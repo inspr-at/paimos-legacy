@@ -117,6 +117,9 @@ func main() {
 	if err := seedAdmin(); err != nil {
 		log.Fatalf("seed: %v", err)
 	}
+	if err := auth.ValidatePasswordLoginAccess(); err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
 	handlers.EnsureAtRiskTag()
 
 	if err := storage.Init(); err != nil {

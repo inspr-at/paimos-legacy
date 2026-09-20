@@ -514,6 +514,12 @@ func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error)
 		if status != "active" {
 			return nil, fmt.Errorf("%w: user_id=%d status=%s", errOIDCAccountDisabled, id, status)
 		}
+		// Verified SSO identity does not require the invite's local password.
+		// Fail the login if clearing the flag fails rather than minting a
+		// session that is permanently trapped by MustChangePasswordGate.
+		if _, err := db.DB.Exec("UPDATE users SET must_change_password=0 WHERE id=?", id); err != nil {
+			return nil, fmt.Errorf("clear OIDC password rotation requirement: %w", err)
+		}
 		u := &models.User{}
 		if err := db.DB.QueryRow(
 			"SELECT "+userSelectCols+" FROM users u WHERE u.id=?", id,
@@ -554,14 +560,14 @@ func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error)
 	// violation. Try only twice — if a name is that contended, surfacing
 	// the error is the right call.
 	res, err := db.DB.Exec(`
-		INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name)
-		VALUES(?, '', ?, ?, 'active', ?, ?, ?)
+		INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name, must_change_password)
+		VALUES(?, '', ?, ?, 'active', ?, ?, ?, 0)
 	`, username, role, role, email, info.GivenName, info.FamilyName)
 	if err != nil {
 		username = username + "-" + mustRandom(4)
 		res, err = db.DB.Exec(`
-			INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name)
-			VALUES(?, '', ?, ?, 'active', ?, ?, ?)
+			INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name, must_change_password)
+			VALUES(?, '', ?, ?, 'active', ?, ?, ?, 0)
 		`, username, role, role, email, info.GivenName, info.FamilyName)
 		if err != nil {
 			return nil, fmt.Errorf("create user: %w", err)

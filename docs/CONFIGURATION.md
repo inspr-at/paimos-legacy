@@ -202,11 +202,24 @@ page hides password recovery and cannot override the policy with
 `?method=password`; direct API requests are independently rejected by the
 handlers. Production binaries still contain no dev-login route, and even a
 development-tagged handler refuses login under this policy.
+Authenticated change-password and TOTP-disable requests are also refused before
+checking a local password. Successful OIDC sign-in clears any local
+`must_change_password` requirement, including for previously invited users;
+new SSO users are created without that requirement.
 
 Disabled password login requires valid OIDC configuration at startup:
 `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` and `OIDC_REDIRECT_URL` must be set, with
-the usual redirect and provisioning validation. Startup checks configuration,
-not IdP availability, so the server can still run during an IdP outage.
+the usual redirect and provisioning validation. The issuer must use HTTPS,
+except for loopback hosts (`localhost` or a loopback IP address).
+After database migration and admin seeding, startup also refuses to continue
+unless there is an active user with a usable email for OIDC matching or an
+active general API key belonging to an active user without a pending password
+rotation. Expired, disabled, and dedicated service keys do not count. An
+email-less seeded admin alone is insufficient, even with auto-create enabled:
+provision a matching user or recovery key with password login enabled before
+cutover. These checks only inspect configuration and local database state;
+they do not contact the IdP or prove the provider will accept a login, so an
+IdP outage does not prevent startup when these prerequisites are present.
 
 **The API key is the break-glass credential.** Before disabling password login,
 verify an appropriately authorized API key held by the `paimos` CLI's keyring.

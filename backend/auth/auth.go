@@ -713,6 +713,10 @@ func ChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	if !PasswordLoginEnabled() {
+		http.Error(w, `{"error":"password authentication is disabled"}`, http.StatusForbidden)
+		return
+	}
 	var body struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`

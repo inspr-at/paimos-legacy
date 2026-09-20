@@ -60,6 +60,39 @@ func TestSeedAdmin_CreatesSuperAdmin(t *testing.T) {
 	}
 }
 
+func TestSeedAdminPasswordLoginDisabledRefusesLockout(t *testing.T) {
+	openSeedTestDB(t)
+	t.Setenv("ADMIN_PASSWORD", "bootstrap-pass-123")
+	for _, name := range []string{"ADMIN_PASSWORD_FILE", "OIDC_CLIENT_SECRET_FILE"} {
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	t.Setenv("OIDC_ISSUER_URL", "https://issuer.example.invalid")
+	t.Setenv("OIDC_CLIENT_ID", "test-client")
+	t.Setenv("OIDC_CLIENT_SECRET", "")
+	t.Setenv("OIDC_REDIRECT_URL", "https://paimos.example.test/api/auth/oidc/callback")
+	t.Setenv("OIDC_PROVISION_MODE", "invite-only")
+	t.Setenv("OIDC_AUTO_CREATE_ROLE", "member")
+	if err := auth.ValidatePasswordLoginConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedAdmin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.ValidatePasswordLoginAccess(); err == nil {
+		t.Fatal("seeded admin without an email or API key must not permit password-disabled startup")
+	}
+	if _, err := db.DB.Exec("UPDATE users SET email='admin@example.test' WHERE username='admin'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.ValidatePasswordLoginAccess(); err != nil {
+		t.Fatalf("provisioned matching email must permit startup: %v", err)
+	}
+}
+
 func TestSeedAdmin_CreatesSuperAdminFromFile(t *testing.T) {
 	openSeedTestDB(t)
 	path := filepath.Join(t.TempDir(), "admin-password")

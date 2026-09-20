@@ -155,6 +155,10 @@ func TOTPDisable(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !PasswordLoginEnabled() {
+		jsonErr(w, "password authentication is disabled", http.StatusForbidden)
+		return
+	}
 
 	var body struct {
 		Password string `json:"password"`

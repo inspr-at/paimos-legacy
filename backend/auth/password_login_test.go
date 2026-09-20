@@ -8,6 +8,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -82,10 +83,31 @@ func setupPasswordPolicyOIDC(t *testing.T) *int {
 }
 
 func TestPasswordLoginDisabledPreservesOIDCFlow(t *testing.T) {
+	for _, policy := range []string{"enabled", "disabled"} {
+		for _, scenario := range []string{"existing-flagged", "auto-create", "auto-create-username-collision"} {
+			t.Run(policy+"/"+scenario, func(t *testing.T) {
+				testPasswordPolicyOIDCFlow(t, policy, scenario)
+			})
+		}
+	}
+}
+
+func testPasswordPolicyOIDCFlow(t *testing.T, policy, scenario string) {
 	setupPrincipalTestDB(t)
-	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	t.Setenv("AUTH_PASSWORD_LOGIN", policy)
 	exchanges := setupPasswordPolicyOIDC(t)
-	userID := seedOIDCUser(t, "policy-admin", "policy@example.test", "admin", "active")
+	var userID int64
+	if scenario == "existing-flagged" {
+		userID = seedOIDCUser(t, "policy-admin", "policy@example.test", "admin", "active")
+		if _, err := db.DB.Exec("UPDATE users SET must_change_password=1 WHERE id=?", userID); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		t.Setenv("OIDC_PROVISION_MODE", "auto-create")
+		if scenario == "auto-create-username-collision" {
+			seedOIDCUser(t, "policy", "someone-else@example.test", "member", "active")
+		}
+	}
 	if err := ValidatePasswordLoginConfig(); err != nil {
 		t.Fatal(err)
 	}
@@ -97,21 +119,172 @@ func TestPasswordLoginDisabledPreservesOIDCFlow(t *testing.T) {
 	if callback.Code != http.StatusFound || callback.Header().Get("Location") != "/after-sso" || *exchanges != 1 {
 		t.Fatalf("OIDC callback failed: status=%d exchanges=%d", callback.Code, *exchanges)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	var matchedID int64
+	var mustChange, count int
+	if err := db.DB.QueryRow("SELECT id, must_change_password FROM users WHERE email='policy@example.test'").Scan(&matchedID, &mustChange); err != nil {
+		t.Fatal(err)
+	}
+	if mustChange != 0 || (userID != 0 && matchedID != userID) {
+		t.Fatal("OIDC must clear the rotation flag on the matched or created user")
+	}
+	userID = matchedID
+	if err := db.DB.QueryRow("SELECT count(*) FROM users WHERE email='policy@example.test'").Scan(&count); err != nil || count != 1 {
+		t.Fatal("OIDC must not duplicate the matched user")
+	}
+	// Exercise an ordinary gated route: /auth/me alone would hide the bug.
+	req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
 	for _, cookie := range callback.Result().Cookies() {
 		req.AddCookie(cookie)
 	}
 	rec := httptest.NewRecorder()
-	Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	Middleware(MustChangePasswordGate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := PrincipalFromContext(r.Context())
 		if !ok || principal.UserID() != userID || !IsViaOIDC(r.Context()) {
 			t.Error("OIDC callback session did not authenticate")
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(rec, req)
+	}))).ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
-		t.Fatalf("OIDC session unusable with password login disabled: status=%d", rec.Code)
+		t.Fatalf("OIDC session trapped by password rotation gate: status=%d", rec.Code)
 	}
+}
+
+func TestPasswordPolicyOIDCFlagClearFailureRefusesSession(t *testing.T) {
+	setupPrincipalTestDB(t)
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	setupPasswordPolicyOIDC(t)
+	userID := seedOIDCUser(t, "policy", "policy@example.test", "member", "active")
+	if _, err := db.DB.Exec("UPDATE users SET must_change_password=1 WHERE id=?", userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`CREATE TRIGGER fail_oidc_flag_clear BEFORE UPDATE OF must_change_password ON users
+		BEGIN SELECT RAISE(ABORT, 'test flag clear failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	login, location := startOIDCLogin(t)
+	callback := finishOIDCCallback(t, login, location.Query().Get("state"))
+	if callback.Header().Get("Location") != "/login?sso_error=provision_failed" {
+		t.Fatal("flag-clear failure must refuse OIDC login")
+	}
+	var sessions, flag int
+	if err := db.DB.QueryRow("SELECT (SELECT count(*) FROM sessions), must_change_password FROM users WHERE id=?", userID).Scan(&sessions, &flag); err != nil || sessions != 0 || flag != 1 {
+		t.Fatalf("failed OIDC login changed credentials: sessions=%d flag=%d err=%v", sessions, flag, err)
+	}
+}
+
+func TestPasswordLoginConfigIssuerTransport(t *testing.T) {
+	setupPasswordPolicyOIDC(t)
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	httpClient.Transport = passwordPolicyTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("startup validation must not contact the IdP")
+		return nil, nil
+	})
+	for _, tc := range []struct {
+		issuer string
+		valid  bool
+	}{
+		{"https://issuer.example.test", true},
+		{"http://issuer.example.test", false},
+		{"http://localhost:8080", true},
+		{"http://LOCALHOST:8080", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://127.0.0.2:8080", true},
+		{"http://[::1]:8080", true},
+		{"http://localhost.example.test", false},
+		{"http://127.0.0.1.example.test", false},
+		{"http://10.0.0.1:8080", false},
+		{"http://[::]:8080", false},
+		{"http://:8080", false},
+		{"ftp://issuer.example.test", false},
+	} {
+		t.Run(tc.issuer, func(t *testing.T) {
+			t.Setenv("OIDC_ISSUER_URL", tc.issuer)
+			if err := ValidatePasswordLoginConfig(); (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, error=%v", tc.valid, err)
+			}
+		})
+	}
+}
+
+func TestPasswordLoginAccessPrerequisites(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		email   string
+		status  string
+		key     string
+		flagged bool
+		wantOK  bool
+	}{
+		{name: "email-less-bootstrap", status: "active"},
+		{name: "malformed-email", email: "not-an-email", status: "active"},
+		{name: "display-name", email: "User <user@example.test>", status: "active"},
+		{name: "email-with-spaces", email: " user@example.test ", status: "active"},
+		{name: "disabled-user", email: "user@example.test", status: "disabled"},
+		{name: "valid-user", email: "User@Example.Test", status: "active", wantOK: true},
+		{name: "flagged-SSO-user", email: "user@example.test", status: "active", flagged: true, wantOK: true},
+		{name: "active-key", status: "active", key: "active", wantOK: true},
+		{name: "future-expiry-key", status: "active", key: "future", wantOK: true},
+		{name: "expired-key", status: "active", key: "expired"},
+		{name: "disabled-key", status: "active", key: "disabled"},
+		{name: "disabled-key-owner", status: "disabled", key: "active"},
+		{name: "password-gated-key-owner", status: "active", key: "active", flagged: true},
+		{name: "machine-key", status: "active", key: "machine"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupPrincipalTestDB(t)
+			t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+			setupPasswordPolicyOIDC(t)
+			httpClient.Transport = passwordPolicyTransport(func(*http.Request) (*http.Response, error) {
+				t.Fatal("startup access check must not contact the IdP")
+				return nil, nil
+			})
+			id := seedOIDCUser(t, "access-test", tc.email, "admin", tc.status)
+			if tc.flagged {
+				if _, err := db.DB.Exec("UPDATE users SET must_change_password=1 WHERE id=?", id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.key != "" {
+				var expiry, disabled any
+				kind := "general"
+				switch tc.key {
+				case "future":
+					expiry = time.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+				case "expired":
+					expiry = time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+				case "disabled":
+					disabled = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+				case "machine":
+					kind = "machine_notifier"
+				}
+				if _, err := db.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes,expires_at,disabled_at,credential_kind)
+					VALUES(?,'recovery',?,'paimos_test','all',?,?,?)`, id, strings.Repeat("a", 64), expiry, disabled, kind); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ValidatePasswordLoginConfig(); err != nil {
+				t.Fatal(err)
+			}
+			err := ValidatePasswordLoginAccess()
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("startup allowed=%v, want %v: %v", err == nil, tc.wantOK, err)
+			}
+			if !tc.wantOK && !strings.Contains(err.Error(), "AUTH_PASSWORD_LOGIN=disabled requires an active user") {
+				t.Fatalf("expected actionable lockout error: %v", err)
+			}
+		})
+	}
+	t.Run("enabled-without-access", func(t *testing.T) {
+		setupPrincipalTestDB(t)
+		t.Setenv("AUTH_PASSWORD_LOGIN", "enabled")
+		if err := ValidatePasswordLoginAccess(); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+		if err := ValidatePasswordLoginAccess(); err == nil {
+			t.Fatal("empty instance must refuse disabled-password startup")
+		}
+	})
 }
 
 func TestPasswordLoginConfig(t *testing.T) {
@@ -293,5 +466,76 @@ func TestPasswordLoginDisabledPreservesAPIKeyBreakGlass(t *testing.T) {
 	})).ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent || len(rec.Result().Cookies()) != 0 {
 		t.Fatalf("API-key break-glass failed or minted a web cookie: status=%d", rec.Code)
+	}
+}
+
+func TestPasswordLoginPolicyAuthenticatedPasswordChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		handler http.HandlerFunc
+		body    func(string) string
+	}{
+		{"change-password", "/api/auth/password", ChangePassword, func(password string) string {
+			return fmt.Sprintf(`{"current_password":%q,"new_password":"replacement-password"}`, password)
+		}},
+		{"disable-totp", "/api/auth/totp/disable", TOTPDisable, func(password string) string {
+			return fmt.Sprintf(`{"password":%q}`, password)
+		}},
+	} {
+		for _, policy := range []string{"enabled", "disabled"} {
+			t.Run(tc.name+"/"+policy, func(t *testing.T) {
+				setupPrincipalTestDB(t)
+				t.Setenv("AUTH_PASSWORD_LOGIN", policy)
+				userID := insertPrincipalUser(t, "session-user")
+				hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.DB.Exec("UPDATE users SET password=?,totp_enabled=1 WHERE id=?", string(hash), userID); err != nil {
+					t.Fatal(err)
+				}
+				now := time.Now()
+				sid, err := createSession(context.Background(), userID, now, now.Add(time.Hour), false, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var disabledBody string
+				for _, attempt := range []struct {
+					body string
+					want int
+				}{
+					{"{", http.StatusBadRequest},
+					{tc.body("wrong-password"), http.StatusUnauthorized},
+					{tc.body("correct-password"), http.StatusOK},
+				} {
+					req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(attempt.body))
+					req.AddCookie(&http.Cookie{Name: sessionCookie, Value: sid})
+					rec := httptest.NewRecorder()
+					Middleware(tc.handler).ServeHTTP(rec, req)
+					want := attempt.want
+					if policy == "disabled" {
+						want = http.StatusForbidden
+						if disabledBody != "" && disabledBody != rec.Body.String() {
+							t.Fatal("disabled response varies with password input")
+						}
+						disabledBody = rec.Body.String()
+					}
+					if rec.Code != want {
+						t.Fatalf("status=%d, want %d", rec.Code, want)
+					}
+				}
+				if policy == "disabled" {
+					var stored string
+					var totpEnabled, sessions int
+					if err := db.DB.QueryRow("SELECT password,totp_enabled,(SELECT count(*) FROM sessions) FROM users WHERE id=?", userID).Scan(&stored, &totpEnabled, &sessions); err != nil {
+						t.Fatal(err)
+					}
+					if stored != string(hash) || totpEnabled != 1 || sessions != 1 {
+						t.Fatal("disabled password check changed credentials or sessions")
+					}
+				}
+			})
+		}
 	}
 }
