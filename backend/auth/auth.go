@@ -568,6 +568,12 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"too many login attempts"}`, http.StatusTooManyRequests)
 		return
 	}
+	if !PasswordLoginEnabled() {
+		recordAuthFailure("login", r, body.Username)
+		log.Printf("audit: login_failed username=%q ip=%s", body.Username, clientIP(r))
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
 
 	var hash string
 	var totpEnabled int
@@ -705,6 +711,10 @@ func ChangePassword(w http.ResponseWriter, r *http.Request) {
 	user := GetUser(r)
 	if user == nil {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !PasswordLoginEnabled() {
+		http.Error(w, `{"error":"password authentication is disabled"}`, http.StatusForbidden)
 		return
 	}
 	var body struct {

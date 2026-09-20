@@ -97,6 +97,26 @@ const (
 func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 	oidcCfgOnce.Lock()
 	defer oidcCfgOnce.Unlock()
+	cfg, err := oidcConfigFromEnv()
+	if err != nil {
+		return cfg, err
+	}
+	if oidcCfg.loaded && oidcCfg.sameConfigInput(cfg) {
+		return oidcCfg, nil
+	}
+	doc, err := fetchDiscovery(ctx, cfg.IssuerURL)
+	if err != nil {
+		return cfg, fmt.Errorf("oidc discovery: %w", err)
+	}
+	cfg.AuthorizationEndpoint = doc.AuthorizationEndpoint
+	cfg.TokenEndpoint = doc.TokenEndpoint
+	cfg.UserinfoEndpoint = doc.UserinfoEndpoint
+	cfg.loaded = true
+	oidcCfg = cfg
+	return cfg, nil
+}
+
+func oidcConfigFromEnv() (oidcConfig, error) {
 	clientSecret, err := secretinput.Optional("OIDC_CLIENT_SECRET")
 	if err != nil {
 		return oidcConfig{}, err
@@ -125,18 +145,6 @@ func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 		return cfg, err
 	}
 
-	if oidcCfg.loaded && oidcCfg.sameConfigInput(cfg) {
-		return oidcCfg, nil
-	}
-	doc, err := fetchDiscovery(ctx, cfg.IssuerURL)
-	if err != nil {
-		return cfg, fmt.Errorf("oidc discovery: %w", err)
-	}
-	cfg.AuthorizationEndpoint = doc.AuthorizationEndpoint
-	cfg.TokenEndpoint = doc.TokenEndpoint
-	cfg.UserinfoEndpoint = doc.UserinfoEndpoint
-	cfg.loaded = true
-	oidcCfg = cfg
 	return cfg, nil
 }
 
@@ -248,12 +256,17 @@ func OIDCStatus(w http.ResponseWriter, r *http.Request) {
 	cfg, err := loadOIDCConfig(r.Context())
 	enabled := err == nil && cfg.AuthorizationEndpoint != ""
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	response := map[string]any{
 		"enabled": enabled,
 		// label lets operators rebrand the SSO button without a code
 		// change (e.g. "Sign in with Acme SSO").
 		"label": envDefault("OIDC_BUTTON_LABEL", "Sign in with SSO"),
-	})
+	}
+	// Preserve the default response bytes for existing deployments.
+	if !PasswordLoginEnabled() {
+		response["password_disabled"] = true
+	}
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // OIDCLogin — GET /api/auth/oidc/login
@@ -501,6 +514,12 @@ func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error)
 		if status != "active" {
 			return nil, fmt.Errorf("%w: user_id=%d status=%s", errOIDCAccountDisabled, id, status)
 		}
+		// Verified SSO identity does not require the invite's local password.
+		// Fail the login if clearing the flag fails rather than minting a
+		// session that is permanently trapped by MustChangePasswordGate.
+		if _, err := db.DB.Exec("UPDATE users SET must_change_password=0 WHERE id=?", id); err != nil {
+			return nil, fmt.Errorf("clear OIDC password rotation requirement: %w", err)
+		}
 		u := &models.User{}
 		if err := db.DB.QueryRow(
 			"SELECT "+userSelectCols+" FROM users u WHERE u.id=?", id,
@@ -541,14 +560,14 @@ func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error)
 	// violation. Try only twice — if a name is that contended, surfacing
 	// the error is the right call.
 	res, err := db.DB.Exec(`
-		INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name)
-		VALUES(?, '', ?, ?, 'active', ?, ?, ?)
+		INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name, must_change_password)
+		VALUES(?, '', ?, ?, 'active', ?, ?, ?, 0)
 	`, username, role, role, email, info.GivenName, info.FamilyName)
 	if err != nil {
 		username = username + "-" + mustRandom(4)
 		res, err = db.DB.Exec(`
-			INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name)
-			VALUES(?, '', ?, ?, 'active', ?, ?, ?)
+			INSERT INTO users(username, password, role, role_key, status, email, first_name, last_name, must_change_password)
+			VALUES(?, '', ?, ?, 'active', ?, ?, ?, 0)
 		`, username, role, role, email, info.GivenName, info.FamilyName)
 		if err != nil {
 			return nil, fmt.Errorf("create user: %w", err)

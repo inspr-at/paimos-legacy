@@ -16,6 +16,8 @@
 package auth_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/auth"
@@ -24,5 +26,14 @@ import (
 func TestDevLoginEnabled_ReturnsFalseOnProdBuild(t *testing.T) {
 	if auth.DevLoginEnabled() {
 		t.Fatalf("DevLoginEnabled() = true on production build — dev-login route would be exposed in shipping binaries")
+	}
+}
+
+func TestPasswordLoginDisabledDevLoginStillAbsentOnProdBuild(t *testing.T) {
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	rec := httptest.NewRecorder()
+	auth.DevLoginHandler(rec, httptest.NewRequest(http.MethodPost, "/api/auth/dev-login", nil))
+	if auth.DevLoginEnabled() || rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 {
+		t.Fatal("production dev-login path is reachable")
 	}
 }

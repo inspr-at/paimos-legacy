@@ -6285,6 +6285,7 @@
           "auth"
         ],
         "summary": "Username/password login",
+        "description": "AUTH_PASSWORD_LOGIN=disabled rejects every password login with the same invalid-credentials response, including admin accounts and method=password requests. OIDC and API-key authentication are independent.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -6409,6 +6410,7 @@
           "auth"
         ],
         "summary": "Begin password reset (always returns 202 to prevent enumeration)",
+        "description": "When AUTH_PASSWORD_LOGIN=disabled, still returns the generic 202 response but does not issue a token or send email.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -6442,6 +6444,7 @@
           "auth"
         ],
         "summary": "Complete password reset",
+        "description": "When AUTH_PASSWORD_LOGIN=disabled, rejects all tokens with the generic invalid-or-expired-token response, including tokens issued before the policy changed.",
         "security": [],
         "requestBody": {
           "required": true,

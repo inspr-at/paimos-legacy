@@ -21,11 +21,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -38,6 +41,92 @@ func bcryptHash(t *testing.T, password string) string {
 		t.Fatalf("fixture password hash: %v", err)
 	}
 	return string(h)
+}
+
+func TestPasswordLoginDisabledBlocksRecovery(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
+	if err := db.Open(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.DB.Close(); db.DB = nil })
+	router := buildRouter()
+	request := func(method, path string, body any) *http.Response {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(string(encoded)))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+	userID := seedUserWithEmail(t, "reset-admin", "reset-admin@example.com", "oldpassword123")
+	if _, err := db.DB.Exec(`UPDATE users SET role='admin',role_key='admin' WHERE id=?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	rawToken := "existing-reset-token-before-policy-change"
+	if _, err := db.DB.Exec(`INSERT INTO password_reset_tokens(user_id,token_hash,created_at,expires_at,ip_address) VALUES(?,?,?,?, '')`, userID, sha256Hex(rawToken), rfcNow(0), rfcNow(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	var previous string
+	for _, email := range []string{"reset-admin@example.com", "nobody@example.com", ""} {
+		resp := request(http.MethodPost, "/api/auth/forgot", map[string]string{"email": email})
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("forgot response: status=%d err=%v", resp.StatusCode, err)
+		}
+		if previous != "" && previous != string(body) {
+			t.Fatal("disabled forgot leaks account existence")
+		}
+		previous = string(body)
+	}
+	for _, token := range []string{rawToken, "unknown-token"} {
+		resp := request(http.MethodGet, "/api/auth/reset/validate?token="+token, nil)
+		var validated struct {
+			Valid  bool
+			Reason string
+		}
+		readJSON(t, resp, &validated)
+		if validated.Valid || validated.Reason != "unknown" {
+			t.Fatal("disabled policy validates reset token")
+		}
+		resp = request(http.MethodPost, "/api/auth/reset", map[string]string{"token": token, "new_password": "newpassword123"})
+		var rejected struct {
+			Error string `json:"error"`
+		}
+		readJSON(t, resp, &rejected)
+		if resp.StatusCode != http.StatusBadRequest || rejected.Error != "invalid or expired token" {
+			t.Fatalf("reset not rejected generically: status=%d body=%v", resp.StatusCode, rejected)
+		}
+	}
+	var total, used int
+	if err := db.DB.QueryRow(`SELECT COUNT(*), COUNT(used_at) FROM password_reset_tokens`).Scan(&total, &used); err != nil || total != 1 || used != 0 {
+		t.Fatalf("disabled recovery issued/consumed tokens: total=%d used=%d err=%v", total, used, err)
+	}
+	var hash string
+	if err := db.DB.QueryRow(`SELECT password FROM users WHERE id=?`, userID).Scan(&hash); err != nil || !auth.CheckPassword(hash, "oldpassword123") {
+		t.Fatal("disabled recovery changed password")
+	}
+	// The switch suspends recovery; re-enabling restores the product feature.
+	for _, policy := range []string{"", "enabled"} {
+		t.Setenv("AUTH_PASSWORD_LOGIN", policy)
+		resp := request(http.MethodGet, "/api/auth/reset/validate?token="+rawToken, nil)
+		var validated struct{ Valid bool }
+		readJSON(t, resp, &validated)
+		if !validated.Valid {
+			t.Fatal("enabled policy rejected the existing unused reset token")
+		}
+	}
+	resp := request(http.MethodPost, "/api/auth/reset", map[string]string{"token": rawToken, "new_password": "newpassword123"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("re-enabled reset failed: status=%d", resp.StatusCode)
+	}
 }
 
 // sha256Hex mirrors the token-hashing scheme used by the handler so

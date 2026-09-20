@@ -30,10 +30,11 @@
 // one with the same email domain.
 //
 // Consequence worth stating plainly: this endpoint is a UI HINT. It
-// never gates authentication. POST /api/auth/login keeps accepting a
-// password for any account — including one whose domain routes to SSO
-// — so a break-glass local admin is never locked out (the SPA also
-// takes ?method=password to skip routing entirely).
+// never gates authentication. With AUTH_PASSWORD_LOGIN enabled (the default),
+// POST /api/auth/login accepts passwords even for SSO-routed domains, and
+// ?method=password skips domain routing. When explicitly disabled, the login
+// and recovery handlers enforce that policy independently of this hint. The
+// break-glass path then is an API key through the CLI, with no web fallback.
 
 package auth
 
@@ -88,11 +89,11 @@ func identifierDomain(identifier string) string {
 	return id[at+1:]
 }
 
-// resolveLoginMethods applies the routing rules. Pure function of
-// (identifier, ssoEnabled, domain config) — no I/O, so the table test
-// covers the whole decision surface.
+// resolveLoginMethods applies operator policy and domain routing without
+// account I/O, so table tests cover the whole decision surface.
 //
-//   - SSO off               → password only (routing is irrelevant).
+//   - Password disabled     → never offer password, even without SSO discovery.
+//   - SSO off               → password only when enabled (routing is irrelevant).
 //   - domain in the list    → SSO only; the password field is hidden
 //     because that realm's credentials live at the IdP.
 //   - anything else         → password + SSO, i.e. the pre-PAI-743
@@ -100,8 +101,9 @@ func identifierDomain(identifier string) string {
 //     which realm it belongs to without a lookup, and guessing wrong
 //     would strand the user.
 func resolveLoginMethods(identifier string, ssoEnabled bool, domains map[string]struct{}) loginMethods {
+	passwordEnabled := PasswordLoginEnabled()
 	if !ssoEnabled {
-		return loginMethods{Password: true}
+		return loginMethods{Password: passwordEnabled}
 	}
 	label := envDefault("OIDC_BUTTON_LABEL", "Sign in with SSO")
 	if d := identifierDomain(identifier); d != "" && len(domains) > 0 {
@@ -109,7 +111,7 @@ func resolveLoginMethods(identifier string, ssoEnabled bool, domains map[string]
 			return loginMethods{Password: false, SSO: true, SSOLabel: label}
 		}
 	}
-	return loginMethods{Password: true, SSO: true, SSOLabel: label}
+	return loginMethods{Password: passwordEnabled, SSO: true, SSOLabel: label}
 }
 
 // LoginMethods — POST /api/auth/login/methods  {"identifier": "..."}
@@ -121,6 +123,7 @@ func resolveLoginMethods(identifier string, ssoEnabled bool, domains map[string]
 func LoginMethods(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Identifier string `json:"identifier"`
+		Method     string `json:"method"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -133,5 +136,10 @@ func LoginMethods(w http.ResponseWriter, r *http.Request) {
 	// The identifier is a credential-adjacent value typed by the user;
 	// no-store keeps it (and the routing answer) out of shared caches.
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(resolveLoginMethods(body.Identifier, ssoEnabled, ssoDomains()))
+	domains := ssoDomains()
+	if body.Method == "password" {
+		// The SPA bypasses realm routing only, never instance policy.
+		domains = nil
+	}
+	_ = json.NewEncoder(w).Encode(resolveLoginMethods(body.Identifier, ssoEnabled, domains))
 }

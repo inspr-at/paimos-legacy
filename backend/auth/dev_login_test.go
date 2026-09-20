@@ -101,6 +101,16 @@ func TestDevLogin_HappyPath(t *testing.T) {
 	}
 }
 
+func TestDevLogin_PasswordLoginDisabled(t *testing.T) {
+	const token = "this-is-a-test-token-of-exactly-32+chars-long"
+	devLoginTestSetup(t, token)
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	rec := devLoginPost(t, map[string]string{"username": "dev_admin", "token": token})
+	if rec.Code != http.StatusUnauthorized || rec.Body.String() != "{\"error\":\"invalid dev-login credentials\"}\n" || len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("dev login bypassed policy: status=%d", rec.Code)
+	}
+}
+
 func TestDevLogin_BadToken(t *testing.T) {
 	devLoginTestSetup(t, "this-is-a-test-token-of-exactly-32+chars-long")
 
