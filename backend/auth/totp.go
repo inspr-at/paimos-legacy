@@ -210,6 +210,12 @@ func TOTPStatus(w http.ResponseWriter, r *http.Request) {
 // POST /api/auth/totp/verify  { "totp_token": "...", "code": "123456" }
 // Validates the pending token + TOTP code, then creates the real session.
 func TOTPVerify(w http.ResponseWriter, r *http.Request) {
+	// Pending challenges come only from password login, including challenges
+	// issued before the operator disabled it. OIDC never uses this endpoint.
+	if !PasswordLoginEnabled() {
+		jsonErr(w, "invalid or expired token — please log in again", http.StatusUnauthorized)
+		return
+	}
 	var body struct {
 		TOTPToken string `json:"totp_token"`
 		Code      string `json:"code"`

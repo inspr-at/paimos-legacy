@@ -101,6 +101,9 @@ func main() {
 		log.Fatalf("configuration: %v", err)
 	}
 	publicbase.SetCurrent(publicBasePath)
+	if err := auth.ValidatePasswordLoginConfig(); err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
 
 	// PAI-267: validate dev-login config at boot. No-op on production
 	// builds (prod stub returns immediately). On dev builds, panics if

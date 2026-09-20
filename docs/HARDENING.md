@@ -79,7 +79,11 @@ The recommended PAIMOS production deployment shape:
 
 - **MinIO/S3** — only needed if attachments are used. PAIMOS hides drop zones when unconfigured.
 - **SMTP** — only needed for password reset (and only outbound; PAIMOS doesn't receive mail).
-- **OIDC** — only needed for SSO. Local password + TOTP works without it.
+- **OIDC** — only needed for SSO by default. Instances using
+  `AUTH_PASSWORD_LOGIN=disabled` require OIDC for new web logins and give up
+  the local-admin browser fallback, including `?method=password` and password
+  recovery. Verify a keyring-held CLI API key before cutover: it remains the
+  break-glass path during an IdP outage. See [password-login policy](CONFIGURATION.md#instance-password-login-policy-pai-1044).
 - **OpenRouter** — only needed for AI assist; default-disabled until an admin enables it.
 
 ---

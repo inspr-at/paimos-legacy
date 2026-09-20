@@ -99,6 +99,10 @@ const devLoginSessionTTL = 24 * time.Hour
 // so an attacker probing the endpoint can't tell whether the username
 // existed or the token was wrong.
 func DevLoginHandler(w http.ResponseWriter, r *http.Request) {
+	if !PasswordLoginEnabled() {
+		http.Error(w, `{"error":"invalid dev-login credentials"}`, http.StatusUnauthorized)
+		return
+	}
 	if devLoginToken == "" {
 		http.Error(w, `{"error":"dev-login is not configured"}`, http.StatusServiceUnavailable)
 		return

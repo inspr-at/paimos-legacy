@@ -97,6 +97,26 @@ const (
 func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 	oidcCfgOnce.Lock()
 	defer oidcCfgOnce.Unlock()
+	cfg, err := oidcConfigFromEnv()
+	if err != nil {
+		return cfg, err
+	}
+	if oidcCfg.loaded && oidcCfg.sameConfigInput(cfg) {
+		return oidcCfg, nil
+	}
+	doc, err := fetchDiscovery(ctx, cfg.IssuerURL)
+	if err != nil {
+		return cfg, fmt.Errorf("oidc discovery: %w", err)
+	}
+	cfg.AuthorizationEndpoint = doc.AuthorizationEndpoint
+	cfg.TokenEndpoint = doc.TokenEndpoint
+	cfg.UserinfoEndpoint = doc.UserinfoEndpoint
+	cfg.loaded = true
+	oidcCfg = cfg
+	return cfg, nil
+}
+
+func oidcConfigFromEnv() (oidcConfig, error) {
 	clientSecret, err := secretinput.Optional("OIDC_CLIENT_SECRET")
 	if err != nil {
 		return oidcConfig{}, err
@@ -125,18 +145,6 @@ func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 		return cfg, err
 	}
 
-	if oidcCfg.loaded && oidcCfg.sameConfigInput(cfg) {
-		return oidcCfg, nil
-	}
-	doc, err := fetchDiscovery(ctx, cfg.IssuerURL)
-	if err != nil {
-		return cfg, fmt.Errorf("oidc discovery: %w", err)
-	}
-	cfg.AuthorizationEndpoint = doc.AuthorizationEndpoint
-	cfg.TokenEndpoint = doc.TokenEndpoint
-	cfg.UserinfoEndpoint = doc.UserinfoEndpoint
-	cfg.loaded = true
-	oidcCfg = cfg
 	return cfg, nil
 }
 
@@ -248,12 +256,17 @@ func OIDCStatus(w http.ResponseWriter, r *http.Request) {
 	cfg, err := loadOIDCConfig(r.Context())
 	enabled := err == nil && cfg.AuthorizationEndpoint != ""
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	response := map[string]any{
 		"enabled": enabled,
 		// label lets operators rebrand the SSO button without a code
 		// change (e.g. "Sign in with Acme SSO").
 		"label": envDefault("OIDC_BUTTON_LABEL", "Sign in with SSO"),
-	})
+	}
+	// Preserve the default response bytes for existing deployments.
+	if !PasswordLoginEnabled() {
+		response["password_disabled"] = true
+	}
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // OIDCLogin — GET /api/auth/oidc/login

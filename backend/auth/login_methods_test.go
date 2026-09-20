@@ -8,6 +8,9 @@
 package auth
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +27,7 @@ func domainSet(t *testing.T, raw string) map[string]struct{} {
 }
 
 func TestResolveLoginMethods(t *testing.T) {
+	t.Setenv("AUTH_PASSWORD_LOGIN", "")
 	cases := []struct {
 		name         string
 		identifier   string
@@ -74,6 +78,68 @@ func TestResolveLoginMethods(t *testing.T) {
 				t.Fatal("no login method offered — user would be stranded")
 			}
 		})
+	}
+}
+
+func TestLoginMethodsPasswordPolicyAndBypassWithoutDatabase(t *testing.T) {
+	setupPasswordPolicyOIDC(t)
+	t.Setenv("OIDC_SSO_DOMAINS", "example.test")
+	// Deliberately do not initialize a database: HRD must use config only.
+	for _, policy := range []string{"", "enabled", "disabled"} {
+		t.Run("password-"+policy, func(t *testing.T) {
+			t.Setenv("AUTH_PASSWORD_LOGIN", policy)
+			for _, method := range []string{"", "password"} {
+				var previous string
+				for _, identifier := range []string{"admin@example.test", "nonexistent@example.test"} {
+					body, _ := json.Marshal(map[string]string{"identifier": identifier, "method": method})
+					rec := passwordPolicyPost(LoginMethods, "/api/auth/login/methods", string(body))
+					var got loginMethods
+					if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+						t.Fatal(err)
+					}
+					if rec.Code != http.StatusOK || got.Password != (policy != "disabled" && method == "password") || !got.SSO {
+						t.Fatalf("policy=%q method=%q: unexpected methods %+v", policy, method, got)
+					}
+					if previous != "" && previous != rec.Body.String() {
+						t.Fatal("HRD response differs by account existence")
+					}
+					previous = rec.Body.String()
+				}
+			}
+		})
+	}
+	// IdP discovery failure cannot advertise a password fallback when disabled.
+	t.Setenv("AUTH_PASSWORD_LOGIN", "disabled")
+	for _, identifier := range []string{"admin", "admin@example.test", "nobody@other.test", ""} {
+		for _, sso := range []bool{true, false} {
+			got := resolveLoginMethods(identifier, sso, ssoDomains())
+			if got.Password || got.SSO != sso {
+				t.Fatalf("disabled methods %+v", got)
+			}
+		}
+	}
+	status := httptest.NewRecorder()
+	OIDCStatus(status, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/status", nil))
+	if !strings.Contains(status.Body.String(), `"password_disabled":true`) {
+		t.Fatal("login page cannot learn disabled password policy")
+	}
+}
+
+func TestPasswordLoginDefaultPresentationBytes(t *testing.T) {
+	setupPasswordPolicyOIDC(t)
+	t.Setenv("OIDC_BUTTON_LABEL", "Sign in with SSO")
+	t.Setenv("OIDC_SSO_DOMAINS", "")
+	for _, policy := range []string{"", "enabled"} {
+		t.Setenv("AUTH_PASSWORD_LOGIN", policy)
+		methods := passwordPolicyPost(LoginMethods, "/api/auth/login/methods", `{"identifier":"admin"}`)
+		if methods.Body.String() != "{\"password\":true,\"sso\":true,\"sso_label\":\"Sign in with SSO\"}\n" {
+			t.Fatalf("default login-methods bytes changed: %s", methods.Body.String())
+		}
+		status := httptest.NewRecorder()
+		OIDCStatus(status, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/status", nil))
+		if status.Body.String() != "{\"enabled\":true,\"label\":\"Sign in with SSO\"}\n" {
+			t.Fatalf("default OIDC-status bytes changed: %s", status.Body.String())
+		}
 	}
 }
 

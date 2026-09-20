@@ -163,11 +163,56 @@ describe("LoginView identifier-first flow (PAI-743)", () => {
 
   it("?method=password forces the password field on an SSO-routed realm (break-glass)", async () => {
     mockRoute.query = { method: "password" };
-    apiPost.mockResolvedValue({ password: false, sso: true });
+    apiPost.mockResolvedValue({ password: true, sso: true });
     const m = await mountLogin();
     await submitIdentifier(m.el, "admin@agm.ng");
 
     expect(m.el.querySelector("#password")).not.toBeNull();
+    expect(apiPost).toHaveBeenCalledWith("/auth/login/methods", { identifier: "admin@agm.ng", method: "password" });
+    await m.unmount();
+  });
+
+  it.each([{ method: "password" }, { method: ["password"] }])("?method=$method cannot override disabled password login", async ({ method }) => {
+    mockRoute.query = { method };
+    apiGet.mockResolvedValue({ enabled: true, password_disabled: true });
+    apiPost.mockResolvedValue({ password: false, sso: true });
+    const m = await mountLogin();
+    expect(m.el.querySelector(".login-forgot-link")).toBeNull();
+    await submitIdentifier(m.el, "admin@agm.ng");
+    expect(m.el.querySelector("#password")).toBeNull();
+    expect(m.el.querySelector("button[type=submit]")).toBeNull();
+    expect(m.el.querySelector(".login-forgot-link")).toBeNull();
+    expect(m.el.querySelector(".login-sso-btn")).not.toBeNull();
+    apiPost.mockClear();
+    m.el.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await nextTick();
+    expect(apiPost).not.toHaveBeenCalled();
+    await m.unmount();
+  });
+
+  it("routing failure cannot reopen password login when instance policy is disabled", async () => {
+    mockRoute.query = { method: "password" };
+    apiGet.mockResolvedValue({ enabled: true, password_disabled: true });
+    apiPost.mockRejectedValue(new Error("network"));
+    const m = await mountLogin();
+    await submitIdentifier(m.el, "admin");
+    expect(m.el.querySelector("#password")).toBeNull();
+    expect(m.el.querySelector(".login-sso-btn")).not.toBeNull();
+    await m.unmount();
+  });
+
+  it("a late instance-policy response closes a routing-failure fallback", async () => {
+    let finishStatus!: (value: unknown) => void;
+    apiGet.mockReturnValue(new Promise(resolve => { finishStatus = resolve; }));
+    apiPost.mockRejectedValue(new Error("network"));
+    const m = await mountLogin();
+    await submitIdentifier(m.el, "admin");
+    finishStatus({ enabled: true, password_disabled: true });
+    await nextTick();
+    await nextTick();
+    expect(m.el.querySelector("#password")).toBeNull();
+    expect(m.el.querySelector(".login-forgot-link")).toBeNull();
+    expect(m.el.querySelector(".login-sso-btn")).not.toBeNull();
     await m.unmount();
   });
 

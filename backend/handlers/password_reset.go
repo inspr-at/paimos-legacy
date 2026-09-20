@@ -223,7 +223,7 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	// the same response whether the email existed or not.
 	defer respondForgotAccepted(w)
 
-	if email == "" {
+	if !auth.PasswordLoginEnabled() || email == "" {
 		return
 	}
 
@@ -291,6 +291,10 @@ func respondForgotAccepted(w http.ResponseWriter) {
 // asking the user to type a new password. Returns {"valid":true} or
 // {"valid":false,"reason":"expired|used|unknown"}.
 func ValidateResetToken(w http.ResponseWriter, r *http.Request) {
+	if !auth.PasswordLoginEnabled() {
+		respondValidate(w, false, "unknown")
+		return
+	}
 	raw := strings.TrimSpace(r.URL.Query().Get("token"))
 	if raw == "" {
 		respondValidate(w, false, "unknown")
@@ -340,6 +344,10 @@ func respondValidate(w http.ResponseWriter, valid bool, reason string) {
 // ── POST /api/auth/reset ──────────────────────────────────────────────────
 
 func ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if !auth.PasswordLoginEnabled() {
+		jsonError(w, "invalid or expired token", http.StatusBadRequest)
+		return
+	}
 	var body struct {
 		Token       string `json:"token"`
 		NewPassword string `json:"new_password"`

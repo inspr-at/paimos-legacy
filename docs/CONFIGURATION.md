@@ -184,8 +184,40 @@ reset and anyone with log access can use it (PAI-115).
 PAIMOS supports a single OIDC provider end-to-end with authorization code +
 PKCE. The flow is hidden from the login page until all three required vars
 are set; once configured, the SPA renders an "SSO" button alongside the
-password form. SSO answers identity only; PAIMOS roles and per-project
-permissions remain local authorization.
+password form unless password login is disabled below. SSO answers identity
+only; PAIMOS roles and per-project permissions remain local authorization.
+
+### Instance password-login policy (PAI-1044)
+
+`AUTH_PASSWORD_LOGIN=enabled|disabled` defaults to `enabled` when unset or
+empty. Values are case-insensitive and trimmed; any other value refuses
+startup. The default preserves username + password + TOTP, password recovery,
+and the `?method=password` fallback on SSO-routed domains.
+
+Set `AUTH_PASSWORD_LOGIN=disabled` to require OIDC for new interactive logins.
+This rejects password login for **every account**, including `admin` and
+`super_admin`, rejects already-issued password TOTP challenges, and disables
+forgot-password token issuance, token validation and redemption. The login
+page hides password recovery and cannot override the policy with
+`?method=password`; direct API requests are independently rejected by the
+handlers. Production binaries still contain no dev-login route, and even a
+development-tagged handler refuses login under this policy.
+
+Disabled password login requires valid OIDC configuration at startup:
+`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` and `OIDC_REDIRECT_URL` must be set, with
+the usual redirect and provisioning validation. Startup checks configuration,
+not IdP availability, so the server can still run during an IdP outage.
+
+**The API key is the break-glass credential.** Before disabling password login,
+verify an appropriately authorized API key held by the `paimos` CLI's keyring.
+API-key authentication is independent of both this switch and OIDC. During an
+IdP outage there is intentionally **no new web login**; recovery access is
+CLI-only. The operator gives up the local-admin browser fallback. Existing
+sessions are not revoked by this switch; use the existing session-revocation
+controls when a cutover also requires ending previously authenticated access.
+Re-enabling the setting and restarting restores the local login feature.
+
+### OIDC provider settings
 
 | Var | Default | Notes |
 |---|---|---|
@@ -197,7 +229,7 @@ permissions remain local authorization.
 | `OIDC_PROMPT` | *(unset)* | Optional space-separated OIDC prompt values forwarded to the authorization endpoint. Unset preserves the IdP's normal session-reuse behavior; `select_account` asks compatible providers to show an account chooser. Provider extensions are allowed. |
 | `OIDC_BUTTON_LABEL` | `Sign in with SSO` | Shown on the login page. |
 | `OIDC_POST_LOGIN_REDIRECT` | `/` | SPA path to land on after a successful SSO login. |
-| `OIDC_SSO_DOMAINS` | *(unset)* | PAI-743 home realm discovery: comma-separated email domains served by this IdP (`agm.ng, example.com`; a leading `@` is tolerated). On the identifier-first login, an address in one of these domains is offered SSO **only** — the password field is hidden. Unset means no routing: every identifier is offered password + SSO, exactly as before. |
+| `OIDC_SSO_DOMAINS` | *(unset)* | PAI-743 home realm discovery: comma-separated email domains served by this IdP (`agm.ng, example.com`; a leading `@` is tolerated). On the identifier-first login, an address in one of these domains is offered SSO **only** — the password field is hidden. Unset means no domain routing: every identifier is offered password + SSO when password login is enabled. |
 | `OIDC_PROVISION_MODE` | `invite-only` | `invite-only` matches only existing active users by verified email. `auto-create` creates missing users. |
 | `OIDC_AUTO_CREATE_ROLE` | `member` | Used only when `OIDC_PROVISION_MODE=auto-create`. Allowed: `member`, `external`. |
 

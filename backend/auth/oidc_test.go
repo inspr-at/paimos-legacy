@@ -378,6 +378,15 @@ func TestOIDCLoginForwardsLoginHint(t *testing.T) {
 }
 
 func TestOIDCCallbackInviteOnlyExistingUserCreatesSession(t *testing.T) {
+	for _, policy := range []string{"", "enabled", "disabled"} {
+		t.Run("password-"+policy, func(t *testing.T) {
+			t.Setenv("AUTH_PASSWORD_LOGIN", policy)
+			testOIDCCallbackInviteOnlyExistingUserCreatesSession(t)
+		})
+	}
+}
+
+func testOIDCCallbackInviteOnlyExistingUserCreatesSession(t *testing.T) {
 	issuer := newOIDCMockIssuer(t, map[string]any{
 		"sub":                "sub-existing",
 		"email":              "Person@Example.Test",

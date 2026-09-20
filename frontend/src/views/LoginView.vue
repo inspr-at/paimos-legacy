@@ -21,10 +21,12 @@ const version = __APP_VERSION__
 // identical to today.
 const ssoEnabled = ref(false)
 const ssoLabel = ref('Sign in with SSO')
+const passwordEnabled = ref(true)
 onMounted(async () => {
   try {
-    const r = await api.get<{ enabled: boolean; label: string }>('/auth/oidc/status')
+    const r = await api.get<{ enabled: boolean; label: string; password_disabled?: boolean }>('/auth/oidc/status')
     ssoEnabled.value = r.enabled
+    passwordEnabled.value = !r.password_disabled
     if (r.label) ssoLabel.value = r.label
   } catch {
     /* no-op — SSO simply stays hidden */
@@ -34,8 +36,8 @@ onMounted(async () => {
 // PAI-743: identifier-first. Step 1 collects the identifier alone so a
 // password manager has nothing to autofill-and-submit before the user
 // can choose SSO; step 2 shows only the method(s) the server's home
-// realm discovery says apply. `?method=password` skips routing outright
-// — the break-glass path for a local admin on an SSO-routed domain.
+// realm discovery says apply. `?method=password` asks the server to skip
+// domain routing, but never overrides the instance's password policy.
 const forcePassword = computed(() => {
   const m = route.query.method
   return (Array.isArray(m) ? m[0] : m) === 'password'
@@ -43,6 +45,8 @@ const forcePassword = computed(() => {
 const identifierSubmitted = ref(false)
 const methodPassword = ref(true)
 const methodSSO = ref(false)
+const showPassword = computed(() => passwordEnabled.value && methodPassword.value)
+const showSSO = computed(() => methodSSO.value || (!passwordEnabled.value && ssoEnabled.value))
 
 /** SSO entry point, carrying the identifier so the IdP can skip its own prompt. */
 const ssoHref = computed(() => {
@@ -62,15 +66,15 @@ async function submitIdentifier() {
   try {
     const r = await api.post<{ password: boolean; sso: boolean; sso_label?: string }>(
       '/auth/login/methods',
-      { identifier: username.value.trim() },
+      { identifier: username.value.trim(), ...(forcePassword.value ? { method: 'password' } : {}) },
     )
-    methodPassword.value = r.password || forcePassword.value
+    methodPassword.value = r.password
     methodSSO.value = r.sso
     if (r.sso_label) ssoLabel.value = r.sso_label
   } catch {
     // Routing is a convenience, never a gate: if the probe fails, fall
     // back to the pre-PAI-743 surface rather than stranding the user.
-    methodPassword.value = true
+    methodPassword.value = passwordEnabled.value
     methodSSO.value = ssoEnabled.value
   } finally {
     loading.value = false
@@ -94,7 +98,9 @@ const ssoError = computed(() => {
     case 'missing_verifier':
       return 'SSO handshake expired — please try again.'
     case 'email_required':
-      return 'SSO did not return a verified email; sign in with a password instead.'
+      return passwordEnabled.value
+        ? 'SSO did not return a verified email; sign in with a password instead.'
+        : 'SSO did not return a verified email. Ask an admin for help.'
     case 'invite_required':
       return 'No PAIMOS account is linked to this SSO email yet. Ask an admin for access.'
     case 'account_disabled':
@@ -126,6 +132,7 @@ function finishLogin() {
 }
 
 async function submit() {
+  if (!showPassword.value) return
   error.value = ''
   loading.value = true
   try {
@@ -220,7 +227,7 @@ function backToLogin() {
         <button type="submit" class="btn btn-primary login-btn" :disabled="loading">
           {{ loading ? 'Checking…' : 'Continue' }}
         </button>
-        <RouterLink to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
+        <RouterLink v-if="passwordEnabled" to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
       </form>
 
       <!-- Step 2: the method(s) that apply to this identifier. -->
@@ -247,7 +254,7 @@ function backToLogin() {
           <span class="login-identity-change">Change</span>
         </button>
 
-        <div v-if="methodPassword" class="field">
+        <div v-if="showPassword" class="field">
           <label for="password">Password</label>
           <input
             id="password"
@@ -267,7 +274,7 @@ function backToLogin() {
         <div v-else-if="ssoError" class="login-error">{{ ssoError }}</div>
 
         <button
-          v-if="methodPassword"
+          v-if="showPassword"
           type="submit"
           class="btn btn-primary login-btn"
           :disabled="loading"
@@ -275,13 +282,13 @@ function backToLogin() {
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
         <a
-          v-if="methodSSO"
+          v-if="showSSO"
           :href="ssoHref"
-          :class="['btn login-btn login-sso-btn', methodPassword ? 'btn-ghost' : 'btn-primary']"
+          :class="['btn login-btn login-sso-btn', showPassword ? 'btn-ghost' : 'btn-primary']"
         >
           {{ ssoLabel }}
         </a>
-        <RouterLink to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
+        <RouterLink v-if="passwordEnabled" to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
       </form>
 
       <!-- Step 2: OTP code -->
