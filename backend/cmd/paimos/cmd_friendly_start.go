@@ -26,6 +26,7 @@ import (
 )
 
 type friendlyStartOptions struct {
+	ModelRole, AuthorFamily                                  string
 	Project, Agent, Ticket, Shape, Parent, Role              string
 	Profile, Harness, Model, Effort, Account, Machine        string
 	Workspace, PromptFile, Key, Deployment, Label, StateRoot string
@@ -36,15 +37,16 @@ type friendlyStartOptions struct {
 }
 
 type friendlyStartPlan struct {
-	Project         string                  `json:"project"`
-	Agent           string                  `json:"agent"`
-	Ticket          string                  `json:"ticket,omitempty"`
-	Role            string                  `json:"role"`
-	Shape           string                  `json:"work_shape,omitempty"`
-	Parent          string                  `json:"parent_session_id,omitempty"`
-	Profile         dispatchprofile.Profile `json:"dispatch_profile"`
-	BindingRevision *int64                  `json:"binding_revision,omitempty"`
-	BindingChange   bool                    `json:"binding_change"`
+	ModelResolution *dispatchprofile.Resolution `json:"model_resolution,omitempty"`
+	Project         string                      `json:"project"`
+	Agent           string                      `json:"agent"`
+	Ticket          string                      `json:"ticket,omitempty"`
+	Role            string                      `json:"role"`
+	Shape           string                      `json:"work_shape,omitempty"`
+	Parent          string                      `json:"parent_session_id,omitempty"`
+	Profile         dispatchprofile.Profile     `json:"dispatch_profile"`
+	BindingRevision *int64                      `json:"binding_revision,omitempty"`
+	BindingChange   bool                        `json:"binding_change"`
 	request         agentd.StartRequest
 	binding         orchestratorConfig
 }
@@ -69,6 +71,7 @@ type friendlyDaemon interface {
 
 var friendlyDaemonClient = func(socket string) (friendlyDaemon, error) { return agentd.NewClient(socket) }
 var friendlySafeValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+var friendlyModelValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 var friendlyTicketKey = regexp.MustCompile(`^[A-Z][A-Z0-9]{2,9}-[1-9][0-9]*$`)
 
 func workerCmd() *cobra.Command {
@@ -85,6 +88,7 @@ func friendlyStartCmd(coordinator bool) *cobra.Command {
 	}
 	cmd := &cobra.Command{Use: "start", Short: "Resolve an agent and immutable profile, then start an owned " + role, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		normalizeFriendlyModelRole(&o)
 		if o.Guided && o.NonInteractive {
 			return friendlyStartError("--guided and --non-interactive cannot be combined")
 		}
@@ -139,9 +143,10 @@ func friendlyStartCmd(coordinator bool) *cobra.Command {
 	f.StringVar(&o.Ticket, "ticket", "", "ticket key, e.g. PAI-921")
 	f.StringVar(&o.Shape, "work-shape", "", "ship or scout; required with a ticket")
 	f.StringVar(&o.Parent, "parent", "", "same-project public session UUID or unambiguous harness:agent handle")
-	f.StringVar(&o.Role, "role", role, "worker or coordinator; orchestrator start requires coordinator")
+	f.StringVar(&o.Role, "role", role, "worker, coordinator, or a model role (scout, mechanical, build, build-hard, review-gate)")
+	f.StringVar(&o.AuthorFamily, "author-family", "", "author model family for review-gate")
 	f.StringVar(&o.Profile, "profile", "", "immutable profile ID@version; selectors must agree")
-	f.StringVar(&o.Harness, "harness", "", "codex or claude")
+	f.StringVar(&o.Harness, "harness", "", "codex, claude, pi or cursor")
 	f.StringVar(&o.Model, "model", "", "exact supported model selector")
 	f.StringVar(&o.Effort, "effort", "", "exact supported effort selector")
 	f.StringVar(&o.Account, "account", "", "opaque named-account key from the operator registry, or a closed class label; local_probe selects the class source without named-account verification")
@@ -169,6 +174,20 @@ func friendlyStartError(reason string) error {
 	return errors.New(reason)
 }
 
+// Model roles choose execution; the existing harness hierarchy remains worker/coordinator.
+func normalizeFriendlyModelRole(o *friendlyStartOptions) {
+	if o.Coordinator {
+		return
+	}
+	for _, role := range dispatchprofile.Roles() {
+		if o.Role == role.Name {
+			o.ModelRole = o.Role
+			o.Role = "worker"
+			return
+		}
+	}
+}
+
 func validateFriendlyStart(o friendlyStartOptions) error {
 	if !orchestratorProjectKeyPattern.MatchString(o.Project) {
 		return errors.New("--project must be an exact canonical project key; use paimos project list")
@@ -177,7 +196,7 @@ func validateFriendlyStart(o friendlyStartOptions) error {
 		return errors.New("--agent must be a canonical agent key; use paimos agent list --project <key>")
 	}
 	if o.Role != "worker" && o.Role != "coordinator" || o.Coordinator && o.Role != "coordinator" {
-		return errors.New("--role must be worker or coordinator; orchestrator start requires coordinator")
+		return errors.New("--role must be worker, coordinator, or a model role (scout, mechanical, build, build-hard, review-gate)")
 	}
 	if !o.Coordinator && (o.Ticket == "" || o.Parent == "") {
 		return errors.New("worker start requires --ticket <key>, --work-shape ship|scout and --parent <public-session-id|harness:agent>")
@@ -194,10 +213,13 @@ func validateFriendlyStart(o friendlyStartOptions) error {
 	if !friendlySafeValue.MatchString(o.Key) && !(o.Key == "" && (o.DryRun || o.Explain)) {
 		return errors.New("supply --idempotency-key with 1–128 safe label characters; reuse it only for the same request")
 	}
-	if o.Harness != "" && o.Harness != "codex" && o.Harness != "claude" {
-		return errors.New("unsupported harness capability; choose --harness codex or claude and a catalog profile")
+	if o.Harness != "" && o.Harness != "codex" && o.Harness != "claude" && o.Harness != "pi" && o.Harness != "cursor" {
+		return errors.New("unsupported harness capability; choose --harness codex, claude, pi or cursor and a catalog profile")
 	}
-	for _, value := range []string{o.Model, o.Effort, o.Account, o.Machine} {
+	if o.Model != "" && !friendlyModelValue.MatchString(o.Model) {
+		return errors.New("model selector must be an exact catalog model")
+	}
+	for _, value := range []string{o.Effort, o.Account, o.Machine} {
 		if value != "" && !friendlySafeValue.MatchString(value) {
 			return errors.New("selectors must be non-secret safe labels")
 		}
@@ -291,6 +313,21 @@ func resolveFriendlyStart(ctx context.Context, client *Client, o friendlyStartOp
 	}
 	if err := friendlyRead(ctx, client, "/api/ai/execution-options?dispatch_only=1", &catalog); err != nil {
 		return plan, err
+	}
+	if o.ModelRole != "" {
+		resolution, resolveErr := resolveModel(ctx, client, o.Workspace, dispatchprofile.ResolveRequest{Role: o.ModelRole, AuthorFamily: dispatchprofile.Family(o.AuthorFamily), Harness: o.Harness})
+		if resolveErr != nil {
+			return plan, resolveErr
+		}
+		if resolution.OwnerRequired || resolution.Profile == nil {
+			return plan, errors.New("owner approval required; no worker model selected")
+		}
+		pin := resolution.Profile.ID + "@" + resolution.Profile.Version
+		if o.Profile != "" && o.Profile != pin {
+			return plan, errors.New("--profile conflicts with model role resolution")
+		}
+		o.Profile = pin
+		plan.ModelResolution = &resolution
 	}
 	plan.Profile, err = resolveFriendlyProfile(catalog.Profiles, o)
 	if err != nil {
@@ -414,6 +451,7 @@ func friendlyConstrainedRequest(request agentd.StartRequest, o friendlyStartOpti
 }
 
 func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStartResult, error) {
+	normalizeFriendlyModelRole(&o)
 	if o.Label == "" {
 		o.Label = o.Agent
 	}
@@ -570,7 +608,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 		return finish(result)
 	}
 	var public models.HarnessSession
-	if err := friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", plan.request.ProjectID, session.Reporter.PublicSessionID), &public); err != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != plan.request.ProjectID || public.AgentName != o.Agent || public.Harness != plan.Profile.Harness || public.ManagementMode != "managed" || public.Role != plan.Role || (public.WorkShape != plan.Shape && !(plan.Shape == "" && public.WorkShape == "unknown")) || friendlyParentValue(public.ParentSessionID) != plan.Parent || friendlyTicketValue(public.TicketID) != plan.request.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != (models.HarnessDispatchProfile(plan.Profile)) || public.AccountKey != plan.request.AccountKey {
+	if err := friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", plan.request.ProjectID, session.Reporter.PublicSessionID), &public); err != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != plan.request.ProjectID || public.AgentName != o.Agent || public.Harness != plan.Profile.Harness || public.ManagementMode != "managed" || public.Role != plan.Role || (public.WorkShape != plan.Shape && !(plan.Shape == "" && public.WorkShape == "unknown")) || friendlyParentValue(public.ParentSessionID) != plan.Parent || friendlyTicketValue(public.TicketID) != plan.request.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != (friendlyProfileSnapshot(plan.Profile)) || public.AccountKey != plan.request.AccountKey {
 		result.Reason = "Reporter registration could not be verified against the public authority; inspect runtime doctor and harness list."
 		return finish(result)
 	}
@@ -693,4 +731,8 @@ func friendlyCLIBase(client *Client) string {
 		base += " --config " + shellQuote(flagConfigPath)
 	}
 	return base
+}
+
+func friendlyProfileSnapshot(p dispatchprofile.Profile) models.HarnessDispatchProfile {
+	return models.HarnessDispatchProfile{ID: p.ID, Version: p.Version, Harness: p.Harness, Model: p.Model, Effort: p.Effort, MachineSource: p.MachineSource, AccountSource: p.AccountSource, WorkspaceMode: p.WorkspaceMode}
 }

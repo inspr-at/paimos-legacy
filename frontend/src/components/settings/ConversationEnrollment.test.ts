@@ -39,7 +39,7 @@ const runtime = (overrides: Record<string, unknown> = {}) => ({
   account_scopes: [{
     account_label: 'chatgpt',
     accounts: [{ key: 'account-a', label: 'Codex Team' }],
-    profiles: [{ id: 'codex-sol-high', version: '1' }],
+    profiles: [{ id: 'codex-sol-high', version: '2' }],
     attachment_revision: 7,
     account_availability: 'available' as const,
   }],
@@ -48,7 +48,7 @@ const runtime = (overrides: Record<string, unknown> = {}) => ({
     account_key: 'account-a',
     attachment_revision: 7,
     dispatch_profile_id: 'codex-sol-high',
-    dispatch_profile_version: '1',
+    dispatch_profile_version: '2',
     execution_policy_id: 'aithema-conversation-v1' as const,
     max_output_bytes: 262144,
     max_events: 512,
@@ -60,9 +60,11 @@ const runtime = (overrides: Record<string, unknown> = {}) => ({
 
 const codexProfile = {
   id: 'codex-sol-high',
-  version: '1',
+  version: '2',
   harness: 'codex',
-  model: 'gpt-5.6-sol',
+  model: 'gpt-6-sol',
+  family: 'openai',
+  tier: 'strong',
   effort: 'high',
   machine_source: 'authenticated_reporter',
   account_source: 'local_probe',
@@ -96,7 +98,7 @@ async function fillForm(host: HTMLElement) {
   await nextTick()
   setValue(host, '#conversation-account', 'chatgpt\0account-a', 'change')
   await nextTick()
-  setValue(host, '#conversation-profile', 'codex-sol-high@1', 'change')
+  setValue(host, '#conversation-profile', 'codex-sol-high@2', 'change')
   setValue(host, '#conversation-expiry', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString())
   setValue(host, '#conversation-project-ref', 'aithema-project-explicit')
   setValue(host, '#conversation-issuer-0', 'https://aithema.example')
@@ -129,7 +131,7 @@ function responseFor(host: HTMLElement, overrides: Record<string, unknown> = {})
       account_key: 'account-a',
       attachment_revision: 7,
       dispatch_profile_id: 'codex-sol-high',
-      dispatch_profile_version: '1',
+      dispatch_profile_version: '2',
       execution_policy_id: 'aithema-conversation-v1',
       limits: {
         max_input_bytes: 131072,
@@ -159,7 +161,7 @@ describe('ConversationEnrollment (PAI-1029)', () => {
         return {
           dispatch_profiles: [
             codexProfile,
-            { ...codexProfile, id: 'cursor-grok', harness: 'cursor', model: 'grok-4.6' },
+            { ...codexProfile, id: 'cursor-grok', harness: 'cursor', model: 'grok-4.7-high' },
           ],
         }
       }
@@ -179,7 +181,7 @@ describe('ConversationEnrollment (PAI-1029)', () => {
     await nextTick()
 
     expect(host.querySelector('#conversation-account')?.textContent).toContain('Codex Team')
-    expect(host.querySelector('#conversation-profile')?.textContent).toContain('codex-sol-high@1')
+    expect(host.querySelector('#conversation-profile')?.textContent).toContain('codex-sol-high@2')
     expect(host.textContent).not.toContain('Grok')
   })
 
@@ -216,7 +218,7 @@ describe('ConversationEnrollment (PAI-1029)', () => {
       account_key: 'account-a',
       attachment_revision: 7,
       dispatch_profile_id: 'codex-sol-high',
-      dispatch_profile_version: '1',
+      dispatch_profile_version: '2',
       actors: [{ issuer: 'https://aithema.example', subject: 'actor-explicit-42', user_id: 9 }],
       age_recipients: ['age1publicrecipient'],
     }))

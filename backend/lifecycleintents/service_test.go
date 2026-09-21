@@ -27,12 +27,12 @@ func TestConversationCapabilityPersistsInRuntimeRegistration(t *testing.T) {
 		Workspaces: f.registration.Workspaces,
 		AccountScopes: []AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "acct-main", Label: "Main"}},
-			Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 7,
 			AccountAvailability: AccountAvailabilityAvailable,
 		}},
 		Conversation: &ConversationCapability{
 			SchemaVersion: ConversationSchemaV1, AccountKey: "acct-main", AttachmentRevision: 7,
-			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2",
 			ExecutionPolicyID: ConversationExecutionPolicyV1, MaxOutputBytes: 256 << 10, MaxEvents: 512,
 		},
 	}
@@ -108,7 +108,7 @@ func setupWithClock(t *testing.T, now func() time.Time) *fixture {
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.registration = Registration{Generation: uuid.NewString(), Host: "fixture-machine", AccountLabel: "chatgpt", Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmt.Sprintf("%064x", 1)}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}}
+	f.registration = Registration{Generation: uuid.NewString(), Host: "fixture-machine", AccountLabel: "chatgpt", Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmt.Sprintf("%064x", 1)}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}}
 	f.runtime, e = f.s.RegisterRuntime(context.Background(), f.reporter, f.project, testLease, f.registration)
 	if e != nil {
 		t.Fatal(e)
@@ -158,7 +158,7 @@ func (f *fixture) request(operation string) Request {
 		r.WorkspaceHandle = f.runtime.Workspaces[0].Handle
 		r.AgentName = "worker"
 		r.DispatchProfileID = "codex-sol-high"
-		r.DispatchProfileVersion = "1"
+		r.DispatchProfileVersion = "2"
 		r.WorkShape = "unknown"
 		r.Role = "worker"
 	}
@@ -513,7 +513,7 @@ func TestLifecycleCancelAndClaimCrashExpiry(t *testing.T) {
 }
 func (f *fixture) managed(t *testing.T) models.HarnessSession {
 	t.Helper()
-	s, _, e := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: f.runtime.AccountLabel})
+	s, _, e := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: f.runtime.AccountLabel})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -637,7 +637,7 @@ func TestLifecycleBindingCASRestartAndNegativeTargets(t *testing.T) {
 	in = f.claim(t)
 	in = f.transition(t, in, "executing", "")
 	// Register a new generation with exactly the desired binding.
-	created, _, e := hs.Register(ctx, managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", TicketID: &ticket, WorkShape: "ship", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: f.runtime.AccountLabel})
+	created, _, e := hs.Register(ctx, managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", TicketID: &ticket, WorkShape: "ship", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: f.runtime.AccountLabel})
 	if e != nil {
 		t.Fatal(e)
 	}

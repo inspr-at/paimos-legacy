@@ -62,7 +62,7 @@ func TestDisplayLabelForAccountKeyPreservesOrdinaryAndDerivesUnsafe(t *testing.T
 
 func TestValidateAdvertisedAccountsAcceptsDerivedLegacyLabels(t *testing.T) {
 	generation, host := uuid.NewString(), "fixture-machine"
-	profiles := []Profile{{ID: "codex-sol-high", Version: "1"}}
+	profiles := []Profile{{ID: "codex-sol-high", Version: "2"}}
 	long := strings.Repeat("n", 49)
 	cases := []AccountChoice{
 		{Key: "coordinator", Label: DisplayLabelForAccountKey("coordinator", nil)},

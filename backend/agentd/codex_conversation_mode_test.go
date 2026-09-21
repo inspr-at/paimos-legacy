@@ -24,7 +24,7 @@ func TestCodexConversationModeBuildsFixedConfigurationAndThreadStart(t *testing.
 		t.Fatal(err)
 	}
 	mode, err := buildCodexConversationMode(codexConversationModeInput{
-		AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-5.6-sol", Scratch: scratch,
+		AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-6-sol", Scratch: scratch,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestCodexConversationModeBuildsFixedConfigurationAndThreadStart(t *testing.
 	}
 	wantJSON := `{"allowProviderModelFallback":false,"approvalPolicy":"never","approvalsReviewer":"user","baseInstructions":` + strconv.Quote(codexConversationBasePolicy) +
 		`,"cwd":` + strconv.Quote(scratch) + `,"developerInstructions":` + strconv.Quote(codexConversationDeveloperPolicy) +
-		`,"dynamicTools":[],"environments":[],"ephemeral":true,"model":"gpt-5.6-sol","permissions":"aithema-conversation-v1","runtimeWorkspaceRoots":[` + strconv.Quote(scratch) + `],"selectedCapabilityRoots":[]}`
+		`,"dynamicTools":[],"environments":[],"ephemeral":true,"model":"gpt-6-sol","permissions":"aithema-conversation-v1","runtimeWorkspaceRoots":[` + strconv.Quote(scratch) + `],"selectedCapabilityRoots":[]}`
 	if string(encoded) != wantJSON || strings.Contains(string(encoded), `"sandbox"`) {
 		t.Fatalf("thread/start=%s", encoded)
 	}
@@ -97,7 +97,7 @@ func TestCodexConversationModeBuildsFixedConfigurationAndThreadStart(t *testing.
 }
 
 func TestCodexConversationModeRejectsUnsafeScratch(t *testing.T) {
-	input := codexConversationModeInput{AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-5.6-sol"}
+	input := codexConversationModeInput{AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-6-sol"}
 	if _, err := buildCodexConversationMode(input); !errors.Is(err, errCodexConversationUnsupported) {
 		t.Fatalf("empty scratch err=%v", err)
 	}
@@ -152,7 +152,7 @@ func TestCodexConversationModeRequiresControllerResolvedOpaqueInputs(t *testing.
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			input := codexConversationModeInput{
-				AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-5.6-sol", Scratch: scratch,
+				AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-6-sol", Scratch: scratch,
 			}
 			test.mutate(&input)
 			if _, err := buildCodexConversationMode(input); !errors.Is(err, errCodexConversationUnsupported) {
@@ -332,7 +332,7 @@ func TestCodexConversationModeOfflineSandboxDenyFixture(t *testing.T) {
 func mustCodexConversationMode(t *testing.T, scratch string) codexConversationMode {
 	t.Helper()
 	mode, err := buildCodexConversationMode(codexConversationModeInput{
-		AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-5.6-sol", Scratch: scratch,
+		AccountKey: "conversation-account", DispatchProfileID: "codex-conversation", Model: "gpt-6-sol", Scratch: scratch,
 	})
 	if err != nil {
 		t.Fatal(err)

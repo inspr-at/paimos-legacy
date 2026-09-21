@@ -32,8 +32,8 @@ const (
 	cursorStopPrimitive       = "cursor acp owned process-group stop"
 	cursorComposerArgv        = "composer-2.5"
 	cursorComposerACPModel    = "composer-2.5[fast=true]"
-	cursorGrokArgv            = "grok-4.6[effort=high,fast=true]"
-	cursorGrokACPModel        = "grok-4.6[effort=high,fast=true]"
+	cursorGrokArgv            = "grok-4.7-high"
+	cursorGrokACPModel        = "grok-4.7-high"
 )
 
 // CursorAdapter owns one documented `agent acp` stdio child. Composer and Grok
@@ -140,7 +140,7 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 	if command == nil {
 		command = exec.Command
 	}
-	cmd := command(path, "--model", argvModel, "acp") // #nosec G204 G702 -- fixed adapter argv and operator-selected executable.
+	cmd := command(path, "--trust", "--model", argvModel, "acp") // #nosec G204 G702 -- fixed adapter argv and operator-selected executable.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, errors.New("open Cursor ACP stdin")
@@ -205,31 +205,42 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 	return process, nil
 }
 
+// ACP IDs are protocol data, independent of CLI selectors. The current pin
+// remains unchanged. Unknown acknowledgements fail closed; add an observed
+// mapping here only after verifying that CLI's session/new response.
+type cursorModelRoute struct{ model, effort, argv, acp string }
+
+func cursorModelRoutes() []cursorModelRoute {
+	routes := []cursorModelRoute{
+		{cursorComposerArgv, "default", cursorComposerArgv, cursorComposerACPModel},
+		{"composer-2.5-fast", "default", "composer-2.5-fast", cursorComposerACPModel},
+	}
+	for _, effort := range []string{"low", "medium", "high", "xhigh"} {
+		for _, suffix := range []string{"", "-fast"} {
+			model := "grok-4.7-" + effort + suffix
+			routes = append(routes, cursorModelRoute{model, effort, model, model})
+		}
+	}
+	return routes
+}
+
 func cursorLaunchModel(request StartRequest) (argv, expectedACP string, err error) {
+	return cursorLaunchModelFromRoutes(request, cursorModelRoutes())
+}
+
+func cursorLaunchModelFromRoutes(request StartRequest, routes []cursorModelRoute) (argv, expectedACP string, err error) {
 	if request.ResolvedProfile == nil || request.ResolvedProfile.Harness != AdapterCursor {
 		return "", "", ErrDispatchProfile
 	}
 	if err := dispatchprofile.ValidateSnapshot(*request.ResolvedProfile); err != nil {
 		return "", "", ErrDispatchProfile
 	}
-	model := strings.TrimSpace(request.ResolvedProfile.Model)
-	effort := strings.TrimSpace(request.ResolvedProfile.Effort)
-	switch model {
-	case cursorComposerArgv:
-		if effort != "default" {
-			return "", "", errors.New("Cursor Composer does not advertise a reasoning effort")
+	for _, route := range routes {
+		if request.ResolvedProfile.Model == route.model && request.ResolvedProfile.Effort == route.effort {
+			return route.argv, route.acp, nil
 		}
-		return cursorComposerArgv, cursorComposerACPModel, nil
-	case "grok-4.6":
-		if effort != "high" {
-			return "", "", errors.New("Cursor Grok high effort must be acknowledged")
-		}
-		return cursorGrokArgv, cursorGrokACPModel, nil
-	case "auto", "Auto", "default[]":
-		return "", "", errors.New("Cursor Auto model is refused")
-	default:
-		return "", "", errors.New("Cursor model is unapproved")
 	}
+	return "", "", errors.New("Cursor model/effort has no approved ACP mapping")
 }
 
 func parseCursorStatusIdentity(output []byte) (email, userID string, ok bool) {

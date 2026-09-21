@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -66,7 +67,7 @@ type friendlyFixture struct {
 func newFriendlyFixture(t *testing.T) *friendlyFixture {
 	t.Helper()
 	f := &friendlyFixture{daemon: &friendlyFakeDaemon{status: agentd.Status{Instance: "test-deployment", DaemonID: "daemon-fixture"}, public: true}}
-	f.opts = friendlyStartOptions{Project: "PAI", Agent: "builder", Ticket: "PAI-921", Shape: "ship", Parent: friendlyParentID, Role: "worker", Profile: "codex-sol-high@1", Workspace: t.TempDir(), Key: "fixture-start", Deployment: "test-deployment", Label: "builder", StateRoot: t.TempDir(), ExpectedRevision: -1}
+	f.opts = friendlyStartOptions{Project: "PAI", Agent: "builder", Ticket: "PAI-921", Shape: "ship", Parent: friendlyParentID, Role: "worker", Profile: "codex-sol-high@2", Workspace: t.TempDir(), Key: "fixture-start", Deployment: "test-deployment", Label: "builder", StateRoot: t.TempDir(), ExpectedRevision: -1}
 	f.sessions = []models.HarnessSession{{ID: friendlyParentID, ProjectID: 42, AgentName: "root", Harness: "codex", Role: "coordinator", Phase: "working"}}
 	oldAgent := flagAgentName
 	flagAgentName = ""
@@ -101,8 +102,8 @@ func newFriendlyFixture(t *testing.T) *friendlyFixture {
 		case "/api/projects/42/harness-sessions":
 			json.NewEncoder(w).Encode(f.sessions)
 		case "/api/projects/42/harness-sessions/" + friendlyPublicID:
-			profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
-			snapshot := models.HarnessDispatchProfile(profile)
+			profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
+			snapshot := friendlyProfileSnapshot(profile)
 			request := f.daemon.request
 			var parent *string
 			if request.ParentSessionID != "" {
@@ -188,7 +189,7 @@ func TestFriendlyStartWorkerResolvesAndReplaysOriginalOutcome(t *testing.T) {
 	if strings.Contains(result.Reason, "Ordinary messages and controls use the automatic owned primary inbox") {
 		t.Fatal("start claimed ordinary delivery from public registration alone")
 	}
-	if f.daemon.request.TicketID != 921 || f.daemon.request.ParentSessionID != friendlyParentID || f.daemon.request.DispatchProfileVersion != "1" || !strings.Contains(f.daemon.request.Prompt, "PRIVATE FIXTURE PERSONA") {
+	if f.daemon.request.TicketID != 921 || f.daemon.request.ParentSessionID != friendlyParentID || f.daemon.request.DispatchProfileVersion != "2" || !strings.Contains(f.daemon.request.Prompt, "PRIVATE FIXTURE PERSONA") {
 		t.Fatal("canonical resolution was not applied")
 	}
 	for _, name := range []string{"status", "message", "steer", "interrupt", "stop"} {
@@ -265,7 +266,7 @@ func TestFriendlyStartParentHandleAndSourceSelectors(t *testing.T) {
 	f.opts.Parent = "codex:root"
 	f.opts.Profile = ""
 	f.opts.Harness = "codex"
-	f.opts.Model = "gpt-5.6-sol"
+	f.opts.Model = "gpt-6-sol"
 	f.opts.Effort = "high"
 	f.opts.Account = "local_probe"
 	f.opts.Machine = "authenticated_reporter"
@@ -347,14 +348,14 @@ func TestFriendlyStartGuidedAndJSONUseSameResolver(t *testing.T) {
 	o.Parent = ""
 	o.Profile = ""
 	var guidance bytes.Buffer
-	if err := guideFriendlyStart(context.Background(), strings.NewReader("PAI\nbuilder\nPAI-921\nship\ncodex:root\ncodex-sol-high@1\n"), &guidance, &o); err != nil {
+	if err := guideFriendlyStart(context.Background(), strings.NewReader("PAI\nbuilder\nPAI-921\nship\ncodex:root\ncodex-sol-high@2\n"), &guidance, &o); err != nil {
 		t.Fatal(err)
 	}
 	result, err := runFriendlyStart(context.Background(), o)
 	if err != nil || result.Outcome != "started" {
 		t.Fatalf("guided start: %v", err)
 	}
-	out, _, err := executeCLIForTest(t, "worker", "start", "--json", "--non-interactive", "--project", "PAI", "--agent", "builder", "--ticket", "PAI-921", "--work-shape", "ship", "--parent", o.Parent, "--profile", "codex-sol-high@1", "--workspace", o.Workspace, "--state-root", o.StateRoot, "--expect-deployment-instance", o.Deployment, "--idempotency-key", o.Key, "--wait", "0s")
+	out, _, err := executeCLIForTest(t, "worker", "start", "--json", "--non-interactive", "--project", "PAI", "--agent", "builder", "--ticket", "PAI-921", "--work-shape", "ship", "--parent", o.Parent, "--profile", "codex-sol-high@2", "--workspace", o.Workspace, "--state-root", o.StateRoot, "--expect-deployment-instance", o.Deployment, "--idempotency-key", o.Key, "--wait", "0s")
 	var parsed friendlyStartResult
 	if err != nil || json.Unmarshal([]byte(out), &parsed) != nil || parsed.PublicSessionID != friendlyPublicID || f.daemon.startCount != 1 {
 		t.Fatal("CLI JSON did not replay the same validated request")
@@ -387,8 +388,8 @@ func TestFriendlyStartRetryRecordConflictAndCrash(t *testing.T) {
 }
 
 func TestFriendlyStartProfileCapabilityAndConstraintFailClosed(t *testing.T) {
-	o := friendlyStartOptions{Profile: "codex-sol-high@1"}
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	o := friendlyStartOptions{Profile: "codex-sol-high@2"}
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	forged := profile
 	forged.Effort = "max"
 	if _, err := resolveFriendlyProfile([]dispatchprofile.Profile{forged}, o); err == nil {
@@ -481,8 +482,19 @@ func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
 	stdout = &out
 	defer func() { stdout = oldOut; flagJSON = oldJSON }()
 	cmd := rootCmd()
-	// The catalog is alphabetically ordered: codex-sol-high is row five.
-	cmd.SetIn(strings.NewReader("1\n1\nPAI-921\n1\n1\n5\n"))
+	// Select the displayed row for the same pin as the explicit invocation;
+	// the catalog grows, so its numeric position is not a stable identifier.
+	profileRow := 0
+	for i, profile := range dispatchprofile.List() {
+		if profile.ID+"@"+profile.Version == f.opts.Profile {
+			profileRow = i + 1
+			break
+		}
+	}
+	if profileRow == 0 {
+		t.Fatalf("fixture profile %s is absent from the catalog", f.opts.Profile)
+	}
+	cmd.SetIn(strings.NewReader(fmt.Sprintf("1\n1\nPAI-921\n1\n1\n%d\n", profileRow)))
 	cmd.SetErr(&guidance)
 	cmd.SetArgs([]string{"worker", "start", "--guided", "--dry-run", "--json", "--workspace", f.opts.Workspace, "--state-root", f.opts.StateRoot, "--expect-deployment-instance", f.opts.Deployment})
 	if err := cmd.Execute(); err != nil {
@@ -492,7 +504,7 @@ func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
 	if json.Unmarshal(out.Bytes(), &guided) != nil || guided.Outcome != "validated" || guided.Plan.Profile.ID != "codex-sol-high" || guided.Plan.Parent != friendlyParentID {
 		t.Fatal("guided rows did not resolve expected plan")
 	}
-	for _, label := range []string{"Project choices:", "PAI", "Agent choices:", "builder", "Parent choices:", "codex:root", "Profile choices:", "gpt-5.6-sol / high"} {
+	for _, label := range []string{"Project choices:", "PAI", "Agent choices:", "builder", "Parent choices:", "codex:root", "Profile choices:", "gpt-6-sol / high"} {
 		if !strings.Contains(guidance.String(), label) {
 			t.Fatalf("missing readable choice %s", label)
 		}

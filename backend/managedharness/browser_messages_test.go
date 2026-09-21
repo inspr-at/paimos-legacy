@@ -64,7 +64,7 @@ func newBrowserMessageFixtureRegistration(t *testing.T, machine, account string,
 		SessionRef: uuid.NewString(), WorkerLease: testWorkerLease, ManagementMode: ManagementManaged,
 		Role: RoleWorker, SteerMode: SteerOwned, AccountLabel: "chatgpt",
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
-		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -251,21 +251,21 @@ func TestBrowserMessageCASUsesV3ScopeFence(t *testing.T) {
 		}
 	}
 	t.Run("match", func(t *testing.T) {
-		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]},{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]`))
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"2"}]},{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"2"}]}]`))
 		request := browserMessageRequest(f.session, "utt_6123456789abcdef0123456789abcdef", "simple", "Scoped tell")
 		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != nil {
 			t.Fatalf("matching v3 chatgpt scope refused: %v", err)
 		}
 	})
 	t.Run("cross-class", func(t *testing.T) {
-		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]`))
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"2"}]}]`))
 		request := browserMessageRequest(f.session, "utt_7123456789abcdef0123456789abcdef", "simple", "Cross class")
 		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != ErrBrowserUnavailable {
 			t.Fatalf("cross-class v3 tell accepted: %v", err)
 		}
 	})
 	t.Run("wrong-key", func(t *testing.T) {
-		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]`))
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}]`))
 		request := browserMessageRequest(f.session, "utt_8123456789abcdef0123456789abcdef", "simple", "Wrong key")
 		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != ErrBrowserUnavailable {
 			t.Fatalf("named chatgpt scope accepted class-only session: %v", err)

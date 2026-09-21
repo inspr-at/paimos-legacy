@@ -42,7 +42,7 @@ func TestConfiguredConversationIsExplicitCompleteAndCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", agentd.AdapterCodex)
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", agentd.AdapterCodex)
 	registration := lifecycleintents.Registration{
 		Generation: supervisor.Status().DaemonID, Host: "fixture", SchemaVersion: lifecycleintents.AccountLifecycleSchemaV4,
 		AccountScopes: []lifecycleintents.AccountScope{{

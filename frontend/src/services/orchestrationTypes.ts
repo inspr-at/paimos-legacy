@@ -149,6 +149,8 @@ export type WorkerWorkspaceProvenance = {
 }
 
 export type HarnessDispatchProfile = {
+  family?: 'openai' | 'anthropic' | 'xai' | 'cursor'
+  tier?: 'fast' | 'standard' | 'strong' | 'frontier'
   id: string
   version: string
   harness: 'codex' | 'claude' | 'pi' | 'cursor'

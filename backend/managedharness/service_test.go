@@ -906,13 +906,13 @@ func TestRegisterPersistsExactDispatchAndRejectsExclusiveWorkspaceReuse(t *testi
 	input := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "profile-session", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
-		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt", AccountKey: "coordinator"}
+		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: "chatgpt", AccountKey: "coordinator"}
 	session, created, err := service.Register(context.Background(), input)
 	if err != nil || !created {
 		t.Fatalf("register = %+v created=%v err=%v", session, created, err)
 	}
 	if session.MachineID != "mbp0" || session.Workspace == nil || *session.Workspace != *workspace || session.DispatchProfile == nil ||
-		session.DispatchProfile.ID != "codex-sol-high" || session.DispatchProfile.Model != "gpt-5.6-sol" || session.AccountLabel != "chatgpt" || session.AccountKey != "coordinator" {
+		session.DispatchProfile.ID != "codex-sol-high" || session.DispatchProfile.Model != "gpt-6-sol" || session.AccountLabel != "chatgpt" || session.AccountKey != "coordinator" {
 		t.Fatalf("stored provenance = %+v", session)
 	}
 	replay, created, err := service.Register(context.Background(), input)

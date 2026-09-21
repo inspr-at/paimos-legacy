@@ -28,18 +28,18 @@ func mixedHarnessRegistration(t *testing.T, host string) Registration {
 					{Key: "codex-lab", Label: "Lab"},
 				},
 				Profiles: []Profile{
-					{ID: "codex-luna-medium", Version: "1"},
-					{ID: "codex-sol-high", Version: "1"},
-					{ID: "codex-sol-xhigh", Version: "1"},
-					{ID: "codex-terra-high", Version: "1"},
+					{ID: "codex-luna-medium", Version: "2"},
+					{ID: "codex-sol-high", Version: "2"},
+					{ID: "codex-sol-xhigh", Version: "2"},
+					{ID: "codex-terra-high", Version: "2"},
 				},
 			},
 			{
 				AccountLabel: "cursor_context",
 				Accounts:     []AccountChoice{{Key: "cursor-op", Label: "Cursor"}},
 				Profiles: []Profile{
-					{ID: "cursor-composer", Version: "1"},
-					{ID: "cursor-grok", Version: "1"},
+					{ID: "cursor-composer", Version: "2"},
+					{ID: "cursor-grok", Version: "2"},
 				},
 			},
 		},
@@ -68,7 +68,7 @@ func TestV3RegistrationJSONOmitsSingularClass(t *testing.T) {
 	if json.Unmarshal(raw, &round) != nil {
 		t.Fatal("v3 registration did not round-trip")
 	}
-	if !round.MatchScope("chatgpt", "codex-work", "codex-sol-high", "1", true) || !round.MatchScope("cursor_context", "cursor-op", "cursor-composer", "1", true) {
+	if !round.MatchScope("chatgpt", "codex-work", "codex-sol-high", "2", true) || !round.MatchScope("cursor_context", "cursor-op", "cursor-composer", "2", true) {
 		t.Fatal("round-trip lost mixed membership")
 	}
 }
@@ -106,7 +106,7 @@ func TestV2RegistrationStillAcceptsMixedHarnessProfiles(t *testing.T) {
 		SchemaVersion: AccountChoiceSchemaV2,
 		Accounts:      []AccountChoice{{Key: "coordinator", Label: "Coordinator"}},
 		Workspaces:    []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
-		Profiles:      []Profile{{ID: "codex-sol-high", Version: "1"}, {ID: "cursor-composer", Version: "1"}},
+		Profiles:      []Profile{{ID: "codex-sol-high", Version: "2"}, {ID: "cursor-composer", Version: "2"}},
 	}
 	if err := validateRegistration(in); err != nil {
 		t.Fatal(err)
@@ -118,32 +118,32 @@ func TestMatchScopeDoesNotSilentlyPickOverlappingCodexClasses(t *testing.T) {
 		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountScopeSchemaV3,
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{
-			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}},
-			{AccountLabel: "api_key", Accounts: []AccountChoice{{Key: "codex-api", Label: "API"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}},
+			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}},
+			{AccountLabel: "api_key", Accounts: []AccountChoice{{Key: "codex-api", Label: "API"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}},
 		},
 	}
 	if err := validateRegistration(in); err != nil {
 		t.Fatal(err)
 	}
-	if in.MatchScope("chatgpt", "codex-work", "codex-sol-high", "1", true) == false {
+	if in.MatchScope("chatgpt", "codex-work", "codex-sol-high", "2", true) == false {
 		t.Fatal("chatgpt named choice")
 	}
-	if in.MatchScope("api_key", "codex-api", "codex-sol-high", "1", true) == false {
+	if in.MatchScope("api_key", "codex-api", "codex-sol-high", "2", true) == false {
 		t.Fatal("api_key named choice")
 	}
-	if in.MatchScope("chatgpt", "codex-api", "codex-sol-high", "1", true) || in.MatchScope("api_key", "codex-work", "codex-sol-high", "1", true) {
+	if in.MatchScope("chatgpt", "codex-api", "codex-sol-high", "2", true) || in.MatchScope("api_key", "codex-work", "codex-sol-high", "2", true) {
 		t.Fatal("crossed class and key")
 	}
-	if in.MatchScope("", "codex-work", "codex-sol-high", "1", true) {
+	if in.MatchScope("", "codex-work", "codex-sol-high", "2", true) {
 		t.Fatal("missing class was treated as unique")
 	}
 }
 
 func TestRegistrationRejectsUnknownNestedFields(t *testing.T) {
 	generation, host := uuid.NewString(), "fixture-machine"
-	v1 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`
-	v2 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`
-	v3 := `{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	v1 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}`
+	v2 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}`
+	v3 := `{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}]}`
 	for _, body := range []string{v1, v2, v3} {
 		var parsed Registration
 		if json.Unmarshal([]byte(body), &parsed) != nil {
@@ -154,12 +154,12 @@ func TestRegistrationRejectsUnknownNestedFields(t *testing.T) {
 		}
 	}
 	for _, body := range []string{
-		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`,
-		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1","harness":"codex"}]}`,
-		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator","home":"~/.codex"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`,
-		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]}]}`,
-		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1","harness":"codex"}]}]}`,
-		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work","home":"~/.codex"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"2","harness":"codex"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator","home":"~/.codex"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"2"}]}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"2","harness":"codex"}]}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work","home":"~/.codex"}],"profiles":[{"id":"codex-sol-high","version":"2"}]}]}`,
 	} {
 		var parsed Registration
 		if json.Unmarshal([]byte(body), &parsed) == nil {
@@ -170,7 +170,7 @@ func TestRegistrationRejectsUnknownNestedFields(t *testing.T) {
 
 func TestV3RegistrationRejectsEmptyAccountsArrayAndKeepsClassOnlyOmission(t *testing.T) {
 	generation, handle := uuid.NewString(), uuid.NewString()
-	classOnly := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	classOnly := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"2"}]}]}`
 	var parsed Registration
 	if json.Unmarshal([]byte(classOnly), &parsed) != nil {
 		t.Fatal("omitted accounts refused")
@@ -178,7 +178,7 @@ func TestV3RegistrationRejectsEmptyAccountsArrayAndKeepsClassOnlyOmission(t *tes
 	if err := validateRegistration(parsed); err != nil || len(parsed.AccountScopes[0].Accounts) != 0 {
 		t.Fatalf("class-only chatgpt: %+v err=%v", parsed, err)
 	}
-	empty := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	empty := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[],"profiles":[{"id":"codex-sol-high","version":"2"}]}]}`
 	if json.Unmarshal([]byte(empty), &parsed) == nil && validateRegistration(parsed) == nil {
 		t.Fatal("empty accounts array canonicalized as class-only")
 	}
@@ -189,8 +189,8 @@ func TestV4RegistrationCarriesRevisionAndExplicitEmptyAvailability(t *testing.T)
 		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountLifecycleSchemaV4,
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{
-			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7, AccountAvailability: AccountAvailabilityAvailable},
-			{AccountLabel: "cursor_context", Profiles: []Profile{{ID: "cursor-composer", Version: "1"}}, AttachmentRevision: 9, AccountAvailability: AccountAvailabilityUnavailable},
+			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 7, AccountAvailability: AccountAvailabilityAvailable},
+			{AccountLabel: "cursor_context", Profiles: []Profile{{ID: "cursor-composer", Version: "2"}}, AttachmentRevision: 9, AccountAvailability: AccountAvailabilityUnavailable},
 		},
 	}
 	if err := validateRegistration(base); err != nil {
@@ -204,9 +204,9 @@ func TestV4RegistrationCarriesRevisionAndExplicitEmptyAvailability(t *testing.T)
 	if err := json.Unmarshal(raw, &round); err != nil || validateRegistration(round) != nil {
 		t.Fatalf("v4 round trip err=%v body=%s", err, raw)
 	}
-	if !round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 7) ||
-		round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 6) ||
-		round.MatchScope("cursor_context", "", "cursor-composer", "1", true) {
+	if !round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "2", true, 7) ||
+		round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "2", true, 6) ||
+		round.MatchScope("cursor_context", "", "cursor-composer", "2", true) {
 		t.Fatalf("v4 revision or empty availability was widened: %+v", round.AccountScopes)
 	}
 	for _, mutate := range []func(*Registration){
@@ -226,7 +226,7 @@ func TestV4RegistrationCarriesRevisionAndExplicitEmptyAvailability(t *testing.T)
 	legacy.AccountScopes = append([]AccountScope(nil), round.AccountScopes...)
 	legacy.AccountScopes[0].AttachmentRevision = 0
 	legacy.AccountScopes[0].AccountAvailability = ""
-	if err := validateRegistration(legacy); err != nil || !legacy.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 0) {
+	if err := validateRegistration(legacy); err != nil || !legacy.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "2", true, 0) {
 		t.Fatalf("v4 registration did not preserve a legacy named scope: %+v err=%v", legacy.AccountScopes, err)
 	}
 }
@@ -237,12 +237,12 @@ func TestV4ConversationCapabilityRoundTripsWithoutWidening(t *testing.T) {
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}},
-			Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 7,
 			AccountAvailability: AccountAvailabilityAvailable,
 		}},
 		Conversation: &ConversationCapability{
 			SchemaVersion: ConversationSchemaV1, AccountKey: "codex-work", AttachmentRevision: 7,
-			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2",
 			ExecutionPolicyID: ConversationExecutionPolicyV1, MaxOutputBytes: 256 << 10, MaxEvents: 512,
 		},
 	}
@@ -259,8 +259,8 @@ func TestV4ConversationCapabilityRoundTripsWithoutWidening(t *testing.T) {
 		t.Fatalf("conversation round trip err=%v body=%s capability=%+v", err, body, round.Conversation)
 	}
 	runtime := runtimeProjection(uuid.NewString(), 7, round, "2027-01-01T00:00:00.000Z")
-	if !runtime.MatchConversation("codex-work", 7, "codex-sol-high", "1", ConversationExecutionPolicyV1, 256<<10, 512) ||
-		runtime.MatchConversation("codex-work", 7, "codex-sol-high", "1", ConversationExecutionPolicyV1, 128<<10, 512) {
+	if !runtime.MatchConversation("codex-work", 7, "codex-sol-high", "2", ConversationExecutionPolicyV1, 256<<10, 512) ||
+		runtime.MatchConversation("codex-work", 7, "codex-sol-high", "2", ConversationExecutionPolicyV1, 128<<10, 512) {
 		t.Fatalf("conversation capability match widened: %+v", runtime.Conversation)
 	}
 
@@ -297,16 +297,16 @@ func TestV4RegistrationAllowsExplicitAndLegacyNamedScopesWithoutConflatingEpochs
 		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountLifecycleSchemaV4,
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{
-			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 4, AccountAvailability: AccountAvailabilityAvailable},
-			{AccountLabel: "cursor_context", Accounts: []AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []Profile{{ID: "cursor-composer", Version: "1"}}},
+			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 4, AccountAvailability: AccountAvailabilityAvailable},
+			{AccountLabel: "cursor_context", Accounts: []AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []Profile{{ID: "cursor-composer", Version: "2"}}},
 		},
 	}
 	if err := validateRegistration(in); err != nil {
 		t.Fatal(err)
 	}
-	if !in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 4) ||
-		in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 0) ||
-		!in.MatchScopeAtRevision("cursor_context", "cursor-op", "cursor-composer", "1", true, 0) {
+	if !in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "2", true, 4) ||
+		in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "2", true, 0) ||
+		!in.MatchScopeAtRevision("cursor_context", "cursor-op", "cursor-composer", "2", true, 0) {
 		t.Fatalf("mixed lifecycle epochs were conflated: %+v", in.AccountScopes)
 	}
 }
@@ -317,7 +317,7 @@ func TestV3RegistrationRejectsCursorWithoutKeysAndClaudeNamedKeys(t *testing.T) 
 		Generation: uuid.NewString(), Host: host, SchemaVersion: AccountScopeSchemaV3,
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{
-			{AccountLabel: "cursor_context", Profiles: []Profile{{ID: "cursor-composer", Version: "1"}}},
+			{AccountLabel: "cursor_context", Profiles: []Profile{{ID: "cursor-composer", Version: "2"}}},
 		},
 	}
 	if err := validateRegistration(cursor); err != ErrInvalid {
@@ -327,7 +327,7 @@ func TestV3RegistrationRejectsCursorWithoutKeysAndClaudeNamedKeys(t *testing.T) 
 		Generation: uuid.NewString(), Host: host, SchemaVersion: AccountScopeSchemaV3,
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
 		AccountScopes: []AccountScope{
-			{AccountLabel: "claude_ai_max", Accounts: []AccountChoice{{Key: "claude-home", Label: "Claude"}}, Profiles: []Profile{{ID: "claude-opus-xhigh", Version: "1"}}},
+			{AccountLabel: "claude_ai_max", Accounts: []AccountChoice{{Key: "claude-home", Label: "Claude"}}, Profiles: []Profile{{ID: "claude-opus-xhigh", Version: "2"}}},
 		},
 	}
 	if err := validateRegistration(claude); err != ErrInvalid {
@@ -353,12 +353,12 @@ func TestLifecycleAdvertisesMixedCodexAndCursorScopesOnOneRuntime(t *testing.T) 
 	codex := f.request("start")
 	codex.RuntimeID, codex.RuntimeGeneration = runtime.ID, runtime.Generation
 	codex.AccountLabel, codex.AccountKey = "chatgpt", "codex-work"
-	codex.DispatchProfileID, codex.DispatchProfileVersion = "codex-sol-high", "1"
+	codex.DispatchProfileID, codex.DispatchProfileVersion = "codex-sol-high", "2"
 	codex.WorkspaceHandle = in.Workspaces[0].Handle
 	crossed := f.request("start")
 	crossed.RuntimeID, crossed.RuntimeGeneration = runtime.ID, runtime.Generation
 	crossed.AccountLabel, crossed.AccountKey = "chatgpt", "codex-work"
-	crossed.DispatchProfileID, crossed.DispatchProfileVersion = "cursor-composer", "1"
+	crossed.DispatchProfileID, crossed.DispatchProfileVersion = "cursor-composer", "2"
 	crossed.WorkspaceHandle = in.Workspaces[1].Handle
 	if _, _, err = f.s.Submit(ctx, f.human, f.project, crossed); err != ErrUnavailable {
 		t.Fatalf("codex key with cursor profile: %v", err)
@@ -366,7 +366,7 @@ func TestLifecycleAdvertisesMixedCodexAndCursorScopesOnOneRuntime(t *testing.T) 
 	wrongKey := f.request("start")
 	wrongKey.RuntimeID, wrongKey.RuntimeGeneration = runtime.ID, runtime.Generation
 	wrongKey.AccountLabel, wrongKey.AccountKey = "cursor_context", "codex-work"
-	wrongKey.DispatchProfileID, wrongKey.DispatchProfileVersion = "cursor-composer", "1"
+	wrongKey.DispatchProfileID, wrongKey.DispatchProfileVersion = "cursor-composer", "2"
 	wrongKey.WorkspaceHandle = in.Workspaces[1].Handle
 	if _, _, err = f.s.Submit(ctx, f.human, f.project, wrongKey); err != ErrUnavailable {
 		t.Fatalf("codex key under cursor class: %v", err)
@@ -385,7 +385,7 @@ func TestLifecycleQueueBindsNamedRequestToAdvertisedAttachmentRevision(t *testin
 		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(3)}},
 		AccountScopes: []AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}},
-			Profiles:           []Profile{{ID: "codex-sol-high", Version: "1"}},
+			Profiles:           []Profile{{ID: "codex-sol-high", Version: "2"}},
 			AttachmentRevision: 12, AccountAvailability: AccountAvailabilityAvailable,
 		}},
 	}
@@ -397,7 +397,7 @@ func TestLifecycleQueueBindsNamedRequestToAdvertisedAttachmentRevision(t *testin
 		RequestKey: uuid.NewString(), Operation: "start", RuntimeID: runtime.ID, RuntimeGeneration: runtime.Generation,
 		AccountLabel: "chatgpt", AccountKey: "codex-work", TTLSeconds: 120,
 		WorkspaceHandle: registration.Workspaces[0].Handle, AgentName: "worker",
-		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", WorkShape: "unknown", Role: "worker",
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", WorkShape: "unknown", Role: "worker",
 	}
 	if _, _, err := f.s.Submit(ctx, f.human, f.project, request); err != ErrUnavailable {
 		t.Fatalf("explicit named request without revision err=%v", err)

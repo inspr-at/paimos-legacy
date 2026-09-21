@@ -46,7 +46,7 @@ func reconcileFriendlyStart(ctx context.Context, c *Client, o friendlyStartOptio
 		return result
 	}
 	var public models.HarnessSession
-	if friendlyRead(ctx, c, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", session.ProjectID, session.Reporter.PublicSessionID), &public) != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != session.ProjectID || public.AgentName != p.Agent || public.Harness != p.Profile.Harness || public.ManagementMode != "managed" || public.Role != p.Role || friendlyParentValue(public.ParentSessionID) != p.Parent || friendlyTicketValue(public.TicketID) != session.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != models.HarnessDispatchProfile(p.Profile) {
+	if friendlyRead(ctx, c, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", session.ProjectID, session.Reporter.PublicSessionID), &public) != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != session.ProjectID || public.AgentName != p.Agent || public.Harness != p.Profile.Harness || public.ManagementMode != "managed" || public.Role != p.Role || friendlyParentValue(public.ParentSessionID) != p.Parent || friendlyTicketValue(public.TicketID) != session.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != friendlyProfileSnapshot(p.Profile) {
 		return result
 	}
 	result.Outcome = "started"

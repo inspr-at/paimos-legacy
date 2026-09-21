@@ -46,8 +46,8 @@ func TestNormalizeWorkflowKeepsV3AccountScopesUnflattened(t *testing.T) {
 	w := Workflow{Choices: WorkflowChoices{Runtimes: []RuntimeChoice{{
 		RuntimeID: "runtime", RuntimeGeneration: "gen", SchemaVersion: 3,
 		AccountScopes: []lifecycleintents.AccountScope{
-			{AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}}},
-			{AccountLabel: "cursor_context", Accounts: []lifecycleintents.AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []lifecycleintents.Profile{{ID: "cursor-composer", Version: "1"}}},
+			{AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "2"}}},
+			{AccountLabel: "cursor_context", Accounts: []lifecycleintents.AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []lifecycleintents.Profile{{ID: "cursor-composer", Version: "2"}}},
 		},
 	}}}}
 	normalizeWorkflow(&w)

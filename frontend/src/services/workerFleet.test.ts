@@ -17,7 +17,7 @@ function worker(overrides: Record<string, unknown> = {}) {
     agent: { id: 7, name: 'scout-worker' },
     machine_id: 'vienna-builder-1',
     workspace_provenance: { kind: 'git_worktree', mode: 'exclusive' },
-    dispatch_profile: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+    dispatch_profile: { model: 'gpt-6-sol', effort: 'xhigh' },
     account_label: 'chatgpt',
     management_mode: 'managed',
     runtime_provenance_trust: 'managed_reporter',
@@ -43,7 +43,7 @@ describe('worker fleet ticket companion', () => {
       expect.objectContaining({
         machineId: 'vienna-builder-1',
         workspace: { kind: 'git_worktree', mode: 'exclusive' },
-        dispatch: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+        dispatch: { model: 'gpt-6-sol', effort: 'xhigh' },
         accountLabel: 'chatgpt',
         managementMode: 'managed',
         runtimeProvenanceTrust: 'managed_reporter',

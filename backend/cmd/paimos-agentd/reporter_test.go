@@ -30,7 +30,7 @@ const (
 )
 
 func TestCLIReporterResolvesOnlyExactLocallyPinnedDispatchProfile(t *testing.T) {
-	profile, err := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, err := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestCLIReporterResolvesOnlyExactLocallyPinnedDispatchProfile(t *testing.T) 
 	if err != nil || got != profile || !seen {
 		t.Fatalf("resolved=%+v seen=%v err=%v", got, seen, err)
 	}
-	profile.Model = "gpt-5.6-terra"
+	profile.Model = "gpt-6-terra"
 	if _, err := reporter.ResolveDispatchProfile(context.Background(), profile.ID, profile.Version, profile.Harness); err == nil {
 		t.Fatal("authority drifted from the locally pinned profile")
 	}

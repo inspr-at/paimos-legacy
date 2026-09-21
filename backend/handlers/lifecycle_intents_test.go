@@ -41,7 +41,7 @@ func TestLifecycleHTTPClosedBodiesAndCredentialSeparation(t *testing.T) {
 		Generation: uuid.NewString(), Host: "http-fixture", SchemaVersion: lifecycleintents.AccountLifecycleSchemaV4,
 		AccountScopes: []lifecycleintents.AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "coordinator", Label: "Coordinator"}},
-			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 7,
 			AccountAvailability: lifecycleintents.AccountAvailabilityAvailable,
 		}},
 		Workspaces: []lifecycleintents.Workspace{{Handle: uuid.NewString(), Identity: fmt.Sprintf("%064x", 1)}},
@@ -59,11 +59,11 @@ func TestLifecycleHTTPClosedBodiesAndCredentialSeparation(t *testing.T) {
 		router.ServeHTTP(response, request)
 		return response
 	}
-	namedStart := fmt.Sprintf(`{"request_key":%q,"operation":"start","runtime_id":%q,"runtime_generation":%q,"account_label":"chatgpt","account_key":"coordinator","attachment_revision":7,"ttl_seconds":60,"workspace_handle":%q,"agent_name":"worker","dispatch_profile_id":"codex-sol-high","dispatch_profile_version":"1","work_shape":"unknown","role":"worker"}`, uuid.NewString(), runtime.ID, runtime.Generation, runtime.Workspaces[0].Handle)
+	namedStart := fmt.Sprintf(`{"request_key":%q,"operation":"start","runtime_id":%q,"runtime_generation":%q,"account_label":"chatgpt","account_key":"coordinator","attachment_revision":7,"ttl_seconds":60,"workspace_handle":%q,"agent_name":"worker","dispatch_profile_id":"codex-sol-high","dispatch_profile_version":"2","work_shape":"unknown","role":"worker"}`, uuid.NewString(), runtime.ID, runtime.Generation, runtime.Workspaces[0].Handle)
 	if response := call(human, "POST", "intents", namedStart); response.Code != 201 || !strings.Contains(response.Body.String(), `"attachment_revision":7`) {
 		t.Fatalf("reviewed attachment revision was not durably accepted: %d %s", response.Code, response.Body.String())
 	}
-	missingRevision := fmt.Sprintf(`{"request_key":%q,"operation":"start","runtime_id":%q,"runtime_generation":%q,"account_label":"chatgpt","account_key":"coordinator","ttl_seconds":60,"workspace_handle":%q,"agent_name":"worker","dispatch_profile_id":"codex-sol-high","dispatch_profile_version":"1","work_shape":"unknown","role":"worker"}`,
+	missingRevision := fmt.Sprintf(`{"request_key":%q,"operation":"start","runtime_id":%q,"runtime_generation":%q,"account_label":"chatgpt","account_key":"coordinator","ttl_seconds":60,"workspace_handle":%q,"agent_name":"worker","dispatch_profile_id":"codex-sol-high","dispatch_profile_version":"2","work_shape":"unknown","role":"worker"}`,
 		uuid.NewString(), runtime.ID, runtime.Generation, runtime.Workspaces[0].Handle)
 	if response := call(human, "POST", "intents", missingRevision); response.Code != 403 {
 		t.Fatalf("explicit named start without attachment revision status=%d", response.Code)

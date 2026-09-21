@@ -110,7 +110,7 @@ func TestDaemonLifecycleStartsReservedGenerationAndProvesPublicMapping(t *testin
 	defer cancel()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
 	}, newMemoryReporterLeaseStore())
@@ -259,7 +259,7 @@ func TestCommittedReadinessPersistsOnlyTheValidatedAuthorityReceipt(t *testing.T
 		checks = append(checks, lifecycleintents.ReadinessCheck{ID: id, Status: "pass", Reason: "verified"})
 	}
 	in := lifecycleintents.Intent{ID: uuid.NewString(), ProjectID: 440, Request: lifecycleintents.Request{Operation: "readiness", RuntimeID: uuid.NewString(), RuntimeGeneration: supervisor.Status().DaemonID,
-		AccountLabel: "chatgpt", TTLSeconds: 300, WorkspaceHandle: uuid.NewString(), DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", BaselineDigest: baseline}}
+		AccountLabel: "chatgpt", TTLSeconds: 300, WorkspaceHandle: uuid.NewString(), DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", BaselineDigest: baseline}}
 	in.AcceptedReadiness = &lifecycleintents.ReadinessObservation{ContractVersion: lifecycleintents.ReadinessContractVersion, IntentID: in.ID, ProjectID: in.ProjectID,
 		RuntimeID: in.Request.RuntimeID, RuntimeGeneration: in.Request.RuntimeGeneration, AccountLabel: in.Request.AccountLabel, ProfileID: in.Request.DispatchProfileID,
 		ProfileVersion: in.Request.DispatchProfileVersion, WorkspaceHandle: in.Request.WorkspaceHandle, WorkspaceIdentity: strings.Repeat("8", 64), WorkspaceMode: "exclusive", BaselineDigest: baseline,
@@ -281,7 +281,7 @@ func TestCommittedReadinessPersistsOnlyTheValidatedAuthorityReceipt(t *testing.T
 	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
 		t.Fatalf("mismatched receipt commit error=%v", err)
 	}
-	in.AcceptedReadiness.ProfileVersion = "1"
+	in.AcceptedReadiness.ProfileVersion = "2"
 	in.AcceptedReadiness.WorkspaceMode = "shared"
 	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
 		t.Fatalf("profile-mode mismatch commit error=%v", err)
@@ -453,7 +453,7 @@ func TestDaemonLifecycleAdvertisesTwoAccountsAndRejectsWrongKey(t *testing.T) {
 	defer cancel()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
 	}, newMemoryReporterLeaseStore())
@@ -540,7 +540,7 @@ func TestDaemonLifecyclePrepareRefusesDetachedAccountAndRestartAdvertisesCommitt
 	defer cancel()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
 	}, newMemoryReporterLeaseStore())
@@ -741,7 +741,7 @@ func daemonLifecycleErrFromProject(t *testing.T, instance string, project config
 	ctx := context.Background()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
 	}, newMemoryReporterLeaseStore())
@@ -801,8 +801,8 @@ func TestDaemonLifecyclePreparesMixedCodexAndCursorScopes(t *testing.T) {
 	root := t.TempDir()
 	codexWorkspace, _ := filepath.EvalSymlinks(t.TempDir())
 	cursorWorkspace, _ := filepath.EvalSymlinks(t.TempDir())
-	codexProfile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
-	cursorProfile, _ := dispatchprofile.Resolve("cursor-composer", "1", "cursor")
+	codexProfile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
+	cursorProfile, _ := dispatchprofile.Resolve("cursor-composer", "2", "cursor")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{codexProfile, cursorProfile}})
 	}, newMemoryReporterLeaseStore())
@@ -938,8 +938,8 @@ func TestDaemonLifecycleAdvertisementPreservesCodexClassMembership(t *testing.T)
 	defer cancel()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	chatgptProfile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
-	apiKeyProfile, _ := dispatchprofile.Resolve("codex-luna-medium", "1", "codex")
+	chatgptProfile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
+	apiKeyProfile, _ := dispatchprofile.Resolve("codex-luna-medium", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{chatgptProfile, apiKeyProfile}})
 	}, newMemoryReporterLeaseStore())
@@ -1017,7 +1017,7 @@ func TestDaemonLifecycleDetachingAllCodexKeysDoesNotAdvertiseAmbient(t *testing.
 	defer cancel()
 	root := t.TempDir()
 	workspace, _ := filepath.EvalSymlinks(t.TempDir())
-	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "2", "codex")
 	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
 		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
 	}, newMemoryReporterLeaseStore())

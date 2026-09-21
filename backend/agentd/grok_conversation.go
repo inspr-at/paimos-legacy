@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	grokConversationProfileID = "grok-native-4.6-xhigh"
-	grokConversationModel     = "grok-4.6"
+	grokConversationProfileID = "grok-native-4.7-xhigh"
+	grokConversationModel     = "grok-4.7"
 	grokConversationEffort    = "xhigh"
 	grokConfigSHA256          = "3b9f1cefb4672eed5856debd6173bb82009546ad9b10f28d8372749d1bb8e259"
 	grokProfileSHA256         = "9cd1990054adc092e004e649da746e4bb2844ae6debae4a8aa5495df5ecfb231"

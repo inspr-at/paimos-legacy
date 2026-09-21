@@ -150,7 +150,7 @@ func piLaunchIntent(profile dispatchprofile.Profile) (provider, model, thinking 
 	default:
 		return "", "", "", ErrDispatchProfile
 	}
-	parts := strings.SplitN(strings.TrimSpace(profile.Model), ":", 2)
+	parts := strings.SplitN(strings.TrimSpace(profile.Model), "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", "", ErrDispatchProfile
 	}

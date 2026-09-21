@@ -10,9 +10,10 @@ import (
 	"errors"
 	"regexp"
 	"sort"
+	"strings"
 )
 
-const CatalogVersion = "1"
+const CatalogVersion = "2"
 
 const (
 	MachineAuthenticatedReporter = "authenticated_reporter"
@@ -20,6 +21,7 @@ const (
 )
 
 var stableValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+var modelValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 // Profile is an immutable execution choice. Machine and Account are source
 // selectors: their runtime values come from the authenticated reporter and a
@@ -30,26 +32,74 @@ type Profile struct {
 	Harness       string `json:"harness"`
 	Model         string `json:"model"`
 	Effort        string `json:"effort"`
+	Family        Family `json:"family,omitempty"`
+	Tier          Tier   `json:"tier,omitempty"`
 	MachineSource string `json:"machine_source"`
 	AccountSource string `json:"account_source"`
 	WorkspaceMode string `json:"workspace_mode"`
 }
 
-var catalog = []Profile{
-	{ID: "codex-luna-medium", Version: CatalogVersion, Harness: "codex", Model: "gpt-5.6-luna", Effort: "medium", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "codex-sol-high", Version: CatalogVersion, Harness: "codex", Model: "gpt-5.6-sol", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "codex-sol-xhigh", Version: CatalogVersion, Harness: "codex", Model: "gpt-5.6-sol", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "codex-terra-high", Version: CatalogVersion, Harness: "codex", Model: "gpt-5.6-terra", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "claude-sonnet-high", Version: CatalogVersion, Harness: "claude", Model: "sonnet", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "claude-opus-xhigh", Version: CatalogVersion, Harness: "claude", Model: "opus", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "claude-fable-xhigh", Version: CatalogVersion, Harness: "claude", Model: "fable", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	// Pi profiles are human-selected by id. None is an automatic paid-model default.
-	{ID: "pi-anthropic-sonnet-high", Version: CatalogVersion, Harness: "pi", Model: "anthropic:claude-sonnet-4-20250514", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	// Cursor profiles are human-selected included Composer/Grok models. Auto and
-	// third-party paid models are refused by the owned ACP adapter. Composer
-	// does not advertise a reasoning effort; Grok high is acknowledged.
-	{ID: "cursor-composer", Version: CatalogVersion, Harness: "cursor", Model: "composer-2.5", Effort: "default", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
-	{ID: "cursor-grok", Version: CatalogVersion, Harness: "cursor", Model: "grok-4.6", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
+// Model is the model/effort authority. Profiles pin one of its allowed efforts.
+type Model struct {
+	Harness        string   `json:"harness"`
+	ID             string   `json:"id"`
+	Family         Family   `json:"family"`
+	Tier           Tier     `json:"tier"`
+	AllowedEfforts []string `json:"allowed_efforts"`
+}
+
+var models = []Model{
+	{"codex", "gpt-6-luna", OpenAI, Fast, []string{"medium", "high", "xhigh"}},
+	{"codex", "gpt-6-terra", OpenAI, Standard, []string{"medium", "high", "xhigh"}},
+	{"codex", "gpt-6-sol", OpenAI, Strong, []string{"medium", "high", "xhigh"}},
+	{"codex", "gpt-6-astra", OpenAI, Frontier, []string{"medium", "high", "xhigh"}},
+	{"claude", "haiku", Anthropic, Fast, []string{"medium", "high"}},
+	{"claude", "sonnet", Anthropic, Standard, []string{"high"}},
+	{"claude", "opus", Anthropic, Strong, []string{"high", "xhigh"}},
+	{"claude", "fable", Anthropic, Frontier, []string{"high", "xhigh"}},
+	{"pi", "anthropic/claude-sonnet-5", Anthropic, Standard, []string{"high"}},
+	{"pi", "anthropic/claude-opus-5", Anthropic, Strong, []string{"high", "xhigh"}},
+	{"cursor", "composer-2.5", Cursor, Standard, []string{"default"}},
+	{"cursor", "composer-2.5-fast", Cursor, Standard, []string{"default"}},
+	{"cursor", "grok-4.7-low", XAI, Frontier, []string{"low"}},
+	{"cursor", "grok-4.7-medium", XAI, Frontier, []string{"medium"}},
+	{"cursor", "grok-4.7-high", XAI, Frontier, []string{"high"}},
+	{"cursor", "grok-4.7-xhigh", XAI, Frontier, []string{"xhigh"}},
+	{"cursor", "grok-4.7-low-fast", XAI, Frontier, []string{"low"}},
+	{"cursor", "grok-4.7-medium-fast", XAI, Frontier, []string{"medium"}},
+	{"cursor", "grok-4.7-high-fast", XAI, Frontier, []string{"high"}},
+	{"cursor", "grok-4.7-xhigh-fast", XAI, Frontier, []string{"xhigh"}},
+}
+
+var catalog = buildCatalog()
+
+func buildCatalog() []Profile {
+	var out []Profile
+	for _, model := range models {
+		for _, effort := range model.AllowedEfforts {
+			id := model.Harness + "-" + model.ID + "-" + effort
+			switch model.Harness {
+			case "codex":
+				id = "codex-" + strings.TrimPrefix(model.ID, "gpt-6-") + "-" + effort
+			case "pi":
+				id = "pi-anthropic-" + strings.TrimSuffix(strings.TrimPrefix(model.ID, "anthropic/claude-"), "-5") + "-" + effort
+			case "cursor":
+				id = "cursor-" + model.ID
+				if model.ID == "composer-2.5" {
+					id = "cursor-composer"
+				}
+				if model.ID == "grok-4.7-high" {
+					id = "cursor-grok"
+				}
+				if model.ID == "grok-4.7-xhigh" {
+					id = "cursor-grok-xhigh"
+				}
+			}
+			out = append(out, Profile{ID: id, Version: CatalogVersion, Harness: model.Harness, Model: model.ID, Effort: effort, Family: model.Family, Tier: model.Tier,
+				MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"})
+		}
+	}
+	return out
 }
 
 // List returns a detached, stable-order catalog for the execution-options API.
@@ -92,10 +142,13 @@ func Validate(profile Profile) error {
 // catalog. Retired profile versions must remain readable after a binary
 // upgrade; their immutable model and effort are the historical authority.
 func ValidateSnapshot(profile Profile) error {
-	for _, value := range []string{profile.ID, profile.Version, profile.Harness, profile.Model, profile.Effort} {
+	for _, value := range []string{profile.ID, profile.Version, profile.Harness, profile.Effort} {
 		if len(value) == 0 || len(value) > 128 || !stableValue.MatchString(value) {
 			return errors.New("dispatch profile contains an invalid stable value")
 		}
+	}
+	if len(profile.Model) == 0 || len(profile.Model) > 128 || !modelValue.MatchString(profile.Model) {
+		return errors.New("dispatch profile contains an invalid model")
 	}
 	if profile.Harness != "codex" && profile.Harness != "claude" && profile.Harness != "pi" && profile.Harness != "cursor" {
 		return errors.New("dispatch profile harness is unsupported")

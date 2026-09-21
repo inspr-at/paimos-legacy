@@ -18,7 +18,7 @@ func TestLifecycleV1RegistrationJSONOmitsAccountChoices(t *testing.T) {
 		Host:         "fixture-machine",
 		AccountLabel: "chatgpt",
 		Workspaces:   []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
-		Profiles:     []Profile{{ID: "codex-sol-high", Version: "1"}},
+		Profiles:     []Profile{{ID: "codex-sol-high", Version: "2"}},
 	}
 	raw, err := json.Marshal(in)
 	if err != nil {
@@ -218,7 +218,7 @@ func (f *fixture) managedNamed(t *testing.T, key string) models.HarnessSession {
 		Workspace: &models.HarnessWorkspaceProvenance{
 			CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity,
 		},
-		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: f.runtime.AccountLabel, AccountKey: key,
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: f.runtime.AccountLabel, AccountKey: key,
 	})
 	if err != nil {
 		t.Fatal(err)

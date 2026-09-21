@@ -54,15 +54,23 @@ export function parseDispatchProfiles(value: unknown): HarnessDispatchProfile[] 
       'machine_source',
       'account_source',
       'workspace_mode',
+      ...('family' in profile ? ['family'] : []),
+      ...('tier' in profile ? ['tier'] : []),
     ])
     if (
-      ['id', 'version', 'model'].some(
+      ['id', 'version'].some(
         (key) =>
           typeof profile[key] !== 'string' ||
           !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(String(profile[key])),
       ) ||
-      !['codex', 'claude'].includes(String(profile.harness)) ||
-      !['low', 'medium', 'high', 'xhigh', 'max'].includes(String(profile.effort)) ||
+      typeof profile.model !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(profile.model) ||
+      !['codex', 'claude', 'pi', 'cursor'].includes(String(profile.harness)) ||
+      !['low', 'medium', 'high', 'xhigh', 'max', 'default'].includes(String(profile.effort)) ||
+      (profile.effort === 'default' && profile.harness !== 'cursor') ||
+      ((profile.version === '2' || 'family' in profile || 'tier' in profile) &&
+        (!['openai', 'anthropic', 'xai', 'cursor'].includes(String(profile.family)) ||
+          !['fast', 'standard', 'strong', 'frontier'].includes(String(profile.tier)))) ||
       profile.machine_source !== 'authenticated_reporter' ||
       profile.account_source !== 'local_probe' ||
       !['exclusive', 'shared'].includes(String(profile.workspace_mode))

@@ -30,12 +30,12 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 			{
 				"account_label": "chatgpt",
 				"accounts":      []map[string]string{{"key": "codex-work", "label": "Work"}},
-				"profiles":      []map[string]string{{"id": "codex-sol-high", "version": "1"}},
+				"profiles":      []map[string]string{{"id": "codex-sol-high", "version": "2"}},
 			},
 			{
 				"account_label": "cursor_context",
 				"accounts":      []map[string]string{{"key": "cursor-op", "label": "Cursor"}},
-				"profiles":      []map[string]string{{"id": "cursor-composer", "version": "1"}},
+				"profiles":      []map[string]string{{"id": "cursor-composer", "version": "2"}},
 			},
 		},
 	})
@@ -48,7 +48,7 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 		"account_scopes": []map[string]any{
 			{
 				"account_label": "claude_ai_max",
-				"profiles":      []map[string]string{{"id": "claude-opus-xhigh", "version": "1"}},
+				"profiles":      []map[string]string{{"id": "claude-opus-xhigh", "version": "2"}},
 			},
 		},
 	})
@@ -59,7 +59,7 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 		"schema_version": 2,
 		"account_label":  "chatgpt",
 		"accounts":       []map[string]string{{"key": "coordinator", "label": "Coordinator"}},
-		"profiles":       []map[string]string{{"id": "codex-sol-high", "version": "1"}},
+		"profiles":       []map[string]string{{"id": "codex-sol-high", "version": "2"}},
 		"workspaces":     []map[string]any{{"handle": v2WS, "identity": identity, "label": "V2"}},
 	})
 
@@ -88,28 +88,28 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 	codexWorker := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": v3Gen,
 		"account_label": "chatgpt", "account_key": "codex-work",
-		"profile_id": "codex-sol-high", "profile_version": "1", "workspace_handle": workspace,
+		"profile_id": "codex-sol-high", "profile_version": "2", "workspace_handle": workspace,
 	}
 	cursorWorker := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": v3Gen,
 		"account_label": "cursor_context", "account_key": "cursor-op",
-		"profile_id": "cursor-composer", "profile_version": "1", "workspace_handle": workspace,
+		"profile_id": "cursor-composer", "profile_version": "2", "workspace_handle": workspace,
 	}
 	classOnly := map[string]any{
 		"worker_name": "builder", "runtime_id": claudeID, "runtime_generation": claudeGen,
-		"account_label": "claude_ai_max", "profile_id": "claude-opus-xhigh", "profile_version": "1",
+		"account_label": "claude_ai_max", "profile_id": "claude-opus-xhigh", "profile_version": "2",
 		"workspace_handle": claudeWS,
 	}
 	v2Worker := map[string]any{
 		"worker_name": "builder", "runtime_id": v2ID, "runtime_generation": v2Gen,
 		"account_label": "chatgpt", "account_key": "coordinator",
-		"profile_id": "codex-sol-high", "profile_version": "1", "workspace_handle": v2WS,
+		"profile_id": "codex-sol-high", "profile_version": "2", "workspace_handle": v2WS,
 	}
 
 	crossedBefore := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": v3Gen,
 		"account_label": "chatgpt", "account_key": "codex-work",
-		"profile_id": "cursor-composer", "profile_version": "1", "workspace_handle": workspace,
+		"profile_id": "cursor-composer", "profile_version": "2", "workspace_handle": workspace,
 	}
 	if resp := patchBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d", projectID, draft.ID),
 		map[string]any{"execution_mode": "assisted", "worker": crossedBefore}); resp.StatusCode != 200 {
@@ -143,14 +143,14 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 	crossed := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": v3Gen,
 		"account_label": "chatgpt", "account_key": "codex-work",
-		"profile_id": "cursor-composer", "profile_version": "1", "workspace_handle": workspace,
+		"profile_id": "cursor-composer", "profile_version": "2", "workspace_handle": workspace,
 	}
 	if resp := reviewWorker(t, ts, projectID, draft.ID, "assisted", crossed); resp.StatusCode != 400 {
 		t.Fatalf("cross-scope profile=%d %s", resp.StatusCode, baselineReadBody(resp))
 	}
 	cursorOnly := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": v3Gen,
-		"account_label": "cursor_context", "profile_id": "cursor-composer", "profile_version": "1",
+		"account_label": "cursor_context", "profile_id": "cursor-composer", "profile_version": "2",
 		"workspace_handle": workspace,
 	}
 	if resp := reviewWorker(t, ts, projectID, draft.ID, "assisted", cursorOnly); resp.StatusCode != 400 {
@@ -159,7 +159,7 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 	invented := map[string]any{
 		"worker_name": "builder", "runtime_id": claudeID, "runtime_generation": claudeGen,
 		"account_label": "claude_ai_max", "account_key": "claude-home",
-		"profile_id": "claude-opus-xhigh", "profile_version": "1", "workspace_handle": claudeWS,
+		"profile_id": "claude-opus-xhigh", "profile_version": "2", "workspace_handle": claudeWS,
 	}
 	if resp := reviewWorker(t, ts, projectID, draft.ID, "assisted", invented); resp.StatusCode != 400 {
 		t.Fatalf("invented class-only key=%d %s", resp.StatusCode, baselineReadBody(resp))
@@ -167,7 +167,7 @@ func TestBaselineBatchV3ScopedChoicesAndReview(t *testing.T) {
 	staleGen := map[string]any{
 		"worker_name": "builder", "runtime_id": v3ID, "runtime_generation": uuid.NewString(),
 		"account_label": "chatgpt", "account_key": "codex-work",
-		"profile_id": "codex-sol-high", "profile_version": "1", "workspace_handle": workspace,
+		"profile_id": "codex-sol-high", "profile_version": "2", "workspace_handle": workspace,
 	}
 	if resp := reviewWorker(t, ts, projectID, draft.ID, "assisted", staleGen); resp.StatusCode != 400 {
 		t.Fatalf("stale generation=%d %s", resp.StatusCode, baselineReadBody(resp))
@@ -191,7 +191,7 @@ func TestBaselineBatchUnknownSchemaFailsClosed(t *testing.T) {
 		"host":           "fixture-unknown",
 		"schema_version": 9,
 		"account_label":  "chatgpt",
-		"profiles":       []map[string]string{{"id": "codex-sol-high", "version": "1"}},
+		"profiles":       []map[string]string{{"id": "codex-sol-high", "version": "2"}},
 		"workspaces":     []map[string]any{{"handle": workspace, "identity": strings.Repeat("a", 64)}},
 	})
 	handover, _ := validHandover(t)
@@ -204,7 +204,7 @@ func TestBaselineBatchUnknownSchemaFailsClosed(t *testing.T) {
 	decode(t, imported, &draft)
 	worker := map[string]any{
 		"worker_name": "builder", "runtime_id": id, "runtime_generation": gen,
-		"account_label": "chatgpt", "profile_id": "codex-sol-high", "profile_version": "1",
+		"account_label": "chatgpt", "profile_id": "codex-sol-high", "profile_version": "2",
 		"workspace_handle": workspace,
 	}
 	if resp := reviewWorker(t, ts, projectID, draft.ID, "assisted", worker); resp.StatusCode != 400 {

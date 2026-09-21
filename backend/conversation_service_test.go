@@ -105,14 +105,14 @@ func openConversationRouteFixtureConfigured(t *testing.T, advertiseConversation,
 		Workspaces: []lifecycleintents.Workspace{{Handle: uuid.NewString(), Identity: fmt.Sprintf("%064x", 1)}},
 		AccountScopes: []lifecycleintents.AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "acct-main", Label: "Main"}},
-			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}, {ID: "codex-luna-medium", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "2"}, {ID: "codex-luna-medium", Version: "2"}}, AttachmentRevision: 7,
 			AccountAvailability: lifecycleintents.AccountAvailabilityAvailable,
 		}},
 	}
 	if advertiseConversation {
 		registration.Conversation = &lifecycleintents.ConversationCapability{
 			SchemaVersion: lifecycleintents.ConversationSchemaV1, AccountKey: "acct-main", AttachmentRevision: 7,
-			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2",
 			ExecutionPolicyID: lifecycleintents.ConversationExecutionPolicyV1, MaxOutputBytes: 262144, MaxEvents: 512,
 		}
 	}
@@ -163,7 +163,7 @@ func (f *conversationRouteFixture) enrollmentBody(accountKey, generation string)
 		"schema_version": 1, "name": "aithema conversation", "project_id": f.projectID,
 		"host_id": f.runtime.MachineID, "project_ref": "aithema-project-1", "runtime_id": f.runtime.ID,
 		"runtime_generation": generation, "account_key": accountKey, "attachment_revision": 7,
-		"dispatch_profile_id": "codex-sol-high", "dispatch_profile_version": "1",
+		"dispatch_profile_id": "codex-sol-high", "dispatch_profile_version": "2",
 		"actors": []map[string]any{{"issuer": f.actor.Issuer, "subject": f.actor.Subject, "user_id": f.actorID}},
 		"limits": map[string]any{"max_input_bytes": 131072, "max_messages": 128, "max_output_bytes": 262144,
 			"max_event_bytes": 8192, "max_events": 512, "max_timeout_ms": 180000},

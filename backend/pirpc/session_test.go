@@ -23,7 +23,7 @@ func launchTestSession(t *testing.T, mode string, extraEnv ...string) *Session {
 	session, err := Launch(context.Background(), LaunchConfig{
 		Executable:    os.Args[0],
 		Provider:      "anthropic",
-		Model:         "claude-sonnet-4-20250514",
+		Model:         "claude-sonnet-5",
 		ThinkingLevel: "high",
 		NoSession:     true,
 		Command: func(path string, args ...string) *exec.Cmd {
@@ -38,7 +38,7 @@ func launchTestSession(t *testing.T, mode string, extraEnv ...string) *Session {
 		_ = session.Stop(context.Background())
 	})
 	if mode == "argv-echo" {
-		want := []string{"--mode", "rpc", "--no-session", "--provider", "anthropic", "--model", "claude-sonnet-4-20250514", "--thinking", "high"}
+		want := []string{"--mode", "rpc", "--no-session", "--provider", "anthropic", "--model", "claude-sonnet-5", "--thinking", "high"}
 		if !slices.Equal(argv, want) {
 			t.Fatalf("argv=%q want %q", argv, want)
 		}
@@ -226,7 +226,7 @@ func TestSessionEOFAfterAcceptance(t *testing.T) {
 	session, err := Launch(context.Background(), LaunchConfig{
 		Executable:    os.Args[0],
 		Provider:      "anthropic",
-		Model:         "claude-sonnet-4-20250514",
+		Model:         "claude-sonnet-5",
 		ThinkingLevel: "high",
 		NoSession:     true,
 		Command:       pirpctest.Command(piRPCHelperTest, "eof-after-accept"),
@@ -297,7 +297,7 @@ func TestSessionPinsProtectedAgentDirAndIgnoresAmbient(t *testing.T) {
 	session, err := Launch(context.Background(), LaunchConfig{
 		Executable:    os.Args[0],
 		Provider:      "anthropic",
-		Model:         "claude-sonnet-4-20250514",
+		Model:         "claude-sonnet-5",
 		ThinkingLevel: "high",
 		NoSession:     true,
 		AgentDir:      canonical,

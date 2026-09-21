@@ -76,7 +76,7 @@ func TestAgentModeWorkerFleetVersionsDoNotCrossWireContracts(t *testing.T) {
 		TicketID: &issueID, WorkShape: "ship", SteerMode: managedharness.SteerNone,
 		Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/versioned/workspace",
 			Identity: strings.Repeat("a", 64), Kind: "directory", Mode: "exclusive"},
-		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt",
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: "chatgpt",
 		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true},
 	})
 	if err != nil {

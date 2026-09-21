@@ -71,7 +71,7 @@ def inventory(binary, expected_hash, workdir):
             cursor = result.get("nextCursor")
             if not cursor: break
         if cursor: raise ValueError("inventory pagination bound")
-        r["profile_model_available"] = any(m["model"] == "gpt-5.6-sol" and "high" in m["efforts"] for m in r["models"])
+        r["profile_model_available"] = any(m["model"] == "gpt-6-sol" and "high" in m["efforts"] for m in r["models"])
         r["status"] = "PASS"
     except (ValueError, TimeoutError, OSError, KeyError, json.JSONDecodeError) as exc:
         r["failure_class"] = type(exc).__name__

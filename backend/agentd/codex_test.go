@@ -87,7 +87,7 @@ func TestCodexDispatchProfileUsesDocumentedModelAndEffortFields(t *testing.T) {
 		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=profile")
 		return cmd
 	}
-	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "2", AdapterCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +699,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 				var params struct {
 					Model string `json:"model"`
 				}
-				if json.Unmarshal(request.Params, &params) != nil || params.Model != "gpt-5.6-sol" {
+				if json.Unmarshal(request.Params, &params) != nil || params.Model != "gpt-6-sol" {
 					os.Exit(2)
 				}
 			}
@@ -739,7 +739,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 				fmt.Fprintln(os.Stderr, "invalid turn/start")
 				os.Exit(2)
 			}
-			if mode == "profile" && (params.Model != "gpt-5.6-sol" || params.Effort != "xhigh") {
+			if mode == "profile" && (params.Model != "gpt-6-sol" || params.Effort != "xhigh") {
 				os.Exit(2)
 			}
 			respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})

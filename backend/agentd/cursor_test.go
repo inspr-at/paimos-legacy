@@ -111,7 +111,7 @@ func cursorHelperSessionNew(currentModelID string) map[string]any {
 			"currentModelId": currentModelID,
 			"availableModels": []map[string]string{
 				{"modelId": "default[]", "name": "Auto"},
-				{"modelId": cursorGrokACPModel, "name": "grok-4.6"},
+				{"modelId": cursorGrokACPModel, "name": "grok-4.7-high"},
 				{"modelId": cursorComposerACPModel, "name": "composer-2.5"},
 				{"modelId": "claude-opus-5[thinking=true,context=300k,effort=high,fast=false]", "name": "claude-opus-5"},
 			},
@@ -141,7 +141,7 @@ func TestCursorProcessOwnsExactACPSessionForControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, label := process.(accountSelection).AccountSelection()
-	if !slices.Equal(*argv, []string{"--model", cursorComposerArgv, "acp"}) || process.PID() <= 0 || key != "operator-cursor" || label != AccountCursorContext {
+	if !slices.Equal(*argv, []string{"--trust", "--model", cursorComposerArgv, "acp"}) || process.PID() <= 0 || key != "operator-cursor" || label != AccountCursorContext {
 		t.Fatalf("argv=%q pid=%d key=%q label=%q", *argv, process.PID(), key, label)
 	}
 	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "steer-unsupported", Text: "same-turn"}); !errors.Is(err, ErrCapabilityMissing) {
@@ -228,7 +228,7 @@ func TestCursorComposerRefusesInventedHighEffort(t *testing.T) {
 		MachineSource: dispatchprofile.MachineAuthenticatedReporter, AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: "exclusive",
 	}
 	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
-	if err == nil || !strings.Contains(err.Error(), "does not advertise a reasoning effort") {
+	if err == nil || !strings.Contains(err.Error(), "no approved ACP mapping") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -1242,7 +1242,7 @@ func TestCursorGrokLaunchUsesExactIncludedModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*argv, []string{"--model", cursorGrokArgv, "acp"}) {
+	if !slices.Equal(*argv, []string{"--trust", "--model", cursorGrokArgv, "acp"}) {
 		t.Fatalf("argv=%q", *argv)
 	}
 	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "grok-stop"}); err != nil {
@@ -1555,4 +1555,25 @@ func TestCursorACPHelperProcess(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+func TestCursorACPModelMappingIsDataDriven(t *testing.T) {
+	profile, err := dispatchprofile.Resolve("cursor-grok", dispatchprofile.CatalogVersion, AdapterCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := StartRequest{ResolvedProfile: &profile}
+	argv, acp, err := cursorLaunchModelFromRoutes(request, []cursorModelRoute{
+		{profile.Model, "high", "grok-4.7-high", "vendor-opaque-model-id"},
+	})
+	if err != nil || argv != "grok-4.7-high" || acp != "vendor-opaque-model-id" {
+		t.Fatalf("%s %s %v", argv, acp, err)
+	}
+	if _, _, err := cursorLaunchModelFromRoutes(request, nil); err == nil {
+		t.Fatal("missing mapping accepted")
+	}
+	profile.Effort = "xhigh"
+	if _, _, err := cursorLaunchModel(request); err == nil {
+		t.Fatal("mismatched flat id and effort accepted")
+	}
 }

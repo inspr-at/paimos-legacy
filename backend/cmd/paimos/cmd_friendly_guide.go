@@ -147,7 +147,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 			}
 		}
 	}
-	if o.Profile == "" {
+	if o.Profile == "" && o.ModelRole == "" {
 		var options struct {
 			Profiles []dispatchprofile.Profile `json:"dispatch_profiles"`
 		}

@@ -487,7 +487,7 @@ func conversationTestAdapter(t *testing.T) (*CodexAdapter, StartRequest) {
 	registry := testCodexRegistry(t, codexAccountRegistryEntry{Key: "conversation-account", Home: home, Email: "conversation@example.invalid"})
 	adapter := NewCodexAdapter(os.Args[0], "test")
 	adapter.SetAccounts(registry)
-	profile, err := dispatchprofile.Resolve("codex-sol-high", "1", AdapterCodex)
+	profile, err := dispatchprofile.Resolve("codex-sol-high", "2", AdapterCodex)
 	if err != nil {
 		t.Fatal(err)
 	}

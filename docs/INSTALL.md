@@ -69,7 +69,7 @@ paimos-agentd serve --instance production \
 printf '%s' 'Implement the assigned ticket.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" \
   --project-id "$PROJECT_ID" --identity codex:worker \
-  --dispatch-profile codex-sol-high --dispatch-profile-version 1
+  --dispatch-profile codex-sol-high --dispatch-profile-version 2
 paimos-agentd status --instance production
 ```
 
@@ -126,7 +126,7 @@ otherwise `cursor-agent` on `PATH` is resolved once. Named starts require
 `--cursor-accounts` mapping opaque keys to expected email/userId; the daemon
 never copies auth files, never sets `HOME`, never passes `--api-key`, and never
 calls `login` / `authenticate` as part of ordinary start. Catalog models are
-included Composer (`composer-2.5`) and Grok (`grok-4.6` with acknowledged high)
+included Composer (`composer-2.5`) and Grok (`grok-4.7-high` with high effort)
 only.
 
 ---
@@ -282,3 +282,9 @@ integration with Claude Desktop, REST fall-back patterns), see:
 - [docs/AGENT_INTERFACE.md](AGENT_INTERFACE.md) — the comprehensive CLI guide
 - [docs/AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) — REST integration patterns
 - [docs/api-minimal.md](api-minimal.md) — REST reference
+
+Model-role resolution and instance-specific expiring policy are documented in
+[Agent integration](AGENT_INTEGRATION.md#model-roles-and-instance-policy-pai-1049).
+Run `paimos sync pull --project PAI --kind model_catalog` to seed offline
+resolution. Cursor uses flat selectors with `--trust`; the agentd CLI pin stays
+on 2026.09.02 pending verification of newer ACP model identifiers.

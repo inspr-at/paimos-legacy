@@ -1270,6 +1270,83 @@ printf '%s' 'Implement PAI-850.' | paimos-agentd start \
 paimos-agentd status --instance production
 ```
 
+### Model roles and instance policy (PAI-1049)
+
+`paimos model resolve <role>` uses the same dispatch authority as execution
+options. Catalog version `2` carries model family, tier and allowed efforts:
+Codex `gpt-6-{luna,terra,sol,astra}`, Claude aliases `haiku|sonnet|opus|fable`,
+Pi `anthropic/claude-sonnet-5` and `anthropic/claude-opus-5`, and Cursor flat
+`composer-2.5[-fast]` / `grok-4.7-{low,medium,high,xhigh}[-fast]` IDs.
+Family describes the model vendor, so Grok through Cursor is `xai`, while
+Composer is `cursor`. New resolutions of retired catalog version `1` fail
+closed; persisted snapshots remain readable and are never rewritten.
+
+Codex tiers ascend luna (fast) → terra (standard) → sol (strong) → astra
+(frontier).
+
+| Role | Tier | Effort | First Codex profile |
+| --- | --- | --- | --- |
+| scout | fast | medium | codex-luna-medium |
+| mechanical | fast | high | codex-luna-high |
+| build | standard | high | codex-terra-high |
+| build-hard | strong | xhigh | codex-sol-xhigh |
+| review-gate | frontier | xhigh | codex-astra-xhigh |
+
+The review ladder is Codex Astra → Claude Fable → Claude Opus (same rung
+fallback) → Grok through Cursor → owner. `--author-family` is required for
+`review-gate` and excludes that family across every harness. Native Grok CLI
+is not advertised: its supplied inventory lacks the current model and its
+usage balance is exhausted. Cursor provides the verified flat xAI selector;
+resolution is routing intent, not proof of installed/vendor availability or
+review approval. If that route is unavailable, record an override and resolve
+again. Owner fallback returns `owner_required` and no runnable command; the
+CLI exits unsuccessfully. An unsupported role/harness combination fails closed.
+
+The typed `read_only` role flag is true for `review-gate`. It requires
+read-only command templates throughout the ladder: Codex `--sandbox read-only`,
+Claude `--permission-mode plan`, and Cursor `--mode ask`. Pi's template uses
+the locally documented `--tools read,grep,find,ls` allowlist when the flag is
+set; Pi is not currently a review-ladder entry. Ordinary build templates retain
+their normal permission mode. Response validation rejects missing read-only
+flags and altered command templates, including on skipped ladder entries.
+
+```bash
+paimos model resolve review-gate --author-family anthropic --json
+paimos model resolve build --harness pi
+paimos sync pull --project PAI --kind model_catalog --workspace "$PWD"
+```
+
+`GET /api/models/catalog` returns profiles, model metadata, roles and overrides;
+`GET /api/models/resolve?role=review-gate&author_family=anthropic` returns the
+chosen pin, ordered ladder, skip reasons and exact command template. `{prompt}`
+is a literal placeholder: callers must pass their task as an argv value, not
+interpolate untrusted text into a shell command. These operations never spawn.
+`paimos worker start --role build` (also scout, mechanical, build-hard and
+review-gate) resolves the model before its ordinary owned-worker start. The
+public hierarchy role remains `worker`; an explicit profile/model/effort must
+agree with the resolution. Orchestrator hierarchy behavior is unchanged.
+
+Admins replace policy using `PUT /api/models/overrides` with, for example:
+
+```json
+{"overrides":[{"profile_id":"claude-fable-xhigh","version":"2","state":"conserved","reason":"reserve remaining allowance","until":"2026-09-30T00:00:00Z"}]}
+```
+
+States `unavailable`, `conserved` and `budget-limited` all skip the exact pin
+until its RFC3339 expiry. `{"overrides":[]}` clears policy. One atomic
+`app_settings` record belongs to the serving instance's database: ppm and pma
+have independent policies. Overrides do not modify profiles or old runs.
+
+The `model_catalog` sync kind atomically caches catalog and policy below
+`.paimos/cache/instances/<instance-and-origin-namespace>/model_catalog.json`.
+Use explicit pull/check to refresh it (no instance-wide SSE publication yet).
+On transport failure, `model resolve` uses only that instance/origin's cache,
+evaluates expiry at the current time, and reports `source=cache`, `stale=true`
+and `cached_at`. Offline policy may miss new overrides; sync before a live
+gate. HTTP denials, malformed responses, corrupt caches and unsupported
+catalog versions fail closed. An owned worker still requires its live
+instance and daemon authorities; offline resolution does not grant a launch.
+
 For a typed dispatch, choose an exact `id` and `version` from the authenticated
 `GET /api/ai/execution-options?dispatch_only=1` catalog, then pass only those
 two identifiers to `start`:
@@ -1278,7 +1355,7 @@ two identifiers to `start`:
 printf '%s' 'Implement PAI-906.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" \
   --project-id "$PROJECT_ID" --identity codex:worker \
-  --dispatch-profile codex-sol-high --dispatch-profile-version 1
+  --dispatch-profile codex-sol-high --dispatch-profile-version 2
 ```
 
 The reporter resolves the profile through that existing authority before the
@@ -1338,13 +1415,18 @@ fake-native composition only and does not claim fully live Pi support.
 
 Owned Cursor ACP is a fourth adapter. It starts the pinned operator
 `cursor-agent` (`2026.09.02-c22c1a3`) with documented `acp` stdio and a
-human-selected included model (`composer-2.5` or `grok-4.6` via catalog ids
+human-selected included model (`composer-2.5` or `grok-4.7-high` via catalog ids
 `cursor-composer` / `cursor-grok`). Auto and unapproved third-party models are
 refused before spawn. After `session/new`, the adapter parses
 `models.currentModelId` and the `configOptions` model `currentValue` and stops
 before `session/prompt` if they disagree with the selected profile. Composer
 does not advertise a reasoning effort (`effort=default`); Grok high is
-acknowledged as `grok-4.6[effort=high,fast=true]`. The child uses official ACP
+requested with the flat selector `grok-4.7-high` and `--trust`. The
+CLI rejects bracket-form selectors. ACP acknowledgement is matched through
+a separate model/effort mapping and must agree with both the current model and
+the advertised model list. The 2026.09.18 ACP IDs remain unverified: unknown
+IDs fail closed, and the agentd CLI pin remains 2026.09.02 until separately
+reviewed. The child uses official ACP
 `initialize`, `session/new`, `session/prompt`, and `session/cancel` only; there
 is no PTY, private RPC, or same-turn text steer. Permission, plan, and
 question requests fail closed (reject-once / cancelled). Named Cursor accounts

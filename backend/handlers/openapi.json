@@ -130,6 +130,332 @@
       }
     },
     "schemas": {
+      "ModelDispatchProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "harness",
+          "model",
+          "effort",
+          "machine_source",
+          "account_source",
+          "workspace_mode"
+        ],
+        "description": "Exact immutable profile resolved through the execution-options authority before process spawn.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "claude",
+              "pi",
+              "cursor"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "default"
+            ]
+          },
+          "machine_source": {
+            "type": "string",
+            "enum": [
+              "authenticated_reporter"
+            ]
+          },
+          "account_source": {
+            "type": "string",
+            "enum": [
+              "local_probe"
+            ]
+          },
+          "workspace_mode": {
+            "type": "string",
+            "enum": [
+              "exclusive",
+              "shared"
+            ]
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "xai",
+              "cursor"
+            ]
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "standard",
+              "strong",
+              "frontier"
+            ]
+          }
+        }
+      },
+      "ModelRole": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "scout",
+              "mechanical",
+              "build",
+              "build-hard",
+              "review-gate"
+            ]
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "standard",
+              "strong",
+              "frontier"
+            ]
+          },
+          "effort": {
+            "type": "string"
+          },
+          "cross_family": {
+            "type": "boolean"
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "Require the harness read-only mode in command templates."
+          },
+          "ladder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "tier",
+          "effort",
+          "cross_family",
+          "read_only"
+        ]
+      },
+      "ModelOverride": {
+        "type": "object",
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "unavailable",
+              "conserved",
+              "budget-limited"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "profile_id",
+          "version",
+          "state",
+          "reason",
+          "until"
+        ]
+      },
+      "ModelRegistry": {
+        "type": "object",
+        "properties": {
+          "catalog_version": {
+            "type": "string"
+          },
+          "dispatch_profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelDispatchProfile"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "harness": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "family": {
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "anthropic",
+                    "xai",
+                    "cursor"
+                  ]
+                },
+                "tier": {
+                  "type": "string",
+                  "enum": [
+                    "fast",
+                    "standard",
+                    "strong",
+                    "frontier"
+                  ]
+                },
+                "allowed_efforts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "harness",
+                "id",
+                "family",
+                "tier",
+                "allowed_efforts"
+              ]
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelRole"
+            }
+          },
+          "overrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelOverride"
+            }
+          }
+        },
+        "required": [
+          "catalog_version",
+          "dispatch_profiles",
+          "models",
+          "roles",
+          "overrides"
+        ]
+      },
+      "ModelResolution": {
+        "type": "object",
+        "properties": {
+          "catalog_version": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ModelRole"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ModelDispatchProfile"
+          },
+          "command_template": {
+            "type": "string",
+            "description": "Exact CLI template with a literal {prompt} placeholder; resolution never runs it."
+          },
+          "ladder": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "profile_id": {
+                  "type": "string"
+                },
+                "profile": {
+                  "$ref": "#/components/schemas/ModelDispatchProfile"
+                },
+                "command_template": {
+                  "type": "string"
+                },
+                "skip_reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "selected": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "profile_id",
+                "skip_reasons",
+                "selected"
+              ]
+            }
+          },
+          "owner_required": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "instance",
+              "cache"
+            ]
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "cached_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "catalog_version",
+          "role",
+          "ladder",
+          "owner_required",
+          "source",
+          "stale"
+        ]
+      },
   "LifecycleSessionProjectionV1": {
     "type": "object",
     "additionalProperties": false,
@@ -3165,7 +3491,7 @@
 		  "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
 		  "version": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
 		  "harness": {"type": "string", "enum": ["codex", "claude", "pi", "cursor"]},
-		  "model": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+		  "model": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
 		  "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max", "default"]},
 		  "machine_source": {"type": "string", "enum": ["authenticated_reporter"]},
 		  "account_source": {"type": "string", "enum": ["local_probe"]},
@@ -4684,6 +5010,140 @@
     }
   ],
   "paths": {
+    "/api/models/catalog": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Instance model catalog, typed roles and expiring override policy",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRegistry"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Policy cannot be read or validated; fail closed"
+          }
+        }
+      }
+    },
+    "/api/models/resolve": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Resolve a model role to an exact pin and decision ladder",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "author_family",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "openai",
+                "anthropic",
+                "xai",
+                "cursor"
+              ]
+            },
+            "description": "Required for review-gate; this family is skipped across all harnesses."
+          },
+          {
+            "name": "harness",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "codex",
+                "claude",
+                "pi",
+                "cursor"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or unsupported role/combination, or no eligible non-gate route"
+          },
+          "503": {
+            "description": "Policy unavailable"
+          }
+        }
+      }
+    },
+    "/api/models/overrides": {
+      "put": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Admin: atomically replace this instance’s model overrides",
+        "description": "Each override pins a current profile/version and requires a reason and future RFC3339 expiry. An empty list clears policy. Historical run/profile records are untouched. Policies do not cross instances.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "overrides": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ModelOverride"
+                    }
+                  }
+                },
+                "required": [
+                  "overrides"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRegistry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid policy"
+          },
+          "403": {
+            "description": "Administrator required"
+          }
+        }
+      }
+    },
   "/api/projects/{id}/lifecycle/v1/runtime-health": {
     "get": {
       "tags": [
