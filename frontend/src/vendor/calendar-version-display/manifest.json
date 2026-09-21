@@ -1,6 +1,6 @@
 {
   "repository": "inspr-at/inspr",
-  "revision": "3ef6b03e3a347ff095123a16647f0b32f5e13288",
+  "revision": "317f872bc061576fc0b45d274d3a22f69bcd4c8a",
   "expectedConfigSha256": "7843f3515ce329277d2d576000bd60ac410d725b241d502a9a3fecb2533d956d",
   "schema": "inspr.calendar-version-display.v2",
   "mode": "build-time-only",
@@ -42,6 +42,12 @@
       "outputPath": "auto-animate-license.js",
       "sha256": "57677685789ebe6233671cef7f78b37f74942936b0d42ef2168d6a2195acf606",
       "size": 1100
+    },
+    {
+      "sourcePath": "packages/versioning/config/schemes.json",
+      "outputPath": "schemes.json",
+      "sha256": "4c903f9f4dc63ae141f48131b6e5150d86e8381d50ecde89782cf77ad2f4a5b7",
+      "size": 169
     },
     {
       "sourcePath": null,

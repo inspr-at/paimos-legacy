@@ -12,6 +12,7 @@ const files = [
   "manifest.json",
   "package.json",
   "presentation.js",
+  "schemes.json",
   "version-interaction.js",
   "version.js",
 ];
