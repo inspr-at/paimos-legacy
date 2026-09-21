@@ -20,7 +20,7 @@ const source = fileURLToPath(
 test("accepts the pinned complete closure without network or a doctrine checkout", () => {
   assert.equal(
     verifyCalendarVersionBundle().revision,
-    "3ef6b03e3a347ff095123a16647f0b32f5e13288",
+    "317f872bc061576fc0b45d274d3a22f69bcd4c8a",
   );
 });
 
@@ -31,6 +31,7 @@ for (const [name, mutate] of [
   ],
   ["changed config", (dir) => writeFileSync(join(dir, "display.json"), "{}")],
   ["missing license", (dir) => rmSync(join(dir, "auto-animate-license.js"))],
+  ["missing schemes", (dir) => rmSync(join(dir, "schemes.json"))],
   [
     "extra payload",
     (dir) => writeFileSync(join(dir, "unexpected.js"), "// extra"),

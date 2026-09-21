@@ -1,0 +1,8 @@
+{
+  "schema": "inspr.version-scheme-labels.v1",
+  "labels": {
+    "inspr-calendar-v2": "INSPR-VER2",
+    "inspr-calendar-v1": "INSPR-VER1",
+    "legacy": "Legacy"
+  }
+}
