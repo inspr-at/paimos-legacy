@@ -162,6 +162,7 @@ Get started:
 	// PAI-331: generic sync verbs (init/pull/watch/check) over the
 	// resource registry. PAI-341 will register additional kinds.
 	cmd.AddCommand(syncCmd())
+	cmd.AddCommand(modelCmd())
 	cmd.AddCommand(runCmd())      // PAI-799: append-only progress reporting seam
 	cmd.AddCommand(runAgentCmd()) // PAI-608: local "Implement this" runner
 	cmd.AddCommand(tellCmd())     // PAI-815: durable name-addressed A2A messages

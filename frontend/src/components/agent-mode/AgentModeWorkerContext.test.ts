@@ -19,7 +19,7 @@ const scoutWorker = {
   agentName: 'worker-907',
   machineId: 'vienna-builder-1',
   workspace: { kind: 'git_worktree', mode: 'exclusive' },
-  dispatch: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+  dispatch: { model: 'gpt-6-sol', effort: 'xhigh' },
   accountLabel: 'chatgpt',
   managementMode: 'managed',
   runtimeProvenanceTrust: 'managed_reporter',
@@ -94,7 +94,7 @@ describe('AgentModeWorkerContext', () => {
     expect(loader).toHaveBeenCalledWith(6, 907)
     const text = mounted.el.textContent ?? ''
     expect(text).toContain('Git worktree · Exclusive')
-    expect(text).toContain('gpt-5.6-sol · Extra high')
+    expect(text).toContain('gpt-6-sol · Extra high')
     expect(text).toContain('ChatGPT')
     expect(text).toContain('Managed reporter')
     expect(text).toContain('Investigation evidence')
@@ -119,7 +119,7 @@ describe('AgentModeWorkerContext', () => {
     const text = mounted.el.textContent ?? ''
     expect(text).toContain('Maschine')
     expect(text).toContain('Git-Worktree · Exklusiv')
-    expect(text).toContain('gpt-5.6-sol · Sehr hoch')
+    expect(text).toContain('gpt-6-sol · Sehr hoch')
     expect(text).toContain('Verwalteter Reporter')
     expect(text).toContain('Untersuchungsevidenz')
     expect(text).toContain(

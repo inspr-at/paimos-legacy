@@ -167,6 +167,7 @@ func buildDefaultSyncRegistry() (*sync.Registry, error) {
 	r.Register(sync.NewExternalSystemResource())
 	r.Register(sync.NewRelatedProjectResource())
 	r.Register(sync.NewGuidelineResource())
+	r.Register(sync.NewModelCatalogResource())
 	return r, nil
 }
 

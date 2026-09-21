@@ -833,6 +833,10 @@ valid lease-authenticated reporter heartbeat. Only those rows may expose
 snapshot, and the closed non-secret `account_label`. Trusted rows may also
 include an optional opaque `account_key` for named Codex selection; it is
 omitted when empty and is never a path, env, executable, or credential.
+The dispatch snapshot retains its eight fields; registry `family` and `tier`
+metadata is not added to fleet v2. Model IDs preserve Pi's `provider/id`
+syntax, accepted by both OpenAPI and the standalone orchestration schema;
+historical profile pins and model values remain unchanged.
 Unmanaged, pre-heartbeat,
 and legacy-unverified rows are `untrusted`: machine/workspace/dispatch are null
 and account is unknown even if their registration supplied values; those axes
@@ -1274,3 +1278,18 @@ episode produces an existing-ledger attention item, with a one-minute publish
 throttle; recovery resolves that source. The typed health row persists even if
 no attention receiver is configured. All responses are `private, no-store`;
 wrong, missing, foreign and revoked authority share `consumer_unavailable`.
+
+### Model registry (PAI-1049)
+
+- `GET /api/models/catalog`: authenticated dispatch profiles, allowed model
+  efforts, family/tier metadata, typed roles, and this instance's overrides.
+- `GET /api/models/resolve?role=<role>[&author_family=<family>][&harness=<harness>]`:
+  pinned profile, exact CLI command template, ordered ladder and skip reasons.
+  Review gates require the author's family; owner fallback has no profile.
+- `PUT /api/models/overrides` (admin): atomically replace
+  `{"overrides":[{"profile_id":"claude-fable-xhigh","version":"2","state":"conserved","reason":"reserve allowance","until":"2026-09-30T00:00:00Z"}]}`.
+  States are unavailable, conserved or budget-limited; expiry must be future
+  RFC3339. Empty overrides clear policy. Scope is the serving instance database.
+
+See [model roles](AGENT_INTEGRATION.md#model-roles-and-instance-policy-pai-1049)
+for CLI/cache behavior. Resolution does not run a model or open a review gate.

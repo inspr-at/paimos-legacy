@@ -130,7 +130,7 @@ func TestClaudeInitModelEvidenceIsBoundedAndTruthful(t *testing.T) {
 	if err != nil {
 		t.Skip("node runtime unavailable")
 	}
-	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "2", AdapterClaude)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestClaudeSupervisorReturnsUnverifiedMissingModelEvidence(t *testing.T) {
 		t.Skip("node runtime unavailable")
 	}
 	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "missing_model")
-	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "2", AdapterClaude)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 		t.Skip("node runtime unavailable")
 	}
 	adapter := newTestClaudeAdapter(t, node)
-	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "2", AdapterClaude)
 	if err != nil {
 		t.Fatal(err)
 	}

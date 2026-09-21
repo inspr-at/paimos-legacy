@@ -15,19 +15,19 @@ func TestBindingMatchesOnlyExactCurrentConversationCapability(t *testing.T) {
 		MachineID: "owned-host", SchemaVersion: lifecycleintents.AccountLifecycleSchemaV4,
 		AccountScopes: []lifecycleintents.AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "acct-main", Label: "Main"}},
-			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "2"}}, AttachmentRevision: 7,
 			AccountAvailability: lifecycleintents.AccountAvailabilityAvailable,
 		}},
 		Conversation: &lifecycleintents.ConversationCapability{
 			SchemaVersion: lifecycleintents.ConversationSchemaV1, AccountKey: "acct-main", AttachmentRevision: 7,
-			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2",
 			ExecutionPolicyID: ExecutionPolicyID, MaxOutputBytes: MaximumOutputBytes, MaxEvents: MaximumEvents,
 		},
 	}
 	binding := Binding{
 		RuntimeID: runtime.ID, RuntimeGeneration: runtime.Generation, HostID: runtime.MachineID, AccountLabel: "chatgpt",
 		AccountKey: "acct-main", AttachmentRevision: 7, DispatchProfileID: "codex-sol-high",
-		DispatchProfileVersion: "1", ExecutionPolicyID: ExecutionPolicyID,
+		DispatchProfileVersion: "2", ExecutionPolicyID: ExecutionPolicyID,
 		Limits: Limits{MaxOutputBytes: MaximumOutputBytes, MaxEvents: MaximumEvents},
 	}
 	if !bindingMatchesRuntime(binding, runtime) {

@@ -91,7 +91,7 @@ func registerFleetSession(t *testing.T, projectID int64, name, role string, pare
 		ProjectID: projectID, AgentName: name, Harness: "codex", Host: "test-host", SessionRef: "ref-" + name,
 		WorkerLease: fleetTestWorkerLease, ManagementMode: managedharness.ManagementManaged, Role: role,
 		ParentSessionID: parent, TicketID: ticket, WorkShape: shape, SteerMode: managedharness.SteerOwned,
-		Workspace: workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt",
+		Workspace: workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", AccountLabel: "chatgpt",
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func registerFleetUnmanaged(t *testing.T, projectID int64, name string) models.H
 		Role: managedharness.RoleWorker, SteerMode: managedharness.SteerNone,
 		Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/untrusted/workspace",
 			Identity: fmt.Sprintf("%x", sha256.Sum256([]byte("untrusted:"+name))), Kind: "directory", Mode: "exclusive"},
-		DispatchProfileID: "claude-opus-xhigh", DispatchProfileVersion: "1", AccountLabel: "claude_ai_max",
+		DispatchProfileID: "claude-opus-xhigh", DispatchProfileVersion: "2", AccountLabel: "claude_ai_max",
 		Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestFleetProjectionBoundedSharedAndTruthful(t *testing.T) {
 		portfolio.Workers[0].RuntimeProvenanceTrust != RuntimeTrustManagedReporter || portfolio.Workers[0].WorkspaceProvenance == nil ||
 		portfolio.Workers[0].WorkspaceProvenance.Kind != "directory" || portfolio.Workers[0].WorkspaceProvenance.Mode != "exclusive" ||
 		portfolio.Workers[0].DispatchProfile == nil || portfolio.Workers[0].DispatchProfile.ID != "codex-sol-high" ||
-		portfolio.Workers[0].DispatchProfile.Model != "gpt-5.6-sol" || portfolio.Workers[0].DispatchProfile.Effort != "high" ||
+		portfolio.Workers[0].DispatchProfile.Model != "gpt-6-sol" || portfolio.Workers[0].DispatchProfile.Effort != "high" ||
 		portfolio.Workers[0].AccountLabel != "chatgpt" {
 		t.Fatalf("truth projection=%+v project=%+v", portfolio.Workers[0], portfolio.Projects[0])
 	}

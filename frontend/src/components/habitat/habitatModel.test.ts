@@ -21,6 +21,20 @@ function stoppedWorker() {
 }
 
 describe('Habitat truth and setup boundaries', () => {
+  it('accepts current catalog metadata, Pi selectors and Cursor default effort', () => {
+    const base = habitatFixture().fleet.workers[0].dispatch_profile!
+    const profiles = [
+      { ...base, id: 'codex-astra-xhigh', version: '2', model: 'gpt-6-astra', effort: 'xhigh', family: 'openai', tier: 'frontier' },
+      { ...base, id: 'pi-anthropic-sonnet-high', version: '2', harness: 'pi', model: 'anthropic/claude-sonnet-5', effort: 'high', family: 'anthropic', tier: 'standard' },
+      { ...base, id: 'cursor-composer', version: '2', harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor', tier: 'standard' },
+      { ...base, id: 'cursor-grok-xhigh', version: '2', harness: 'cursor', model: 'grok-4.7-xhigh', effort: 'xhigh', family: 'xai', tier: 'frontier' },
+    ]
+    expect(parseDispatchProfiles({ dispatch_profiles: profiles })).toEqual(profiles)
+    for (const change of [{ family: 'unknown' }, { tier: 'unknown' }, { effort: 'default' }, { unexpected: true }]) {
+      expect(() => parseDispatchProfiles({ dispatch_profiles: [{ ...profiles[0], ...change }] })).toThrow()
+    }
+  })
+
   it('keeps an explicitly stopped generation quiet without granting live controls', () => {
     const worker = stoppedWorker()
     expect(workerNeedsAttention(worker)).toBe(false)

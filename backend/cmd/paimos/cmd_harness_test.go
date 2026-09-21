@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 func TestHarnessRegisterOmitsUnsetHierarchyFieldsForOldServer(t *testing.T) {
@@ -69,13 +71,19 @@ func TestHarnessRegisterSendsTypedExecutionProvenance(t *testing.T) {
 		"--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--steer-mode", "owned", "--capability", "inbox,status,steer,interrupt,stop",
 		"--workspace", "/workspace/paimos", "--git-top-level", "/workspace/paimos", "--git-branch", "feat/pai-906-dispatch-profiles",
 		"--workspace-identity", identity, "--workspace-kind", "git_worktree", "--workspace-mode", "exclusive",
-		"--dispatch-profile", "codex-sol-high", "--dispatch-profile-version", "1", "--account-label", "chatgpt")
+		"--dispatch-profile", "codex-sol-high", "--dispatch-profile-version", dispatchprofile.CatalogVersion, "--account-label", "chatgpt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, field := range []string{"workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
 		if len(posted[field]) == 0 {
 			t.Fatalf("missing %s in payload: %v", field, posted)
+		}
+	}
+	for field, want := range map[string]string{"dispatch_profile_id": "codex-sol-high", "dispatch_profile_version": dispatchprofile.CatalogVersion} {
+		var got string
+		if err := json.Unmarshal(posted[field], &got); err != nil || got != want {
+			t.Fatalf("%s = %s, want %q", field, posted[field], want)
 		}
 	}
 }

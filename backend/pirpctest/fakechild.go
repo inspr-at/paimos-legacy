@@ -410,7 +410,7 @@ func emitGetState(id, sessionID string, streaming bool, pending int) {
 }
 
 func launchIntent() (provider, model, thinking string) {
-	provider, model, thinking = "anthropic", "claude-sonnet-4-20250514", "high"
+	provider, model, thinking = "anthropic", "claude-sonnet-5", "high"
 	raw := strings.TrimSpace(os.Getenv(ArgvEnv))
 	if raw == "" {
 		return provider, model, thinking

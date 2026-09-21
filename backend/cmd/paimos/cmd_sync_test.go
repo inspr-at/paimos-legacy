@@ -13,6 +13,8 @@ package main
 // disconnect to assert termination.
 
 import (
+	"encoding/json"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +30,8 @@ func startFakeSyncAPI(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/api/models/catalog":
+			_ = json.NewEncoder(w).Encode(dispatchprofile.NewRegistry(nil))
 		case "/api/projects":
 			_, _ = w.Write([]byte(`[{"id":7,"key":"ACME","name":"Acme Widgets"}]`))
 		case "/api/projects/7/agents":
@@ -240,6 +244,8 @@ func TestSyncInit_PullsKnowledgePlaneEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/api/models/catalog":
+			_ = json.NewEncoder(w).Encode(dispatchprofile.NewRegistry(nil))
 		case "/api/projects":
 			_, _ = w.Write([]byte(`[{"id":7,"key":"ACME","name":"Acme"}]`))
 		case "/api/projects/7/agents":

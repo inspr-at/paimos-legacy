@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/handlers"
 )
 
@@ -62,6 +64,21 @@ func TestOrchestrationSchemaClosedAndFleetV2Unchanged(t *testing.T) {
 			t.Fatalf("standalone/OpenAPI contract mismatch: %s", name)
 		}
 	}
+	dispatch := definitions["HarnessDispatchProfile"].(map[string]any)["properties"].(map[string]any)
+	if len(dispatch) != 8 || dispatch["family"] != nil || dispatch["tier"] != nil {
+		t.Fatal("model registry metadata changed the fleet dispatch contract")
+	}
+	modelPattern, err := regexp.Compile(dispatch["model"].(map[string]any)["pattern"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Current catalog fixtures include Pi provider/id models; historical
+	// snapshots below must remain valid without rewriting their pinned values.
+	for _, profile := range dispatchprofile.List() {
+		if !modelPattern.MatchString(profile.Model) {
+			t.Fatalf("fleet schema rejects current model %q", profile.Model)
+		}
+	}
 	root := definitions["OrchestrationSnapshotV1"].(map[string]any)["properties"].(map[string]any)
 	if root["schema_version"].(map[string]any)["const"] != float64(1) || root["fleet"].(map[string]any)["$ref"] != "#/$defs/WorkerFleetSnapshotV2" || root["project_coordination"].(map[string]any)["maxItems"] != float64(100) {
 		t.Fatal("version or bound drift")
@@ -78,6 +95,11 @@ func TestOrchestrationSchemaClosedAndFleetV2Unchanged(t *testing.T) {
 	}
 	if snapshot.SchemaVersion != 1 || snapshot.Fleet.SchemaVersion != 2 || snapshot.Fleet.Workers == nil {
 		t.Fatal("fixture schema mismatch")
+	}
+	for _, worker := range snapshot.Fleet.Workers {
+		if profile := worker.DispatchProfile; profile != nil && !modelPattern.MatchString(profile.Model) {
+			t.Fatalf("fleet schema rejects historical model %q", profile.Model)
+		}
 	}
 	for _, path := range []string{"/api/agent-mode/orchestration/v1", "/api/agent-mode/projects/{projectID}/orchestration/v1"} {
 		operation := api["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)

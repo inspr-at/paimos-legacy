@@ -289,7 +289,7 @@ identities:
       {"key": "coordinator", "label": "Coordinator"},
       {"key": "personal", "label": "Personal"}
     ],
-    "profiles": [{"id": "codex-sol-high", "version": "1"}],
+    "profiles": [{"id": "codex-sol-high", "version": "2"}],
     "workspaces": [{
       "handle": "11111111-1111-4111-8111-111111111111",
       "identity": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -557,7 +557,7 @@ printf '%s' 'Work only on the assigned ticket.' |
   paimos-agentd start --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
     --adapter pi --workspace "$PWD" --project-id "$PROJECT_ID" \
     --identity pi:worker --account-key operator-pi \
-    --dispatch-profile pi-anthropic-sonnet-high --dispatch-profile-version 1
+    --dispatch-profile pi-anthropic-sonnet-high --dispatch-profile-version 2
 ```
 
 Owned Cursor is a separate adapter. It requires an operator-authenticated
@@ -570,16 +570,19 @@ must be `{status:"authenticated",isAuthenticated:true,userInfo:{email:...}}`
 and match the selected expected identity before spawn. `account_label=cursor_context`
 means that mapping was verified; it is not a subscription tier. Catalog models
 are exact included IDs (`composer-2.5` with unsupported/default effort, and
-`grok-4.6` with acknowledged high as `grok-4.6[effort=high,fast=true]`). Auto
+`grok-4.7-high` with high effort). Auto
 and paid fallbacks are refused. Composer and Grok are Cursor harness models,
-distinct from unmanaged Grok Bot/Build.
+distinct from unmanaged Grok Bot/Build. CLI selectors are flat and include
+`--trust`; ACP identifiers are separate mapping data and unknown IDs fail
+closed. The newer CLI/ACP mapping still needs live verification before changing
+the existing agentd version pin.
 
 ```bash
 printf '%s' 'Work only on the assigned ticket.' |
   paimos-agentd start --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
     --adapter cursor --workspace "$PWD" --project-id "$PROJECT_ID" \
     --identity cursor:worker --account-key operator-cursor \
-    --dispatch-profile cursor-composer --dispatch-profile-version 1
+    --dispatch-profile cursor-composer --dispatch-profile-version 2
 ```
 
 An owned child may also carry explicit durable hierarchy and ticket fields;

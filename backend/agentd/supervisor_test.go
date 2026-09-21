@@ -130,7 +130,7 @@ func (a *dispatchAdapter) Start(_ context.Context, request StartRequest, observe
 }
 
 func TestSupervisorResolvesAndRecordsExactDispatchProfileBeforeSpawn(t *testing.T) {
-	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "2", AdapterCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +157,12 @@ func TestSupervisorResolvesAndRecordsExactDispatchProfileBeforeSpawn(t *testing.
 }
 
 func TestSupervisorRejectsProfileDriftAndWorkspaceCollisionBeforeSpawn(t *testing.T) {
-	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "2", AdapterCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
 	drifted := profile
-	drifted.Model = "gpt-5.6-terra"
+	drifted.Model = "gpt-6-terra"
 	adapter := &dispatchAdapter{label: "private output must collapse to unknown"}
 	inspector := func(_ context.Context, path, mode string) (WorkspaceProvenance, error) {
 		return WorkspaceProvenance{CanonicalPath: path, Identity: strings.Repeat("b", 64), Kind: WorkspaceDirectory, Mode: mode}, nil

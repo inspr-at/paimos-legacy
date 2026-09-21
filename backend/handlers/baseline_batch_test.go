@@ -363,7 +363,7 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 	invented := map[string]any{
 		"worker_name": "codex", "runtime_id": uuid.NewString(), "runtime_generation": uuid.NewString(),
 		"account_label": "chatgpt", "account_key": "coordinator", "profile_id": "codex-sol-high",
-		"profile_version": "1", "workspace_handle": uuid.NewString(),
+		"profile_version": "2", "workspace_handle": uuid.NewString(),
 	}
 	if resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", blockedProject, draft.ID), map[string]any{
 		"execution_mode": "automatic", "worker": invented, "selected_requirement_refs": []string{"req.login"},
@@ -375,13 +375,13 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 		"generation": uuid.NewString(), "host": "fixture-host", "schema_version": 2,
 		"account_label": "chatgpt",
 		"accounts":      []map[string]string{{"key": "coordinator", "label": "Coordinator"}},
-		"profiles":      []map[string]string{{"id": "codex-sol-high", "version": "1"}},
+		"profiles":      []map[string]string{{"id": "codex-sol-high", "version": "2"}},
 		"workspaces":    []map[string]any{{"handle": workspace, "identity": strings.Repeat("a", 64), "label": "Work"}},
 	})
 	worker := map[string]any{
 		"worker_name": "codex", "runtime_id": runtimeID, "runtime_generation": runtimeGen,
 		"account_label": "chatgpt", "account_key": "coordinator", "profile_id": "codex-sol-high",
-		"profile_version": "1", "workspace_handle": workspace,
+		"profile_version": "2", "workspace_handle": workspace,
 	}
 	rev := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", blockedProject, draft.ID), map[string]any{
 		"execution_mode": "automatic", "worker": worker, "selected_requirement_refs": []string{"req.login"},

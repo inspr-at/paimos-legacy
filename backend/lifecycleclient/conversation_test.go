@@ -552,7 +552,7 @@ func testConversationClaim(callID, execution, generation, deadline string) Conve
 	return ConversationClaim{
 		Call:                ConversationCall{SchemaVersion: 1, CallID: callID, RequestID: "conversation-phase", State: "claimed", DeadlineAt: deadline},
 		ExecutionGeneration: execution, RuntimeGeneration: generation, AccountKey: "conversation-account", AttachmentRevision: 4,
-		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", ExecutionPolicyID: ConversationPolicyV1,
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", ExecutionPolicyID: ConversationPolicyV1,
 		System: "system input", Messages: []ConversationMessage{{Role: "user", Content: "hello"}}, Purpose: "chat",
 		Limits: ConversationLimits{MaxOutputBytes: conversationMaxOutput, MaxEvents: conversationMaxEvents},
 	}

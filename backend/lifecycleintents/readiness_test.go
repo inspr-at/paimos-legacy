@@ -17,7 +17,7 @@ func (f *fixture) readinessRequest() Request {
 		RequestKey: uuid.NewString(), Operation: "readiness", RuntimeID: f.runtime.ID,
 		RuntimeGeneration: f.runtime.Generation, AccountLabel: f.runtime.AccountLabel, TTLSeconds: 300,
 		WorkspaceHandle: f.runtime.Workspaces[0].Handle, DispatchProfileID: "codex-sol-high",
-		DispatchProfileVersion: "1", BaselineDigest: fixtureBaseline,
+		DispatchProfileVersion: "2", BaselineDigest: fixtureBaseline,
 	}
 }
 
@@ -51,7 +51,7 @@ func (f *fixture) completeReadiness(t *testing.T, report *ReadinessReport) error
 func (f *fixture) target() ReadinessTarget {
 	return ReadinessTarget{
 		RuntimeID: f.runtime.ID, RuntimeGeneration: f.runtime.Generation, AccountLabel: f.runtime.AccountLabel,
-		ProfileID: "codex-sol-high", ProfileVersion: "1", WorkspaceHandle: f.runtime.Workspaces[0].Handle,
+		ProfileID: "codex-sol-high", ProfileVersion: "2", WorkspaceHandle: f.runtime.Workspaces[0].Handle,
 		BaselineDigest: fixtureBaseline,
 	}
 }

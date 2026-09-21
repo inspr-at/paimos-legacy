@@ -132,7 +132,7 @@ func TestAIExecutionOptionsIsMounted(t *testing.T) {
 		t.Fatalf("dispatch profiles len=%d", len(body.DispatchProfiles))
 	}
 	for _, profile := range body.DispatchProfiles {
-		if profile.ID == "" || profile.Version != "1" || profile.Harness == "" || profile.MachineSource != "authenticated_reporter" || profile.AccountSource != "local_probe" {
+		if profile.ID == "" || profile.Version != "2" || profile.Harness == "" || profile.MachineSource != "authenticated_reporter" || profile.AccountSource != "local_probe" {
 			t.Fatalf("unsafe dispatch profile: %#v", profile)
 		}
 	}

@@ -74,14 +74,14 @@ func readinessRunnerFixture() (lifecycleintents.Runtime, *fixtureAuthority, *fix
 	baseline := "sha256:" + strings.Repeat("1", 64)
 	workspace := uuid.NewString()
 	a.in.Request = lifecycleintents.Request{RequestKey: uuid.NewString(), Operation: "readiness", RuntimeID: r.ID, RuntimeGeneration: r.Generation,
-		AccountLabel: "chatgpt", TTLSeconds: 300, WorkspaceHandle: workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", BaselineDigest: baseline}
+		AccountLabel: "chatgpt", TTLSeconds: 300, WorkspaceHandle: workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "2", BaselineDigest: baseline}
 	now := time.Now().UTC()
 	checks := []lifecycleintents.ReadinessCheck{}
 	for _, id := range lifecycleintents.RequiredReadinessChecks {
 		checks = append(checks, lifecycleintents.ReadinessCheck{ID: id, Status: "pass", Reason: "verified"})
 	}
 	a.receipt = &lifecycleintents.ReadinessObservation{ContractVersion: lifecycleintents.ReadinessContractVersion, IntentID: a.in.ID, ProjectID: r.ProjectID,
-		RuntimeID: r.ID, RuntimeGeneration: r.Generation, AccountLabel: "chatgpt", ProfileID: "codex-sol-high", ProfileVersion: "1", WorkspaceHandle: workspace,
+		RuntimeID: r.ID, RuntimeGeneration: r.Generation, AccountLabel: "chatgpt", ProfileID: "codex-sol-high", ProfileVersion: "2", WorkspaceHandle: workspace,
 		WorkspaceIdentity: strings.Repeat("2", 64), WorkspaceMode: "exclusive", BaselineDigest: baseline, HostKind: "macos-home-manager", Status: "ready", NextAction: "none",
 		ObservedAt: now.Format(time.RFC3339Nano), ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano), Checks: checks}
 	e := &fixtureExecutor{readiness: &lifecycleintents.ReadinessReport{ContractVersion: lifecycleintents.ReadinessContractVersion, Status: "ready", TTLSeconds: 300,

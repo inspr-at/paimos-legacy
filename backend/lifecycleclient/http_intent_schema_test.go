@@ -41,7 +41,7 @@ func namedAccountIntent(runtime, generation string, schema int, accountKey strin
 			AccountKey:             accountKey,
 			AgentName:              "fixture",
 			DispatchProfileID:      "codex-sol-high",
-			DispatchProfileVersion: "1",
+			DispatchProfileVersion: "2",
 		},
 	}
 }

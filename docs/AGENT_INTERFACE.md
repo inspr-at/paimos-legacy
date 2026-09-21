@@ -739,14 +739,18 @@ Start the instance coordinator with project/agent keys and an immutable profile:
 
 ```sh
 paimos --instance my-instance orchestrator start --project ACME26 --agent ops \
-  --profile codex-sol-high@1 --workspace /path/to/clean/coordinator-worktree \
+  --profile codex-sol-high@2 --workspace /path/to/clean/coordinator-worktree \
   --idempotency-key coordinator-first-start
 
 paimos --instance my-instance worker start --project ACME26 --agent builder \
   --ticket ACME26-42 --work-shape ship --parent codex:ops \
-  --profile codex-sol-high@1 --workspace /path/to/clean/worker-worktree \
+  --profile codex-sol-high@2 --workspace /path/to/clean/worker-worktree \
   --idempotency-key worker-acme26-42
 ```
+
+Workers may also use `--role build` (or `scout`, `mechanical`, `build-hard`,
+`review-gate`) to resolve a model from instance policy; `review-gate` requires
+`--author-family`. See [model roles and offline cache](AGENT_INTEGRATION.md#model-roles-and-instance-policy-pai-1049).
 
 The named instance must match the enforced deployment identity, or supply
 `--expect-deployment-instance`. The coordinator command reads the instance
