@@ -73,7 +73,10 @@ func (m *ModelCatalogResource) Sync(ctx context.Context, c SyncClient, _ int64, 
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(root, m.LocalPath(identity.Namespace, "catalog"))
+	path, err := joinWorkspacePath(root, m.LocalPath(identity.Namespace, "catalog"))
+	if err != nil {
+		return err
+	}
 	// Refresh the timestamp even when the immutable catalog/policy is unchanged.
 	if err = WriteFileAtomic(path, body); err != nil {
 		return err
@@ -89,7 +92,11 @@ func ReadModelCatalogCache(c SyncClient, root string) (ModelCatalogCache, error)
 	if err != nil {
 		return cache, err
 	}
-	path := filepath.Join(root, NewModelCatalogResource().LocalPath(identity.Namespace, "catalog"))
+	path, err := joinWorkspacePath(root, NewModelCatalogResource().LocalPath(identity.Namespace, "catalog"))
+	if err != nil {
+		return cache, err
+	}
+	// #nosec G304 -- target is contained in workspaceRoot by joinWorkspacePath.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return cache, err
@@ -121,7 +128,11 @@ func (m *ModelCatalogResource) Check(ctx context.Context, c SyncClient, _ int64,
 	if err = registry.Validate(); err != nil {
 		return nil, err
 	}
-	row := CheckRecord{Kind: m.Kind(), Name: "catalog", Path: filepath.Join(root, m.LocalPath(identity.Namespace, "catalog")), Rev: registry.Version, State: "diff"}
+	path, err := joinWorkspacePath(root, m.LocalPath(identity.Namespace, "catalog"))
+	if err != nil {
+		return nil, err
+	}
+	row := CheckRecord{Kind: m.Kind(), Name: "catalog", Path: path, Rev: registry.Version, State: "diff"}
 	cached, err := ReadModelCatalogCache(c, root)
 	if os.IsNotExist(err) {
 		row.State = "missing_local"
