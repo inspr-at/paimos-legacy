@@ -104,7 +104,15 @@ func (e *nativeMessageExecutor) run(done <-chan struct{}, id string, raw []byte,
 		return
 	}
 	go func() {
-		defer func() { <-e.slot }()
+		var receipt *NativeMessageReceipt
+		defer func() {
+			// The child can issue its next call as soon as the reply is visible.
+			// Release admission before publishing either a send or gate result.
+			<-e.slot
+			if receipt != nil {
+				reply(*receipt)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		go func() {
@@ -121,11 +129,12 @@ func (e *nativeMessageExecutor) run(done <-chan struct{}, id string, raw []byte,
 		}
 		for _, allowed := range gates {
 			if !allowed(ctx) {
-				reply(NativeMessageReceipt{Error: "sender_unavailable"})
+				receipt = &NativeMessageReceipt{Error: "sender_unavailable"}
 				return
 			}
 		}
-		reply(e.send(ctx, id, message))
+		result := e.send(ctx, id, message)
+		receipt = &result
 	}()
 }
 

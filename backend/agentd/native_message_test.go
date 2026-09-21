@@ -58,3 +58,45 @@ func TestNativeMessageExecutorBoundsAndCancels(t *testing.T) {
 		t.Fatal("send survived child shutdown")
 	}
 }
+
+func TestNativeMessageExecutorReleasesSlotBeforeReply(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed bool
+		first   NativeMessageReceipt
+	}{
+		{"delivered", true, NativeMessageReceipt{Delivered: true}},
+		{"send_failed", true, NativeMessageReceipt{Error: "send_failed"}},
+		{"gate_rejected", false, NativeMessageReceipt{Error: "sender_unavailable"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delivered := NativeMessageReceipt{Delivered: true}
+			e := newNativeMessageExecutor(func(_ context.Context, id string, _ NativeMessage) NativeMessageReceipt {
+				if id == "first" {
+					return tc.first
+				}
+				return delivered
+			})
+			done := make(chan struct{})
+			defer close(done)
+			results := make(chan NativeMessageReceipt, 2)
+			body := []byte(`{"to":"claude:peer","body":"status"}`)
+			e.run(done, "first", body, func(receipt NativeMessageReceipt) {
+				results <- receipt
+				// The child can send its next call as soon as it sees a reply.
+				// Start it inside the callback to force that ordering.
+				e.run(done, "second", body, func(receipt NativeMessageReceipt) { results <- receipt })
+			}, func(context.Context) bool { return tc.allowed })
+			for i, want := range []NativeMessageReceipt{tc.first, delivered} {
+				select {
+				case got := <-results:
+					if got != want {
+						t.Fatalf("reply %d = %+v, want %+v", i+1, got, want)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("missing reply %d", i+1)
+				}
+			}
+		})
+	}
+}

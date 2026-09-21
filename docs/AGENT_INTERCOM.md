@@ -74,8 +74,10 @@ newer than two minutes may send. Receiver allowlists, reply hops, rate limits,
 secret detection, and human action holds remain ledger decisions. This tool
 sends ordinary queued messages; it does not interrupt the recipient.
 
-Each child can have one send in flight. All native replies use a bounded writer
-queue so a rejected call cannot block the vendor output reader. Initial sends
+Each child can have one send in flight. The send slot is released before its
+result is queued, so a child can issue its next call immediately after a reply.
+All native replies use a bounded writer queue so a rejected call cannot block
+the vendor output reader. Initial sends
 wait within their existing deadline for owned startup, registration, and the
 first successful heartbeat. Native idempotency keys are scoped to the worker
 generation. Tool arguments travel transiently over
