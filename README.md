@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <code>v260919160247.0.0</code> · <code>AGPL-3.0-only</code> ·
+  <code>v260921101051.0.0</code> · <code>AGPL-3.0-only</code> ·
   <code>Go + Vue + SQLite</code>
 </p>
 

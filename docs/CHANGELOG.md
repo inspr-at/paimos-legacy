@@ -9,7 +9,7 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
-## [Unreleased]
+## [260921101051.0.0] — 2026-09-21
 
 ### Added
 
