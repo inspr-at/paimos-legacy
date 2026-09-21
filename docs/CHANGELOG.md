@@ -13,16 +13,16 @@ coordinate, from the first entry below that form).
 
 ### Added
 
-- Add the `AUTH_PASSWORD_LOGIN=enabled|disabled` operator switch so an instance can authenticate only through its configured OIDC provider. The default stays `enabled`, leaving existing deployments unchanged (PAI-1044).
+- Add the `AUTH_PASSWORD_LOGIN=enabled|disabled` operator switch so an instance can authenticate only through its configured OIDC provider. Password login remains enabled by default (PAI-1044).
 
 ### Security
 
-- With `AUTH_PASSWORD_LOGIN=disabled`, every password-credential path fails closed in the handlers — password login, pending password-TOTP challenges, password reset issuance and redemption, dev login, `ChangePassword` and `TOTPDisable` — returning the same generic error as a wrong password. API-key authentication stays available as the break-glass path (PAI-1044).
+- With `AUTH_PASSWORD_LOGIN=disabled`, the handlers refuse every password-credential path: password login (answered with the same error as a wrong password), pending password-TOTP challenges, dev login, `ChangePassword` and `TOTPDisable`, and password-reset tokens are neither issued nor redeemed. API-key authentication stays available as the break-glass path (PAI-1044).
 - Refuse to start with password login disabled unless an active user has an OIDC-matchable email or a usable recovery API key exists, and require an HTTPS issuer unless the host is loopback (PAI-1044).
-- Clear `must_change_password` when a user signs in through OIDC, so invited users are not trapped behind a password change they cannot make (PAI-1044).
 
 ### Changed
 
+- Clear `must_change_password` whenever a user signs in through OIDC, on every deployment regardless of `AUTH_PASSWORD_LOGIN`, so invited users are not trapped behind a password change they cannot make (PAI-1044).
 - Re-vendor the INSPR calendar-version presentation bundle at inspr `317f872`, adding `schemes.json`; all existing payloads are byte-identical (PAI-1045).
 - Bump the doctrine pin to inspr-modules `v260921084702.0.0` and wire the `/inspr-versioning` command (PAI-1046).
 
