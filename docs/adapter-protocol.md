@@ -1,6 +1,6 @@
 # PAIMOS — Adapter Protocol (PAI-332)
 
-> **Who this is for.** Authors of harness adapters that turn the PAIMOS canonical agent artifact into a skill / commands file for a specific harness (Claude Code, opencode, Flue, a future local-model harness). Per the INSPR thesis: *"None is the foundation of the platform. Each adapter is welcomed; none is owed."*
+> **Who this is for.** Authors of harness adapters that turn the PAIMOS canonical agent artifact into a skill / commands file for a specific harness (Claude Code, Codex, Grok, Pi, Cursor, or external harnesses). Per the INSPR thesis: *"None is the foundation of the platform. Each adapter is welcomed; none is owed."*
 
 This document defines the stable, versioned contract every adapter follows. Implement it once, and your adapter slots into `paimos skill render`, the discovery walk, the public registry, and the conformance suite without touching paimos itself.
 
@@ -132,7 +132,7 @@ The walk is **shallow** (one directory deep) — paimos doesn't recursively craw
 
 ### Discovery layers, in order
 
-1. **Built-in registry** — paimos ships `claude-code` today. Always wins on a literal name match unless overridden.
+1. **Built-in registry** — `claude-code`, `codex`, `grok`, `pi`, and `cursor`. Discovery and per-invocation overrides below may shadow these names.
 2. **`$PAIMOS_ADAPTER_PATH` directories** — discovered adapters can shadow built-ins by name (the user installed a custom version on purpose).
 3. **`paimos skill render --harness-from-file <path>`** — per-invocation override. Wins over both above.
 
@@ -242,7 +242,7 @@ export PAIMOS_ADAPTER_PATH="$HOME/.paimos/adapters"
 paimos skill list-adapters
 ```
 
-Your adapter shows up next to the built-in `claude-code`.
+Your adapter shows up next to the built-in adapters.
 
 ### Step 5: run conformance
 
@@ -281,7 +281,64 @@ The rendered file lands at the path your `target_path_template` resolves to, wit
 | Public registry endpoint | `backend/handlers/adapter_registry.go` |
 | Public registry index | `backend/handlers/adapter_registry.json` |
 
-## 8. Related tickets
+## 8. Native skills and command templates (PAI-1050)
+
+| Harness | Suggested skill path |
+| --- | --- |
+| claude-code | `.claude/commands/<slash>.md` (existing format) |
+| codex | `.agents/skills/<slash>/SKILL.md` |
+| grok | `.grok/skills/<slash>/SKILL.md` |
+| pi | `.pi/skills/<slash>/SKILL.md` |
+| cursor | `.cursor/skills/<slash>/SKILL.md` |
+
+Native skills begin with YAML `name` and `description` frontmatter. The managed
+header follows the closing delimiter; drift checking accepts both this placement
+and the existing leading-header format. Canonical instructions, bootstrap steps,
+rules, references and deploy recipes use the same body renderer as Claude Code.
+No model names or permission grants are inserted. Names use 1–64 lowercase
+letters, digits and single hyphens; invalid names fail instead of colliding after
+sanitization. The slash alias falls back to the agent name. Empty descriptions
+receive an invocation hint.
+
+```bash
+paimos skill render --project PAI --agent codex --harness codex
+paimos skill render --project PAI --agent codex --harness codex --check
+paimos skill test-adapter cursor
+paimos model templates grok --json
+paimos model templates cursor --read-only --json
+```
+
+`model templates <harness>` is offline syntax discovery for `codex`, `claude`
+(`claude-code` alias), `grok`, `pi`, and `cursor`. It returns `run`, `review`,
+`resume`, and `spawn` templates. Placeholders are documentation, not shell
+substitution: construct an argv array and pass each model, effort, prompt and
+session identifier as a value. Cursor's model ID already includes its effort.
+Syntax discovery grants no execution authority or availability guarantee.
+
+`spawn` starts a fresh foreground subprocess with structured output; the caller
+owns its lifetime, working directory, isolation and attribution. It is not a
+native subagent or managed agentd launch. `resume` names an explicit vendor
+session. `review` selects the vendor's read-only/plan mode (Pi uses its read-only
+tool allowlist); `--read-only` retains this restriction in every operation.
+Build templates retain vendor permission defaults. Cursor's existing `--trust`
+convention is retained: invoke only in a trusted workspace.
+
+Resolved profiles include pinned `command_templates` on the selected profile
+and every model ladder entry, alongside the existing `command_template` (run).
+Owner fallback has neither. CLI validation checks all four operations, including
+skipped candidates. Matching server/CLI builds are required; old servers missing
+the templates fail closed. Cached catalog resolution produces the same templates.
+Native Grok remains syntax/skill-only until a current native route is verified;
+the resolver's xAI route uses Cursor. Skill sync convenience commands keep their
+Claude Code default; use `skill render --harness` for native adapters.
+
+Verified against installed CLI help and native skill documentation:
+[Codex](https://learn.chatgpt.com/docs/build-skills),
+[Grok](https://docs.x.ai/build/features/skills-plugins-marketplaces),
+[Pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md),
+[Cursor](https://cursor.com/docs/skills).
+
+## 9. Related tickets
 
 - **PAI-329** — canonical agent artifact endpoint.
 - **PAI-330** — `paimos skill render` verb + claude-code reference adapter.

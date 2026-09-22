@@ -1318,7 +1318,11 @@ paimos sync pull --project PAI --kind model_catalog --workspace "$PWD"
 
 `GET /api/models/catalog` returns profiles, model metadata, roles and overrides;
 `GET /api/models/resolve?role=review-gate&author_family=anthropic` returns the
-chosen pin, ordered ladder, skip reasons and exact command template. `{prompt}`
+chosen pin, ordered ladder, skip reasons, the existing run `command_template`,
+and `command_templates` with pinned run/review/resume/spawn syntax (PAI-1050).
+All operations retain the role’s read-only restriction. See the
+[adapter protocol](adapter-protocol.md#8-native-skills-and-command-templates-pai-1050)
+for native skill rendering and offline `paimos model templates <harness>`. `{prompt}`
 is a literal placeholder: callers must pass their task as an argv value, not
 interpolate untrusted text into a shell command. These operations never spawn.
 `paimos worker start --role build` (also scout, mechanical, build-hard and

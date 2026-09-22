@@ -466,7 +466,8 @@ To add one:
 
 ### Adding a harness adapter (PAI-332)
 
-External harnesses (e.g. cursor, aider, your-tool) plug into
+Built-in renderers cover Claude Code, Codex, Grok, Pi and Cursor.
+Additional external harnesses (e.g. aider, your-tool) plug into
 `paimos skill render` via the adapter SDK at `docs/adapter-protocol.md`:
 
 1. A discoverable adapter is a directory on `$PAIMOS_ADAPTER_PATH`

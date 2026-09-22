@@ -56,7 +56,7 @@ func TestModelResolveCLIOnlineAndOfflineCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result dispatchprofile.Resolution
-	if json.Unmarshal([]byte(out), &result) != nil || result.Stale || result.Profile.ID != "codex-astra-xhigh" || !result.Role.ReadOnly || !strings.Contains(result.Command, "--sandbox read-only") {
+	if json.Unmarshal([]byte(out), &result) != nil || result.Commands == nil || !strings.Contains(result.Commands.Resume, "--sandbox read-only") || result.Stale || result.Profile.ID != "codex-astra-xhigh" || !result.Role.ReadOnly || !strings.Contains(result.Command, "--sandbox read-only") {
 		t.Fatalf("online %s", out)
 	}
 	http.DefaultTransport = modelRoundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -66,7 +66,7 @@ func TestModelResolveCLIOnlineAndOfflineCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if json.Unmarshal([]byte(out), &result) != nil || !result.Stale || result.Source != "cache" || result.CachedAt == nil || result.Profile.ID != "claude-opus-xhigh" || !result.Role.ReadOnly || !strings.Contains(result.Command, "--permission-mode plan") {
+	if json.Unmarshal([]byte(out), &result) != nil || result.Commands == nil || !strings.Contains(result.Commands.Spawn, "--permission-mode plan") || !result.Stale || result.Source != "cache" || result.CachedAt == nil || result.Profile.ID != "claude-opus-xhigh" || !result.Role.ReadOnly || !strings.Contains(result.Command, "--permission-mode plan") {
 		t.Fatalf("offline %s", out)
 	}
 	// The same name at a different origin must not consume the first instance's policy.
@@ -151,5 +151,24 @@ func TestWorkerModelSelectorsAcceptCatalogHarnesses(t *testing.T) {
 		if err := validateFriendlyStart(o); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestModelTemplatesOfflineDiscovery(t *testing.T) {
+	for _, harness := range []string{"codex", "claude-code", "grok", "pi", "cursor"} {
+		out, _, err := executeCLIForTest(t, "model", "templates", harness, "--read-only", "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result dispatchprofile.CommandTemplates
+		if err := json.Unmarshal([]byte(out), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Run == "" || result.Review == "" || result.Resume == "" || result.Spawn == "" {
+			t.Fatal(out)
+		}
+	}
+	if _, _, err := executeCLIForTest(t, "model", "templates", "invalid"); err == nil {
+		t.Fatal("unknown harness accepted")
 	}
 }

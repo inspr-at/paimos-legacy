@@ -42,6 +42,86 @@
         "last_verified": "",
         "note": "stub entry; not yet conformance-tested"
       }
+    },
+    {
+      "manifest": {
+        "protocol_version": "1",
+        "name": "codex",
+        "version": "1.0.0",
+        "supports": ">=1.0.0 <2.0.0",
+        "description": "codex Agent Skill — writes to .agents/skills/<slash>/SKILL.md",
+        "target_path_template": "{workspace}/.agents/skills/{slash_command_name}/SKILL.md",
+        "input_format": "json",
+        "output_format": "markdown"
+      },
+      "homepage": "https://github.com/inspr-at/paimos/tree/main/backend/cmd/paimos/adapters/native",
+      "source": "builtin",
+      "maintainer": "paimos",
+      "conformance": {
+        "passes": true,
+        "last_verified": "2026-09-22",
+        "note": "PAI-1050 built-in native skill adapter; conformance is exercised by Go tests."
+      }
+    },
+    {
+      "manifest": {
+        "protocol_version": "1",
+        "name": "grok",
+        "version": "1.0.0",
+        "supports": ">=1.0.0 <2.0.0",
+        "description": "grok Agent Skill — writes to .grok/skills/<slash>/SKILL.md",
+        "target_path_template": "{workspace}/.grok/skills/{slash_command_name}/SKILL.md",
+        "input_format": "json",
+        "output_format": "markdown"
+      },
+      "homepage": "https://github.com/inspr-at/paimos/tree/main/backend/cmd/paimos/adapters/native",
+      "source": "builtin",
+      "maintainer": "paimos",
+      "conformance": {
+        "passes": true,
+        "last_verified": "2026-09-22",
+        "note": "PAI-1050 built-in native skill adapter; conformance is exercised by Go tests."
+      }
+    },
+    {
+      "manifest": {
+        "protocol_version": "1",
+        "name": "pi",
+        "version": "1.0.0",
+        "supports": ">=1.0.0 <2.0.0",
+        "description": "pi Agent Skill — writes to .pi/skills/<slash>/SKILL.md",
+        "target_path_template": "{workspace}/.pi/skills/{slash_command_name}/SKILL.md",
+        "input_format": "json",
+        "output_format": "markdown"
+      },
+      "homepage": "https://github.com/inspr-at/paimos/tree/main/backend/cmd/paimos/adapters/native",
+      "source": "builtin",
+      "maintainer": "paimos",
+      "conformance": {
+        "passes": true,
+        "last_verified": "2026-09-22",
+        "note": "PAI-1050 built-in native skill adapter; conformance is exercised by Go tests."
+      }
+    },
+    {
+      "manifest": {
+        "protocol_version": "1",
+        "name": "cursor",
+        "version": "1.0.0",
+        "supports": ">=1.0.0 <2.0.0",
+        "description": "cursor Agent Skill — writes to .cursor/skills/<slash>/SKILL.md",
+        "target_path_template": "{workspace}/.cursor/skills/{slash_command_name}/SKILL.md",
+        "input_format": "json",
+        "output_format": "markdown"
+      },
+      "homepage": "https://github.com/inspr-at/paimos/tree/main/backend/cmd/paimos/adapters/native",
+      "source": "builtin",
+      "maintainer": "paimos",
+      "conformance": {
+        "passes": true,
+        "last_verified": "2026-09-22",
+        "note": "PAI-1050 built-in native skill adapter; conformance is exercised by Go tests."
+      }
     }
   ]
 }

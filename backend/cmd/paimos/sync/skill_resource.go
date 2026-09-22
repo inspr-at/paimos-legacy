@@ -281,8 +281,8 @@ func (s *SkillResource) Check(
 // knowledge-plane Resources (memory_resource.go, runbook_resource.go, …)
 // can reuse the same parsing logic.
 func ExtractRevFromHeader(body []byte) string {
-	s := string(body)
-	if !adapters.HasHeader(s) {
+	s := adapters.ManagedHeader(string(body))
+	if s == "" {
 		return ""
 	}
 	const marker = "@"

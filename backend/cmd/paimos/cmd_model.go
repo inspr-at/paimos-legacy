@@ -63,7 +63,7 @@ func modelCmd() *cobra.Command {
 	resolve.Flags().StringVar(&author, "author-family", "", "author model family; required for review-gate")
 	resolve.Flags().StringVar(&harness, "harness", "", "restrict to codex, claude, pi or cursor")
 	resolve.Flags().StringVar(&workspace, "workspace", "", "workspace containing the instance catalog cache (default cwd)")
-	cmd.AddCommand(resolve)
+	cmd.AddCommand(resolve, modelTemplatesCmd())
 	return cmd
 }
 
@@ -96,4 +96,22 @@ func resolveModel(ctx context.Context, client *Client, root string, request disp
 	result.Stale = true
 	result.CachedAt = &cached.FetchedAt
 	return result, err
+}
+
+// Syntax discovery works offline and does not resolve or authorize a model.
+func modelTemplatesCmd() *cobra.Command {
+	var readOnly bool
+	cmd := &cobra.Command{Use: "templates <harness>", Short: "Show run, review, resume and spawn syntax without executing it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		templates, err := dispatchprofile.HarnessTemplates(args[0], readOnly)
+		if err != nil {
+			return err
+		}
+		if flagJSON {
+			return emitJSON(templates)
+		}
+		fmt.Fprintf(stdout, "run: %s\nreview: %s\nresume: %s\nspawn: %s\n", templates.Run, templates.Review, templates.Resume, templates.Spawn)
+		return nil
+	}}
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, "retain review restrictions in run, resume and spawn templates")
+	return cmd
 }
