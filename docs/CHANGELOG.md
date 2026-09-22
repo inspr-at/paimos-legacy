@@ -28,7 +28,8 @@ coordinate, from the first entry below that form).
 
 ### Deployment
 
-- Take a fresh stopped-writer backup before M198/M199. These additive migrations permit image-only rollback to `260922071824.0.0` while retaining current data; disable the test identity and revoke its projection credential before returning to the older interface. Restore a backup only during separately controlled recovery with no unaccounted-for post-backup writes. Existing accounts are not converted (PAI-1054).
+- Take a fresh stopped-writer backup before M198/M199. These additive migrations permit image-only rollback to `260922071824.0.0` while retaining current data. Older releases treat reviewer accounts as external portal users and ignore Flow credentials, so before rolling back disable every reviewer account and revoke every active Flow projection credential. Restore a backup only during separately controlled recovery with no unaccounted-for post-backup writes. Existing accounts are not converted (PAI-1054).
+- Before upgrading, run a count-only check for duplicate normalized emails (trimmed and case-insensitive, including inactive and deleted accounts). OIDC login is refused for any ambiguous address (PAI-1054).
 - API schema 2.10.0 exposes the scoped projection-provisioning permission. Human browser sign-in still uses real OIDC, and Flow stream opt-in retains its human-session requirement (PAI-1054).
 
 ## [260922071824.0.0] — 2026-09-22
