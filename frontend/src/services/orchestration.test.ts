@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import fixture from '../../../backend/contracts/fixtures/orchestration-v1.json'
 import { loadOrchestration, parseOrchestrationSnapshot } from './orchestration'
+import type { OrchestrationSnapshotV1 } from './orchestrationTypes'
 import { api } from '@/api/client'
 vi.mock('@/api/client', async (original) => ({
   ...(await original<typeof import('@/api/client')>()),
@@ -118,6 +119,83 @@ describe('orchestration v1 boundary', () => {
     const candidate = copy()
     mutate(candidate)
     expect(() => parseOrchestrationSnapshot(candidate)).toThrow()
+  })
+
+  it('accepts the exact redacted reviewer root and rejects leaked or contradictory reviewer_scope variants', () => {
+    const reviewer = copy() as OrchestrationSnapshotV1
+    reviewer.instance_root.active_generation = {
+      state: 'unknown',
+      reason: 'reviewer_scope',
+      session_id: null,
+    }
+    expect(reviewer.instance_root).toEqual({
+      configured_identity: null,
+      binding_revision: 0,
+      binding_updated_at: null,
+      active_generation: {
+        state: 'unknown',
+        reason: 'reviewer_scope',
+        session_id: null,
+      },
+    })
+    expect(reviewer.project_coordination.every((row) => row.root_binding_revision === null)).toBe(
+      true,
+    )
+    expect(parseOrchestrationSnapshot(reviewer).instance_root).toEqual(reviewer.instance_root)
+
+    const leaks: ((snapshot: OrchestrationSnapshotV1) => void)[] = [
+      (snapshot) => {
+        snapshot.instance_root.configured_identity = { display_label: 'Root' }
+      },
+      (snapshot) => {
+        snapshot.instance_root.binding_revision = 1
+      },
+      (snapshot) => {
+        snapshot.instance_root.binding_updated_at = snapshot.fleet.observed_at
+      },
+      (snapshot) => {
+        snapshot.instance_root.active_generation.session_id =
+          snapshot.fleet.workers[0]!.harness_session_id
+      },
+      (snapshot) => {
+        snapshot.instance_root.active_generation.state = 'unset'
+      },
+      (snapshot) => {
+        snapshot.instance_root.active_generation.state = 'ambiguous'
+      },
+      (snapshot) => {
+        snapshot.project_coordination[0]!.root_binding_revision = 0
+      },
+      (snapshot) => {
+        const coordination = snapshot.project_coordination[0]!
+        const project = snapshot.fleet.projects[0]!
+        ;(coordination.coordinator as { reason: string }).reason = 'reviewer_scope'
+        ;(project.orchestrator as { reason: string }).reason = 'reviewer_scope'
+      },
+      (snapshot) => {
+        const coordinator = snapshot.fleet.workers.find((worker) => worker.role === 'coordinator')!
+        coordinator.liveness.state = 'busy'
+        snapshot.instance_root.configured_identity = { display_label: 'Root' }
+        snapshot.instance_root.binding_revision = 1
+        snapshot.instance_root.binding_updated_at = snapshot.fleet.observed_at
+        snapshot.instance_root.active_generation = {
+          state: 'resolved',
+          reason: 'reviewer_scope',
+          session_id: coordinator.harness_session_id,
+        }
+        for (const row of snapshot.project_coordination) row.root_binding_revision = 1
+      },
+    ]
+    for (const mutate of leaks) {
+      const candidate = structuredClone(reviewer)
+      mutate(candidate)
+      expect(() => parseOrchestrationSnapshot(candidate)).toThrow('invalid orchestration response')
+    }
+    expect(parseOrchestrationSnapshot(copy()).instance_root.active_generation).toEqual({
+      state: 'unset',
+      reason: 'root_not_configured',
+      session_id: null,
+    })
   })
 
   it('validates request scope and zoom before issuing a request', async () => {

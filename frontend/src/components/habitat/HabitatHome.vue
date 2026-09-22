@@ -34,6 +34,9 @@ const emit = defineEmits<{
 const route = useRoute()
 const noWorkers = computed(() => props.snapshot.fleet.totals.workers === 0)
 const root = computed(() => props.snapshot.instance_root)
+const sharedReview = computed(
+  () => props.reviewer === true || root.value.active_generation.reason === 'reviewer_scope',
+)
 const nextStep = computed(() => {
   if (!root.value.configured_identity)
     return {
@@ -144,8 +147,10 @@ function projectCount(id: number) {
 function projectStatus(id: number) {
   const project = projects.value.find((row) => row.project.id === id)
   if (!props.fresh) return 'Last snapshot'
-  if (project?.coordinator.state === 'ambiguous') return 'Check coordinator'
+  if (project?.coordinator.state === 'ambiguous')
+    return sharedReview.value ? 'Shared project' : 'Check coordinator'
   if (project?.coordinator.state === 'resolved') return 'Coordinated'
+  if (sharedReview.value) return projectCount(id) === 0 ? 'No workers yet' : 'Shared project'
   return projectCount(id) === 0 ? 'No workers yet' : 'Coordinator needed'
 }
 </script>
@@ -178,7 +183,14 @@ function projectStatus(id: number) {
       }}</span>
     </div>
 
-    <section v-if="!reviewer && noWorkers && !attentionOnly" class="habitat-welcome">
+    <section v-if="sharedReview && !attentionOnly" class="habitat-welcome">
+      <div>
+        <h2>Shared projects, read only</h2>
+        <p>You can review the projects shared with this account.</p>
+      </div>
+    </section>
+
+    <section v-else-if="noWorkers && !attentionOnly" class="habitat-welcome">
       <div>
         <h2>{{ nextStep.title }}</h2>
         <p>{{ nextStep.description }}</p>
@@ -365,7 +377,7 @@ function projectStatus(id: number) {
       </div>
 
       <aside v-if="!attentionOnly" class="habitat-home-secondary">
-        <section v-if="noWorkers" class="habitat-setup-guide">
+        <section v-if="noWorkers && !sharedReview" class="habitat-setup-guide">
           <h2>Three steps to your first run</h2>
           <div class="habitat-setup-step">
             <span>1</span>
@@ -389,7 +401,7 @@ function projectStatus(id: number) {
             </div>
           </div>
         </section>
-        <template v-else>
+        <template v-else-if="!noWorkers">
           <section>
             <div class="habitat-section-head">
               <h2>Your workers</h2>
@@ -422,7 +434,7 @@ function projectStatus(id: number) {
               <p v-if="!atWork.length" class="habitat-roster-empty">
                 No workers are included at this level of detail.
               </p>
-              <div v-if="!reviewer" class="habitat-roster-root">
+              <div v-if="!sharedReview" class="habitat-roster-root">
                 <span>{{
                   root.configured_identity?.display_label || 'Coordinator not configured'
                 }}</span

@@ -937,87 +937,133 @@
       }
     },
     "OrchestrationRootV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "configured_identity",
-        "binding_revision",
-        "binding_updated_at",
-        "active_generation"
-      ],
-      "properties": {
-        "configured_identity": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "display_label"
-              ],
-              "properties": {
-                "display_label": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 64
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "binding_revision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "binding_updated_at": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "date-time"
-        },
-        "active_generation": {
+      "oneOf": [
+        {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "state",
-            "reason",
-            "session_id"
+            "configured_identity",
+            "binding_revision",
+            "binding_updated_at",
+            "active_generation"
           ],
           "properties": {
-            "state": {
-              "type": "string",
-              "enum": [
-                "resolved",
-                "unset",
-                "ambiguous",
-                "unknown"
+            "configured_identity": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "display_label"
+                  ],
+                  "properties": {
+                    "display_label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "root_not_configured",
-                "generation_unavailable",
-                "no_active_root_generation",
-                "multiple_active_root_generations",
-                "generation_not_in_sample",
-                "root_generation_unknown",
-                "single_active_root_generation"
-              ]
+            "binding_revision": {
+              "type": "integer",
+              "minimum": 0
             },
-            "session_id": {
+            "binding_updated_at": {
               "type": [
                 "string",
                 "null"
               ],
-              "format": "uuid"
+              "format": "date-time"
+            },
+            "active_generation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "reason",
+                "session_id"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "resolved",
+                    "unset",
+                    "ambiguous",
+                    "unknown"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "root_not_configured",
+                    "generation_unavailable",
+                    "no_active_root_generation",
+                    "multiple_active_root_generations",
+                    "generation_not_in_sample",
+                    "root_generation_unknown",
+                    "single_active_root_generation"
+                  ]
+                },
+                "session_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "configured_identity",
+            "binding_revision",
+            "binding_updated_at",
+            "active_generation"
+          ],
+          "properties": {
+            "configured_identity": {
+              "type": "null"
+            },
+            "binding_revision": {
+              "type": "integer",
+              "const": 0
+            },
+            "binding_updated_at": {
+              "type": "null"
+            },
+            "active_generation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "reason",
+                "session_id"
+              ],
+              "properties": {
+                "state": {
+                  "const": "unknown"
+                },
+                "reason": {
+                  "const": "reviewer_scope"
+                },
+                "session_id": {
+                  "type": "null"
+                }
+              }
             }
           }
         }
-      }
+      ]
     },
     "ProjectCoordinationV1": {
       "type": "object",

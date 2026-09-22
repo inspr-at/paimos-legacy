@@ -13,15 +13,29 @@ afterEach(() => {
 })
 describe('Home presents actual next steps', () => {
   it('omits reviewer setup, sessions links and the connections polling component', async () => {
+    const snapshot = habitatFixture('10', null, true)
+    snapshot.instance_root = {
+      configured_identity: null,
+      binding_revision: 0,
+      binding_updated_at: null,
+      active_generation: { state: 'unknown', reason: 'reviewer_scope', session_id: null },
+    }
+    snapshot.project_coordination[0].root_binding_revision = null
     const mounted = await mountComponent(HabitatHome, {
-      snapshot: habitatFixture('10', null, true), deliveries: [], messages: [],
+      snapshot, deliveries: [], messages: [],
       messageState: 'ready', deliveryState: 'ready', fresh: true,
       authority: 'reviewer:1', reviewer: true,
     })
     expect(mounted.el.querySelector('[data-testid="connections-poller"]')).toBeNull()
-    expect(mounted.el.querySelector('.habitat-welcome')).toBeNull()
     expect(mounted.el.querySelector('.habitat-roster-root')).toBeNull()
+    expect(mounted.el.textContent).toContain('Shared projects, read only')
+    expect(mounted.el.textContent).toContain('You can review the projects shared with this account.')
     expect(mounted.el.textContent).not.toContain('Set up coordinator')
+    expect(mounted.el.textContent).not.toContain('Set the coordinator')
+    expect(mounted.el.textContent).not.toContain('Start coordinator')
+    expect(mounted.el.textContent).not.toContain('Three steps to your first run')
+    expect(mounted.el.textContent).not.toContain('Coordinator needed')
+    expect(mounted.el.querySelector('.habitat-welcome button')).toBeNull()
     expect(mounted.el.textContent).not.toContain('Messages')
     await mounted.unmount()
   })
@@ -114,6 +128,7 @@ describe('Home presents actual next steps', () => {
     })
     const mounted = await mountComponent(HabitatHome, props)
     expect(mounted.el.textContent).toContain('Set up coordinator')
+    expect(mounted.el.textContent).toContain('Set the coordinator')
     expect(mounted.el.textContent).toContain('No workers yet')
     expect(mounted.el.querySelector('.habitat-roster-row')).toBeNull()
     expect(mounted.el.querySelector('.habitat-welcome')).not.toBeNull()

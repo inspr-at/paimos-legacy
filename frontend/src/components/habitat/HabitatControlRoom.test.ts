@@ -24,13 +24,14 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: context.replace }),
   RouterLink: { props: ['to'], template: '<a><slot /></a>' },
 }))
+const authFixture = vi.hoisted(() => ({
+  user: { id: 1, role: 'member', status: 'active' },
+  allProjects: true,
+  accessibleProjects: new Map(),
+  canEdit: () => true,
+}))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    user: { id: 1, role: 'member', status: 'active' },
-    allProjects: true,
-    accessibleProjects: new Map(),
-    canEdit: () => true,
-  }),
+  useAuthStore: () => authFixture,
 }))
 vi.mock('@/services/orchestration', () => ({ loadOrchestration: vi.fn() }))
 vi.mock('@/services/agentMode', () => ({ fetchAgentModeSnapshot: vi.fn() }))
@@ -54,6 +55,7 @@ const CommandContextHost = defineComponent({
   },
 })
 afterEach(() => {
+  authFixture.user.role = 'member'
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   commandContext = null
@@ -182,5 +184,30 @@ describe('Habitat production composition', () => {
     expect(mounted.el.textContent).toContain('Set up a worker')
     expect(mounted.el.textContent).not.toContain('Idle')
     await mounted.unmount()
+  })
+
+  it('hides account settings from a reviewer when refresh fails and keeps them for an ordinary user', async () => {
+    context.route = reactive({ query: { view: 'home' } })
+    vi.mocked(loadOrchestration).mockRejectedValue(new Error('invalid orchestration response'))
+    vi.mocked(fetchAgentModeSnapshot).mockRejectedValue(new Error('offline'))
+    authFixture.user.role = 'reviewer'
+    const reviewer = await mountComponent(HabitatControlRoom)
+    await vi.waitFor(() =>
+      expect(reviewer.el.textContent).toContain('The control room could not be refreshed.'),
+    )
+    expect(reviewer.el.textContent).toContain('Retry')
+    expect(reviewer.el.textContent).toContain('Open portfolio')
+    expect(reviewer.el.textContent).not.toContain('Account settings')
+    await reviewer.unmount()
+
+    authFixture.user.role = 'member'
+    const member = await mountComponent(HabitatControlRoom)
+    await vi.waitFor(() =>
+      expect(member.el.textContent).toContain('The control room could not be refreshed.'),
+    )
+    expect(member.el.textContent).toContain('Retry')
+    expect(member.el.textContent).toContain('Open portfolio')
+    expect(member.el.textContent).toContain('Account settings')
+    await member.unmount()
   })
 })
