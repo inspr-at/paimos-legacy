@@ -354,7 +354,10 @@ assert_audited_release_recovery_main() {
       v26.09.09:scripts/test-release.sh|\
       v260910221338.0.0:scripts/release.sh|\
       v260910221338.0.0:scripts/release/recovery/v260910221338.0.0.json|\
-      v260910221338.0.0:scripts/test-release.sh)
+      v260910221338.0.0:scripts/test-release.sh|\
+      v260922104613.0.0:scripts/release.sh|\
+      v260922104613.0.0:scripts/release/recovery/v260922104613.0.0.json|\
+      v260922104613.0.0:scripts/test-release.sh)
         ;;
       *) fail "audited release recovery contains an unrelated file: $file" ;;
     esac
@@ -796,6 +799,11 @@ assert_release_recovery_receipt() {
       # PAI-994 records the same GitHub immediate-merge incident for PR #281.
       # Keep this release-specific: the audited receipt and every fail-closed
       # head/check/tree/ancestry/tag gate below remain mandatory.
+      ;;
+    v260922104613.0.0:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # PAI-1054: PR #358 merged immediately through the canonical protected
+      # --auto --squash --match-head-commit command after every check was green.
+      # GitHub omitted the post-merge request; retain every exact receipt gate.
       ;;
     *)
       fail "release recovery receipt carries an unrecognized incident reason"
