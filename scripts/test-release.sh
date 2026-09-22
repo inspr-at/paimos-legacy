@@ -20,6 +20,7 @@ PROTECTED_SQUASH_RECOVERY_REASON='protected_squash_merge_missing_auto_merge_prov
 IMMEDIATE_RECOVERY_VERSION='5.20.0'
 MANUAL_RECOVERY_VERSION='5.19.0'
 V2_RECOVERY_VERSION='260910221338.0.0'
+UXQA_RECOVERY_VERSION='260922104613.0.0'
 
 fail() {
   echo "test-release: $*" >&2
@@ -902,6 +903,18 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v260910221338.0.0.json" >/dev/null ||
     fail 'committed v260910221338.0.0 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v260922104613.0.0",
+      pull_request: 358,
+      approved_head: "2fc27606eecb2d59223b2178b1da258d3175f7dc",
+      merge_commit: "cbca667dbbd48820f934e794b044ac606bf421cf",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v260922104613.0.0.json" >/dev/null ||
+    fail 'committed v260922104613.0.0 recovery receipt is missing or drifted'
 }
 
 test_calendar_missing_provenance_receipt_recovery() {
@@ -914,8 +927,8 @@ test_calendar_missing_provenance_receipt_recovery() {
   prepend_release_notes "$repo" "$version"
   mkdir -p "$state"
   printf '%s\n' "$version" > "$state/vienna-date"
-  if [[ "$version" == "$V2_RECOVERY_VERSION" ]]; then
-    printf '%s\n' '260910235959' > "$state/utc-stamp"
+  if [[ "$version" == "$V2_RECOVERY_VERSION" || "$version" == "$UXQA_RECOVERY_VERSION" ]]; then
+    printf '%s235959\n' "${version:0:6}" > "$state/utc-stamp"
   fi
   touch "$state/missing-auto-merge-provenance"
 
@@ -2361,6 +2374,8 @@ test_calendar_missing_provenance_receipt_recovery \
   26.09.09 "$PROTECTED_SQUASH_RECOVERY_REASON" calendar-protected-squash-recovery 1
 test_calendar_missing_provenance_receipt_recovery \
   "$V2_RECOVERY_VERSION" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-v2-immediate-recovery 1
+test_calendar_missing_provenance_receipt_recovery \
+  "$UXQA_RECOVERY_VERSION" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-v2-uxqa-recovery 1
 test_interrupted_calendar_descendant_recovery
 test_calendar_v2_release_and_closures
 test_calendar_release_and_rejections
