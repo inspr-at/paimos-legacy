@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 198
+const latestSchemaVersion = 199
 
 func TestMigration198PreservesExistingUsersAndGrants(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m198-upgrade.db")+"?_txlock=immediate")
@@ -2116,5 +2116,36 @@ func TestMigration186AcceptanceTargetBindings(t *testing.T) {
 	}
 	if !columnExists(t, database, "acceptance_target_bindings", "registration_id") {
 		t.Fatal("M186 registration_id missing")
+	}
+}
+
+func TestMigration199PreservesLegacyIdentitiesAndRejectsReviewerCollisions(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m199-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES
+ ('old-admin','x','admin','admin','same@example.test','active'),('old-member','x','member','member','same@example.test','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 199); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 199); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.QueryRow("SELECT COUNT(*) FROM users WHERE email='same@example.test'").Scan(&count); err != nil || count != 2 {
+		t.Fatal("migration rewrote existing identities")
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,is_reviewer,status) VALUES('reviewer-collision','x','external','external','same@example.test',1,'active')`); err == nil {
+		t.Fatal("reviewer collision accepted")
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM flow_projection_credentials").Scan(&count); err != nil || count != 0 {
+		t.Fatal("migration created a credential")
 	}
 }

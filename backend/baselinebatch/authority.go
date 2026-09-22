@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/externalstage"
@@ -23,6 +24,18 @@ func (s *Service) currentAuthority(ctx context.Context, tx *sql.Tx, actor Actor,
 	}
 	if actor.UserID <= 0 {
 		return ProjectAuthority{}, fmt.Errorf("%w: authenticated actor required", ErrUnauthorized)
+	}
+	if actor.Kind == string(auth.PrincipalFlowProjection) {
+		if write || actor.SessionCredentialID != "" || actor.Impersonated {
+			return ProjectAuthority{}, ErrForbidden
+		}
+		expected, err := auth.NewFlowProjectionPrincipal(actor.APIKeyID, actor.UserID, projectID)
+		if err != nil {
+			return ProjectAuthority{}, ErrForbidden
+		}
+		if _, _, err := auth.ReauthorizePrincipalTx(ctx, tx, expected, time.Now().UTC()); err != nil {
+			return ProjectAuthority{}, ErrForbidden
+		}
 	}
 	if sessionActor {
 		if err := requireLiveSession(ctx, tx, actor); err != nil {

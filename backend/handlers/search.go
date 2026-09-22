@@ -339,6 +339,7 @@ func Search(w http.ResponseWriter, r *http.Request) {
 	// PAI-283 phase 2.
 	ftsQuery, useFTS := sanitizeFTS5Token(q)
 	if !useFTS {
+		filterDedup()
 		// Input had no tokenizable content (only special characters).
 		// All FTS5 paths below would either crash the parser or match
 		// nothing; the LIKE-based key path (line ~484) needs a token

@@ -509,6 +509,8 @@ func mountAPI(r chi.Router) {
 		r.Post("/auth/totp/disable", auth.TOTPDisable)
 
 		// API keys
+		r.With(auth.RequireAdmin, auth.RequireScope(auth.ScopeFlowCredentialsWrite)).Post("/auth/flow-projection-credentials", handlers.CreateFlowProjectionCredential)
+		r.With(auth.RequireAdmin, auth.RequireScope(auth.ScopeFlowCredentialsWrite)).Delete("/auth/flow-projection-credentials/{id}", handlers.RevokeFlowProjectionCredential)
 		r.Get("/auth/api-keys", handlers.ListAPIKeys)
 		r.Post("/auth/api-keys", handlers.CreateAPIKey)
 		r.Delete("/auth/api-keys/{id}", handlers.DeleteAPIKey)

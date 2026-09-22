@@ -189,6 +189,7 @@ function toggleTheme() {
   }
 }
 function openTalk() {
+  if (auth.user?.role === 'reviewer') return
   if (commandContext.value) commandContext.value.openTalk()
   else void router.replace({ query: { ...route.query, view: 'sessions' } })
 }
@@ -246,10 +247,11 @@ onScopeDispose(() => {
             :to="{ path: '/', query: { ...route.query, view: 'assign', session: undefined } }"
             ><Plus :size="18" aria-hidden="true" /><span>Start work</span></RouterLink
           >
-          <RouterLink class="habitat-rail-settings" to="/settings" aria-label="Settings"
+          <RouterLink v-if="auth.user?.role !== 'reviewer'" class="habitat-rail-settings" to="/settings" aria-label="Settings"
             ><Settings :size="17" aria-hidden="true" /><span>Settings</span></RouterLink
           >
           <RouterLink
+            v-if="auth.user?.role !== 'reviewer'"
             class="habitat-rail-account"
             to="/settings?tab=account"
             :aria-label="`Signed in as ${displayName}. Open settings`"
@@ -298,6 +300,7 @@ onScopeDispose(() => {
                   />
                 </button>
                 <RouterLink
+                  v-if="auth.user?.role !== 'reviewer'"
                   class="habitat-account habitat-mobile-account"
                   to="/settings?tab=account"
                   :aria-label="`Signed in as ${displayName}. Open settings`"
@@ -321,7 +324,8 @@ onScopeDispose(() => {
           </template>
           <div class="p6-shell-content">
             <p v-if="auth.user?.role === 'reviewer'" role="status" class="reviewer-notice">
-              Reviewer · Read-only access to shared projects. Administration, customer records and execution are unavailable.
+              {{ displayName }} · Reviewer · Read-only access to shared projects. Administration, customer records and execution are unavailable.
+              <span v-if="route.query.access === 'reviewer'">The requested page is outside your shared-project access.</span>
             </p>
             <slot />
           </div>
@@ -330,8 +334,8 @@ onScopeDispose(() => {
             <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
               >Product sessions</RouterLink
             >
-            <RouterLink to="/legacy">Classic workspace</RouterLink>
-            <RouterLink to="/settings">Settings</RouterLink>
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/legacy">Classic workspace</RouterLink>
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/settings">Settings</RouterLink>
           </footer>
         </FlowHost>
       </div>
@@ -346,6 +350,7 @@ onScopeDispose(() => {
       :shortcut-source="palette.settings.value?.source ?? null"
       :selected-session-id="selectedSessionId"
       :crm-enabled="crmEnabled"
+      :read-only="auth.user?.role === 'reviewer'"
       :announcement="palette.announcement.value"
       :return-focus="commandButton"
       @update:query="palette.query.value = $event"

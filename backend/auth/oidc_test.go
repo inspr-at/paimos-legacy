@@ -577,3 +577,23 @@ func TestOIDCCallbackRequiresExplicitVerifiedEmail(t *testing.T) {
 		})
 	}
 }
+
+func TestOIDCCallbackRejectsAmbiguousEmailIdentity(t *testing.T) {
+	for _, status := range []string{"active", "inactive", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			issuer := newOIDCMockIssuer(t, map[string]any{"sub": "ambiguous-subject", "email": "shared@example.test", "email_verified": true})
+			setupOIDCTest(t, issuer)
+			seedOIDCUser(t, "duplicate-admin", "shared@example.test", "admin", "active")
+			seedOIDCUser(t, "duplicate-member", "SHARED@example.test", "member", status)
+			login, location := startOIDCLogin(t)
+			callback := finishOIDCCallback(t, login, location.Query().Get("state"))
+			if callback.Header().Get("Location") != "/login?sso_error=provision_failed" {
+				t.Fatalf("ambiguous email login did not fail closed: %d", callback.Code)
+			}
+			var count int
+			if err := db.DB.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count); err != nil || count != 0 {
+				t.Fatal("ambiguous email minted a session")
+			}
+		})
+	}
+}

@@ -216,6 +216,11 @@ func Middleware(next http.Handler) http.Handler {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+			if principal.Kind() == PrincipalFlowProjection && !flowProjectionRouteAllowed(r, principal) {
+				w.Header().Set("Cache-Control", "private, no-store")
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				return
+			}
 			if principal.Kind() == PrincipalMachineNotifier && !machineNotifierRouteAllowed(r) {
 				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return

@@ -18,7 +18,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useUndoStore } from "@/stores/undo";
-import { safePostLoginRedirect } from "@/router/redirects";
+import { safePostLoginRedirect, reviewerRouteAllowed } from "@/router/redirects";
 import { mustChangePassword } from "@/api/client";
 import { publicURL, routerHistoryBase } from "@/publicPath";
 import type { AppShell } from "@/router/shell";
@@ -280,6 +280,10 @@ router.beforeEach(async (to) => {
   if (to.path === "/login" && auth.user) {
     const redirect = safePostLoginRedirect(to.query.redirect);
     return redirect || (auth.user.role === "external" ? "/portal" : "/");
+  }
+  if (auth.user?.role === "reviewer" && !to.meta.public &&
+      (!reviewerRouteAllowed(to.path) || (to.path === "/" && ["assign", "talk"].includes(String(to.query.view))))) {
+    return { path: "/", query: { access: "reviewer" } };
   }
   // PAI-179: legacy /settings?tab=crm deep links redirect to the new
   // location under Integrations. Keep this redirect indefinitely —

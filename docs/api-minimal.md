@@ -370,7 +370,7 @@ projects; neither creating a user nor adding a future project seeds access.
 Editor grants are rejected by both the API and the database. Converting an
 existing user to reviewer requires revoking existing grants first. All other
 roles retain their existing defaults. Real OIDC login matches the verified email
-of this pre-provisioned user; no application admin role or machine login is needed.
+of this pre-provisioned user; no application admin role or machine login substitutes for this human browser login.
 
 Reviewer reads are a closed allowlist in `backend/auth/reviewer.go`. They include
 the normal internal landing workspace, scoped project/issue lists and details,
@@ -384,6 +384,25 @@ orchestration snapshots. The sole allowed application mutation is sign-out.
 The UI marks the account read-only; existing public assets, login endpoints,
 health/version and public capability-link routes retain their independent access
 contracts and do not gain authority from reviewer login.
+
+Administrators may separately provision a server-only Flow projection credential
+with `POST /auth/flow-projection-credentials` and body `{name, reviewer_user_id,
+project_id, expires_at}`. It requires an existing active reviewer with explicit
+viewer membership on the active project and an RFC3339 expiry within 30 days.
+The administrator must hold `flow:credentials:write` (or `*`); impersonation is
+refused. The response contains `{id, project_id, expires_at, key}` exactly once
+under `Cache-Control: private, no-store`. Capture it directly into protected
+server storage, never logs, tickets or browser evidence. No retrieval endpoint
+exists. `DELETE /auth/flow-projection-credentials/:id` revokes it permanently.
+
+This separate machine credential permits only exact `GET
+/api/projects/:id/baseline-batches/flow-state`, with no query parameters. It has
+no general API, authentication, draft or execution authority. M199 stores its
+hash outside `api_keys`, so older readers reject it. Every request and the
+projection transaction recheck owner, exact project, membership, expiry and
+revocation. The human test account still signs in through real OIDC; this
+credential only lets the Janus server read its sandbox projection. The sandbox
+must opt in via `POST /projects/:id/baseline-batches/opt-in {enabled:true}`.
 
 M198 stores the role as an `is_reviewer` discriminator with both compatibility
 role columns set to `external`. This avoids rebuilding the production users/FK

@@ -57,6 +57,29 @@ func TestReviewerProductionRouterScopesHumanToExplicitViewerProjects(t *testing.
 		t.Fatalf("wrong public role: %+v", created)
 	}
 	cookie := seedSessionHomeRouterCookie(t, created.ID, "000000001055")
+	// Both creation and updates must preserve unique reviewer email identity.
+	collision := request("POST", "/api/users", adminCookie, `{"username":"reviewer-collision","email":" REVIEWER@example.test ","role":"member","password":"synthetic-test-password"}`)
+	if collision.Code != 400 {
+		t.Fatalf("create reviewer email collision: %d", collision.Code)
+	}
+	if _, err := db.DB.Exec("UPDATE users SET email='operator@example.test' WHERE id=?", admin); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []struct {
+		id   int64
+		body string
+	}{
+		{admin, `{"email":"reviewer@example.test"}`},
+		{created.ID, `{"email":"operator@example.test"}`},
+	} {
+		if got := request("PUT", fmt.Sprintf("/api/users/%d", change.id), adminCookie, change.body); got.Code != 400 {
+			t.Fatalf("update reviewer email collision: %d", got.Code)
+		}
+	}
+	if _, err := db.DB.Exec("UPDATE users SET email='reviewer@example.test' WHERE id=?", admin); err == nil {
+		t.Fatal("database allowed reviewer identity collision")
+	}
+
 	var compatibilityRole, compatibilityKey string
 	if err := db.DB.QueryRow("SELECT role,role_key FROM users WHERE id=?", created.ID).Scan(&compatibilityRole, &compatibilityKey); err != nil {
 		t.Fatal(err)
@@ -84,6 +107,24 @@ func TestReviewerProductionRouterScopesHumanToExplicitViewerProjects(t *testing.
 		return id
 	}
 	privateIssue := issue("Production confidential issue", production)
+	if _, err := db.DB.Exec("UPDATE issues SET issue_number=1 WHERE id=?", privateIssue); err != nil {
+		t.Fatal(err)
+	}
+	if got := request("GET", "/api/search?q=PRIV-1%20!!", adminCookie, ""); !strings.Contains(got.Body.String(), "Production confidential issue") {
+		t.Fatal("search regression fixture does not exercise key lookup")
+	}
+	blockedMember := seedSessionHomeRouterUser(t, "search-denied-member", "member", "active", false)
+	if _, err := db.DB.Exec("INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'none')", blockedMember, production); err != nil {
+		t.Fatal(err)
+	}
+	blockedCookie := seedSessionHomeRouterCookie(t, blockedMember, "000000001056")
+	for _, searchCookie := range []string{cookie, blockedCookie} {
+		got := request("GET", "/api/search?q=PRIV-1%20!!", searchCookie, "")
+		if got.Code != 200 || strings.Contains(got.Body.String(), "Production confidential") {
+			t.Fatalf("punctuation key search bypassed access: %d", got.Code)
+		}
+	}
+
 	sharedIssue := issue("UXQA visible issue", sandbox)
 	orphan := issue("Production confidential orphan", nil)
 	privateTag, err := db.DB.Exec("INSERT INTO tags(name,color) VALUES('Production confidential tag','gray')")
@@ -164,6 +205,18 @@ func TestReviewerProductionRouterScopesHumanToExplicitViewerProjects(t *testing.
 	}
 	if got := request("GET", "/api/projects", adminCookie, ""); !strings.Contains(got.Body.String(), "Production confidential") {
 		t.Fatal("existing admin behavior changed")
+	}
+	if _, err := db.DB.Exec("UPDATE projects SET status='deleted' WHERE id=?", sandbox); err != nil {
+		t.Fatal(err)
+	}
+	if got := request("GET", fmt.Sprintf("/api/projects/%d", sandbox), cookie, ""); got.Code != 403 {
+		t.Fatalf("deleted project detail: %d", got.Code)
+	}
+	if got := request("GET", "/api/projects?status=deleted", cookie, ""); strings.Contains(got.Body.String(), "UXQA sandbox") {
+		t.Fatal("deleted project list leak")
+	}
+	if _, err := db.DB.Exec("UPDATE projects SET status='active' WHERE id=?", sandbox); err != nil {
+		t.Fatal(err)
 	}
 	if got := request("PUT", grantPath, adminCookie, `{"access_level":"none"}`); got.Code != 200 {
 		t.Fatalf("revoke: %d", got.Code)

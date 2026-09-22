@@ -28,13 +28,13 @@ function isActive(path: string) {
 </script>
 
 <template>
-  <RouterLink to="/settings" :class="['nav-item', { active: isActive('/settings') }]" :title="isExpanded ? '' : 'Settings'">
+  <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/settings" :class="['nav-item', { active: isActive('/settings') }]" :title="isExpanded ? '' : 'Settings'">
     <AppIcon name="settings" /><span class="sl">Settings</span>
     <span v-if="isAdmin && completeFailures > 0" class="dev-badge">{{ completeFailures }}</span>
   </RouterLink>
 
   <div class="user-row">
-    <RouterLink to="/settings?tab=account" class="user-profile-link" :title="isExpanded ? 'Profile settings' : (auth.user?.nickname || auth.user?.first_name || auth.user?.username || '')">
+    <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/settings?tab=account" class="user-profile-link" :title="isExpanded ? 'Profile settings' : (auth.user?.nickname || auth.user?.first_name || auth.user?.username || '')">
       <div class="user-avatar">
         <img v-if="auth.user?.avatar_path" :src="publicURL(auth.user.avatar_path)" class="user-avatar-img" :alt="auth.user.username" />
         <span v-else>{{ userInitials(auth.user) }}</span>
@@ -44,6 +44,7 @@ function isActive(path: string) {
         <span class="user-role">{{ auth.user?.role }}</span>
       </div>
     </RouterLink>
+    <span v-if="auth.user?.role === 'reviewer'" class="user-name">{{ auth.user?.username }} · Reviewer</span>
     <button class="logout-btn" @click="auth.logout" title="Log out">
       <span class="logout-label sl">Logout</span>
       <AppIcon name="log-out" :size="16" />

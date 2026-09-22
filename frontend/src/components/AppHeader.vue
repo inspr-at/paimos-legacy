@@ -360,7 +360,7 @@ defineExpose({
               <kbd class="ah-refresh-shortcut">⌘R</kbd>
             </button>
             <button
-              v-if="issueAutoRefreshEnabled"
+              v-if="issueAutoRefreshEnabled && auth.user?.role !== 'reviewer'"
               class="ah-refresh-countdown"
               type="button"
               title="Open issue auto-refresh settings"

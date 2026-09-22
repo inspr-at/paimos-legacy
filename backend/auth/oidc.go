@@ -39,7 +39,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -505,12 +504,16 @@ var (
 // into auto-create via OIDC_PROVISION_MODE=auto-create.
 func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error) {
 	email := strings.ToLower(strings.TrimSpace(info.Email))
-	row := db.DB.QueryRow(
-		"SELECT id, status FROM users WHERE lower(email) = ? LIMIT 1", email,
-	)
 	var id int64
 	var status string
-	if err := row.Scan(&id, &status); err == nil {
+	var matches int
+	if err := db.DB.QueryRow("SELECT COUNT(*),COALESCE(MIN(id),0),COALESCE(MIN(status),'') FROM users WHERE lower(trim(email))=?", email).Scan(&matches, &id, &status); err != nil {
+		return nil, err
+	}
+	if matches > 1 {
+		return nil, errors.New("ambiguous OIDC email identity")
+	}
+	if matches == 1 {
 		if status != "active" {
 			return nil, fmt.Errorf("%w: user_id=%d status=%s", errOIDCAccountDisabled, id, status)
 		}
@@ -527,8 +530,6 @@ func provisionOIDCUser(info *oidcUserinfo, cfg oidcConfig) (*models.User, error)
 			return nil, err
 		}
 		return u, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
 	}
 
 	if cfg.ProvisionMode != oidcProvisionAutoCreate {

@@ -56,6 +56,9 @@ func ResolveAPIKeyPrincipal(rawKey string) (*models.User, Principal, error) {
 }
 
 func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Principal, error) {
+	if strings.HasPrefix(rawKey, FlowProjectionKeyPrefix()) {
+		return resolveFlowProjection(rawKey, now)
+	}
 	sum := sha256.Sum256([]byte(rawKey))
 	hash := hex.EncodeToString(sum[:])
 

@@ -61,8 +61,9 @@ const (
 	// grants and commands from Agent Mode, while a runner process leases
 	// a capability and answers input requests. A key minted for one must
 	// not silently carry the other.
-	ScopeAgentControlsWrite  = "agent-controls:write"
-	ScopeAgentControlsRunner = "agent-controls:runner"
+	ScopeFlowCredentialsWrite = "flow:credentials:write"
+	ScopeAgentControlsWrite   = "agent-controls:write"
+	ScopeAgentControlsRunner  = "agent-controls:runner"
 )
 
 // ScopeDef describes one named scope: what role you must already have
@@ -87,6 +88,11 @@ type ScopeDef struct {
 // families (informational, surfaced by /api/schema) — no method, status,
 // or payload shape is claimed here.
 var scopeCatalog = map[string]ScopeDef{
+	ScopeFlowCredentialsWrite: {
+		Name: ScopeFlowCredentialsWrite, RequiredRole: RoleAdmin,
+		Endpoints:   []string{"POST /api/auth/flow-projection-credentials", "DELETE /api/auth/flow-projection-credentials/{id}"},
+		Description: "Provision or revoke an expiring single-project Flow projection credential for an explicit human reviewer.",
+	},
 	ScopeProjectsWrite: {
 		Name:         ScopeProjectsWrite,
 		RequiredRole: RoleAdmin,

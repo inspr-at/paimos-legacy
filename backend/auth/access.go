@@ -151,6 +151,12 @@ func effectiveLevel(ctx context.Context, user *models.User, projectID int64) Acc
 	if IsAdmin(user) {
 		return AccessEditor
 	}
+	if user.Role == RoleReviewer {
+		var status string
+		if err := db.DB.QueryRow("SELECT status FROM projects WHERE id=?", projectID).Scan(&status); err != nil || status == "deleted" {
+			return AccessNone
+		}
+	}
 	lvl := lookup(ctx, user.ID, projectID)
 	if lvl != AccessUnset {
 		// Explicit row — honor it, including 'none' which denies access
@@ -198,6 +204,12 @@ func CanViewProjectTx(ctx context.Context, tx *sql.Tx, userID, projectID int64) 
 	}
 	if IsAdminRole(role) {
 		return true
+	}
+	if role == RoleReviewer {
+		var projectStatus string
+		if err := tx.QueryRowContext(ctx, "SELECT status FROM projects WHERE id=?", projectID).Scan(&projectStatus); err != nil || projectStatus == "deleted" {
+			return false
+		}
 	}
 	if explicit.Valid {
 		return explicit.String == string(AccessViewer) || explicit.String == string(AccessEditor)
@@ -259,7 +271,7 @@ func AccessibleProjectIDs(r *http.Request) []int64 {
 	if user.Role == RoleExternal || user.Role == RoleReviewer {
 		ids := make([]int64, 0, len(explicit))
 		for pid, lvl := range explicit {
-			if lvl == AccessViewer || lvl == AccessEditor {
+			if (lvl == AccessViewer || lvl == AccessEditor) && (user.Role != RoleReviewer || effectiveLevel(r.Context(), user, pid) == AccessViewer) {
 				ids = append(ids, pid)
 			}
 		}

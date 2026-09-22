@@ -59,7 +59,7 @@ func reviewerRouteAllowed(r *http.Request) bool {
 			switch suffix {
 			case "", "issues", "repos", "agents", "environments", "deploy-recipes", "tags", "releases",
 				"knowledge", "command-palette/v1", "session-home/v1", "session-home/zoom/v1",
-				"sessions", "nodes", "baseline-batches", "baseline-batches/", "baseline-batches/flow-state":
+				"nodes", "baseline-batches", "baseline-batches/", "baseline-batches/flow-state":
 				return true
 			}
 		case "issues":
@@ -68,7 +68,7 @@ func reviewerRouteAllowed(r *http.Request) bool {
 				return false
 			}
 			switch suffix {
-			case "", "comments", "history", "tags", "attachments":
+			case "", "comments", "history", "attachments":
 				return true
 			}
 		}

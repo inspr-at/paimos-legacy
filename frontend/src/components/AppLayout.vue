@@ -49,7 +49,7 @@ const { loadRecentProjects, startVisitTracking } = useRecentProjects()
 const appHeaderRef = ref<InstanceType<typeof AppHeader> | null>(null)
 const flowHostActive = ref(false)
 const { init: initKeyboardShortcuts } = useKeyboardShortcuts(appHeaderRef)
-initKeyboardShortcuts()
+if (auth.user?.role !== 'reviewer') initKeyboardShortcuts()
 
 // ── Local state ──────────────────────────────────────────────────────────────
 const isAdmin = computed(() => auth.isAdmin)
@@ -169,11 +169,13 @@ const sidebarStyle = computed(() => {
 })
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
-startVisitTracking()
+if (auth.user?.role !== 'reviewer') startVisitTracking()
 onMounted(() => {
   initSidebarMediaQuery()
-  initTimerPanel()
-  loadSidebarSprints()
+  if (auth.user?.role !== 'reviewer') {
+    initTimerPanel()
+    loadSidebarSprints()
+  }
   loadRecentProjects()
   loadDevSummary()
 })
@@ -232,16 +234,16 @@ onBeforeUnmount(() => {
           <RouterLink to="/issues"   :class="['nav-item', { active: isActive('/issues') }]"   :title="isExpanded ? '' : 'Issues'">
             <AppIcon name="layout-list" /><span class="sl">Issues</span>
           </RouterLink>
-          <RouterLink v-if="voiceIntakeEnabled" to="/intake" :class="['nav-item', { active: isActive('/intake') }]" :title="isExpanded ? '' : 'Voice Intake'">
+          <RouterLink v-if="voiceIntakeEnabled && auth.user?.role !== 'reviewer'" to="/intake" :class="['nav-item', { active: isActive('/intake') }]" :title="isExpanded ? '' : 'Voice Intake'">
             <AppIcon name="mic" /><span class="sl">Voice Intake</span>
           </RouterLink>
-          <RouterLink to="/agent-mode" :class="['nav-item', { active: isActive('/agent-mode') }]" :title="isExpanded ? '' : 'Agent Mode'">
+          <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/agent-mode" :class="['nav-item', { active: isActive('/agent-mode') }]" :title="isExpanded ? '' : 'Agent Mode'">
             <AppIcon name="activity" /><span class="sl">Agent Mode</span>
           </RouterLink>
           <RouterLink v-if="sidebarSprints.length" to="/sprint-board" :class="['nav-item', { active: isActive('/sprint-board') }]" :title="isExpanded ? '' : 'Sprint Board'">
             <AppIcon name="layout-grid" /><span class="sl">Sprint Board</span>
           </RouterLink>
-          <RouterLink to="/reporting" :class="['nav-item', { active: isActive('/reporting') }]" :title="isExpanded ? '' : 'Reporting'">
+          <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/reporting" :class="['nav-item', { active: isActive('/reporting') }]" :title="isExpanded ? '' : 'Reporting'">
             <AppIcon name="bar-chart-2" /><span class="sl">Reporting</span>
           </RouterLink>
           <RouterLink v-if="auth.isAdmin" to="/integrations" :class="['nav-item', { active: isActive('/integrations') }]" :title="isExpanded ? '' : 'Integrations'">
@@ -251,7 +253,7 @@ onBeforeUnmount(() => {
 
         <SidebarRecentProjects :is-expanded="isExpanded" />
 
-        <SidebarSprintTargets :is-expanded="isExpanded" />
+        <SidebarSprintTargets v-if="auth.user?.role !== 'reviewer'" :is-expanded="isExpanded" />
       </div>
 
       <!-- Edge hover zone — VS Code style collapse/expand trigger -->
@@ -267,7 +269,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="sidebar-bottom">
-        <SidebarTimerPanel :is-expanded="isExpanded" />
+        <SidebarTimerPanel v-if="auth.user?.role !== 'reviewer'" :is-expanded="isExpanded" />
         <SidebarFooter :is-expanded="isExpanded" :is-admin="isAdmin" :complete-failures="completeFailures" />
       </div>
     </aside>
@@ -291,7 +293,7 @@ onBeforeUnmount(() => {
   </div>
 
   <IssuePreviewCard />
-  <GlobalNewIssueModal />
+  <GlobalNewIssueModal v-if="auth.user?.role !== 'reviewer'" />
   <AttachmentLightbox />
 
 </template>

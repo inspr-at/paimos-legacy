@@ -15,7 +15,14 @@
 
 package handlers
 
-import "github.com/inspr-at/paimos/backend/models"
+import (
+	"database/sql"
+	"net/http"
+	"strings"
+
+	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/models"
+)
 
 // userSelectCols is the full column list for the users table (bare names, for
 // direct "SELECT ... FROM users" queries). Role reads are canonicalized through
@@ -56,4 +63,23 @@ func scanUserWithTOTP(row interface{ Scan(...any) error }, u *models.User) error
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses, &u.IsSuperAdmin,
 		&u.SearchScopeShortcut, &u.CommandPaletteShortcut, &u.TotpEnabled)
+}
+
+// Keep reviewer email identity unique in both directions, including inactive
+// and deleted rows. The M199 triggers enforce the same rule across writers.
+func validateReviewerEmail(w http.ResponseWriter, r *http.Request, tx *sql.Tx, id int64, email, role string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return true
+	}
+	var count int
+	if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users WHERE id!=? AND lower(trim(email))=? AND (? OR is_reviewer=1)", id, email, role == auth.RoleReviewer).Scan(&count); err != nil {
+		jsonError(w, "cannot verify email identity", http.StatusInternalServerError)
+		return false
+	}
+	if count != 0 {
+		jsonError(w, "reviewer email must uniquely identify one user", http.StatusBadRequest)
+		return false
+	}
+	return true
 }

@@ -159,6 +159,9 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	if !validateReviewerEmail(w, r, tx, 0, body.Email, publicRole) {
+		return
+	}
 	res, err := tx.ExecContext(r.Context(),
 		`INSERT INTO users(username,password,role,role_key,is_super_admin,is_reviewer,status,must_change_password,nickname,email,internal_rate_hourly,locale)
 		 VALUES(?,?,?,?,?,?,'active',?,?,?,?,?)`,
@@ -282,6 +285,24 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			}
 			if grants != 0 {
 				jsonError(w, "revoke existing project grants before assigning reviewer", http.StatusBadRequest)
+				return
+			}
+		}
+
+		if body.Email != nil || body.Role != nil {
+			effectiveRole := oldRole
+			if body.Role != nil {
+				effectiveRole = *body.Role
+			}
+			var effectiveEmail string
+			if err := tx.QueryRowContext(r.Context(), "SELECT COALESCE(email,'') FROM users WHERE id=?", id).Scan(&effectiveEmail); err != nil {
+				jsonError(w, "cannot verify email identity", http.StatusInternalServerError)
+				return
+			}
+			if body.Email != nil {
+				effectiveEmail = *body.Email
+			}
+			if !validateReviewerEmail(w, r, tx, id, effectiveEmail, effectiveRole) {
 				return
 			}
 		}

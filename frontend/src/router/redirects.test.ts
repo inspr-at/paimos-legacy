@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import router from './index'
-import { postLoginRedirectOrFallback, safePostLoginRedirect } from './redirects'
+import { postLoginRedirectOrFallback, safePostLoginRedirect, reviewerRouteAllowed } from './redirects'
 
 describe('post-login redirects', () => {
   it('accepts same-origin app paths including query strings', () => {
@@ -50,4 +50,9 @@ describe('post-login redirects', () => {
     expect(router.resolve(target).matched.some((record) => record.path === '/agent-mode')).toBe(true)
     expect(safePostLoginRedirect(target)).toBe('/agent-mode')
   })
+})
+
+it('restricts human reviewer navigation to readable shared-project screens', () => {
+ for (const path of ['/', '/projects', '/issues', '/projects/33', '/projects/33/issues/7', '/issues/7']) expect(reviewerRouteAllowed(path),path).toBe(true)
+ for (const path of ['/settings','/legacy','/reporting','/intake','/agent-mode','/customers','/crm','/unknown','/projects/33/admin']) expect(reviewerRouteAllowed(path),path).toBe(false)
 })
