@@ -298,24 +298,27 @@ func seedDebugAccounts(tx *sql.Tx, projectIDs map[string]int64) error {
 		if u.PublicRole == auth.RoleSuperAdmin {
 			superAdminFlag = 1
 		}
-		_, err = tx.Exec(`
-			INSERT INTO users (
+		// Update first within the seed transaction: SQLite runs BEFORE INSERT
+		// triggers before resolving an UPSERT conflict, so an existing account
+		// would otherwise collide with its own normalized email identity.
+		result, err := tx.Exec(`UPDATE users SET
+			password=?, role=?, role_key=?, is_super_admin=?, status='active',
+			first_name=?, last_name='Debug', email=?, must_change_password=0, locale='en'
+			WHERE username=?`, hash, auth.LegacyRoleForPublicRole(u.PublicRole), u.PublicRole, superAdminFlag, u.FirstName, u.Username+"@local.invalid", u.Username)
+		if err != nil {
+			return fmt.Errorf("update debug user %s: %w", u.Username, err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("count debug user update %s: %w", u.Username, err)
+		}
+		if updated == 0 {
+			_, err = tx.Exec(`INSERT INTO users (
 				id, username, password, role, role_key, is_super_admin, status,
 				first_name, last_name, email, must_change_password, locale
-			)
-			VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 'Debug', ?, 0, 'en')
-			ON CONFLICT(username) DO UPDATE SET
-				password = excluded.password,
-				role = excluded.role,
-				role_key = excluded.role_key,
-				is_super_admin = excluded.is_super_admin,
-				status = 'active',
-				first_name = excluded.first_name,
-				last_name = excluded.last_name,
-				email = excluded.email,
-				must_change_password = 0,
-				locale = 'en'
-		`, u.ID, u.Username, hash, auth.LegacyRoleForPublicRole(u.PublicRole), u.PublicRole, superAdminFlag, u.FirstName, u.Username+"@local.invalid")
+			) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 'Debug', ?, 0, 'en')`,
+				u.ID, u.Username, hash, auth.LegacyRoleForPublicRole(u.PublicRole), u.PublicRole, superAdminFlag, u.FirstName, u.Username+"@local.invalid")
+		}
 		if err != nil {
 			return fmt.Errorf("upsert debug user %s: %w", u.Username, err)
 		}
