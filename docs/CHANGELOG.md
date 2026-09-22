@@ -9,6 +9,29 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260922104613.0.0] — 2026-09-22
+
+### Added
+
+- Add the internal human `reviewer` role for real OIDC sign-in and read-only access to explicitly shared viewer projects. Existing and future projects grant this role no implicit access (PAI-1054).
+- Add administrator-provisioned, revocable Flow projection credentials bound to one active reviewer and one project for at most 30 days. They authorize only the exact Flow-state read and recheck current access on every request (PAI-1054).
+
+### Fixed
+
+- Apply project permissions before returning issue-key searches that contain punctuation, including explicit denials for existing member accounts (PAI-1054).
+- Keep the reviewer interface on readable surfaces and stop background requests for unavailable controls, sessions, settings and catalogs (PAI-1054).
+- Keep opt-in development account seeding idempotent while preserving normalized email uniqueness (PAI-1054).
+
+### Security
+
+- Refuse ambiguous verified-email OIDC identities and prevent new normalized email collisions in account creation, administrator updates and self-service profiles, including inactive and deleted accounts. Database triggers enforce the same rule for other writers (PAI-1054).
+
+### Deployment
+
+- Take a fresh stopped-writer backup before M198/M199. These additive migrations permit image-only rollback to `260922071824.0.0` while retaining current data. Older releases treat reviewer accounts as external portal users and ignore Flow credentials, so before rolling back disable every reviewer account and revoke every active Flow projection credential. Restore a backup only during separately controlled recovery with no unaccounted-for post-backup writes. Existing accounts are not converted (PAI-1054).
+- Before upgrading, run a count-only check for duplicate normalized emails (trimmed and case-insensitive, including inactive and deleted accounts). OIDC login is refused for any ambiguous address (PAI-1054).
+- API schema 2.10.0 exposes the scoped projection-provisioning permission. Human browser sign-in still uses real OIDC, and Flow stream opt-in retains its human-session requirement (PAI-1054).
+
 ## [260922071824.0.0] — 2026-09-22
 
 ### Added
