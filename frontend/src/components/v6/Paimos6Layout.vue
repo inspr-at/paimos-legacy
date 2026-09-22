@@ -331,7 +331,7 @@ onScopeDispose(() => {
           </div>
           <footer class="habitat-footer">
             <span>Agent Intercom · {{ brandName }}</span>
-            <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
               >Product sessions</RouterLink
             >
             <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/legacy">Classic workspace</RouterLink>

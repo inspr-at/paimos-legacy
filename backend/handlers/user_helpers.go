@@ -16,11 +16,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strings"
 
-	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -65,20 +65,22 @@ func scanUserWithTOTP(row interface{ Scan(...any) error }, u *models.User) error
 		&u.SearchScopeShortcut, &u.CommandPaletteShortcut, &u.TotpEnabled)
 }
 
-// Keep reviewer email identity unique in both directions, including inactive
-// and deleted rows. The M199 triggers enforce the same rule across writers.
-func validateReviewerEmail(w http.ResponseWriter, r *http.Request, tx *sql.Tx, id int64, email, role string) bool {
+// Nonblank email identities stay unique across every role, including inactive
+// and deleted rows. M199 triggers enforce the same rule across all writers.
+func validateUniqueUserEmail(w http.ResponseWriter, r *http.Request, query interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, id int64, email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return true
 	}
 	var count int
-	if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users WHERE id!=? AND lower(trim(email))=? AND (? OR is_reviewer=1)", id, email, role == auth.RoleReviewer).Scan(&count); err != nil {
+	if err := query.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users WHERE id!=? AND lower(trim(email))=?", id, email).Scan(&count); err != nil {
 		jsonError(w, "cannot verify email identity", http.StatusInternalServerError)
 		return false
 	}
 	if count != 0 {
-		jsonError(w, "reviewer email must uniquely identify one user", http.StatusBadRequest)
+		jsonError(w, "email must uniquely identify one user", http.StatusBadRequest)
 		return false
 	}
 	return true

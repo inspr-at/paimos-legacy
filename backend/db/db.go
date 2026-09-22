@@ -14243,15 +14243,17 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 BEGIN SELECT RAISE(ABORT,'reviewer cannot receive editor access'); END`,
 	}})
 
-	// M199 / PAI-1054: a Flow projection credential is never a general API key.
+	// M199 / PAI-1054: prevent new ambiguous email identities for every role.
+	// Existing rows remain untouched; deployments audit duplicates beforehand.
+	// A Flow projection credential is never a general API key.
 	// Older readers cannot find its hash in api_keys and therefore fail closed.
 	migrations = append(migrations, migration{version: 199, steps: []string{
-		`CREATE TRIGGER reviewer_email_insert BEFORE INSERT ON users
-   WHEN trim(COALESCE(NEW.email,''))!='' AND EXISTS(SELECT 1 FROM users existing WHERE lower(trim(existing.email))=lower(trim(NEW.email)) AND (NEW.is_reviewer=1 OR existing.is_reviewer=1))
-   BEGIN SELECT RAISE(ABORT,'reviewer email must uniquely identify one user'); END`,
-		`CREATE TRIGGER reviewer_email_update BEFORE UPDATE OF email,is_reviewer ON users
-   WHEN trim(COALESCE(NEW.email,''))!='' AND EXISTS(SELECT 1 FROM users existing WHERE existing.id!=NEW.id AND lower(trim(existing.email))=lower(trim(NEW.email)) AND (NEW.is_reviewer=1 OR existing.is_reviewer=1))
-   BEGIN SELECT RAISE(ABORT,'reviewer email must uniquely identify one user'); END`,
+		`CREATE TRIGGER user_email_insert BEFORE INSERT ON users
+   WHEN trim(COALESCE(NEW.email,''))!='' AND EXISTS(SELECT 1 FROM users existing WHERE lower(trim(existing.email))=lower(trim(NEW.email)))
+   BEGIN SELECT RAISE(ABORT,'email must uniquely identify one user'); END`,
+		`CREATE TRIGGER user_email_update BEFORE UPDATE OF email ON users
+   WHEN trim(COALESCE(NEW.email,''))!='' AND lower(trim(COALESCE(NEW.email,'')))!=lower(trim(COALESCE(OLD.email,''))) AND EXISTS(SELECT 1 FROM users existing WHERE existing.id!=NEW.id AND lower(trim(existing.email))=lower(trim(NEW.email)))
+   BEGIN SELECT RAISE(ABORT,'email must uniquely identify one user'); END`,
 		`CREATE TABLE flow_projection_credentials (
 		 id INTEGER PRIMARY KEY AUTOINCREMENT,
 		 user_id INTEGER NOT NULL REFERENCES users(id),

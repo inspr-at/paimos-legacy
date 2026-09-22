@@ -36,8 +36,10 @@ vi.mock('@/services/agentModeVoice', () => ({
 }))
 vi.mock('@/services/orchestration', () => ({ loadOrchestration: vi.fn() }))
 vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a><slot /></a>' } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canEdit: () => true }) }))
+const authFixture = vi.hoisted(() => ({user: {role: 'member'}, canEdit: () => true}))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authFixture }))
 afterEach(() => {
+  authFixture.user.role = 'member'
   vi.mocked(api.post).mockRestore?.()
   vi.clearAllMocks()
   voice.sink = null
@@ -51,6 +53,23 @@ afterEach(() => {
 const button = (el: HTMLElement, text: string) =>
   [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === text)!
 describe('Habitat inspector', () => {
+  it('keeps reviewer inspection free of assignment, launch and sessions controls', async () => {
+    authFixture.user.role = 'reviewer'
+    const fixture = habitatFixture()
+    const props = reactive({worker: fixture.fleet.workers[0] as typeof fixture.fleet.workers[0] | null,
+      project: null as typeof fixture.project_coordination[0] | null, workers: fixture.fleet.workers,
+      deliveries: [], fresh: true, authority: 'reviewer:1'})
+    const mounted = await mountComponent(HabitatInspector, props)
+    expect(mounted.el.textContent).not.toContain('Restart / repair options')
+    expect(mounted.el.textContent).not.toContain('Remove worker')
+    props.worker = null
+    props.project = fixture.project_coordination[0]
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Knowledge')
+    expect(mounted.el.textContent).not.toContain('Product sessions & decisions')
+    expect(mounted.el.textContent).not.toContain('Review coordinator setup')
+    await mounted.unmount()
+  })
   it('turns a selected-worker transcript into a draft and sends only after explicit confirmation', async () => {
     const fixture = habitatFixture()
     const worker = fixture.fleet.workers[0]

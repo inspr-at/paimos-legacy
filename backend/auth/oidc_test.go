@@ -583,6 +583,12 @@ func TestOIDCCallbackRejectsAmbiguousEmailIdentity(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			issuer := newOIDCMockIssuer(t, map[string]any{"sub": "ambiguous-subject", "email": "shared@example.test", "email_verified": true})
 			setupOIDCTest(t, issuer)
+			// Model duplicate rows already present before M199. Production
+			// writers now reject new duplicates; OIDC must also fail closed
+			// for preserved legacy identities.
+			if _, err := db.DB.Exec("DROP TRIGGER user_email_insert"); err != nil {
+				t.Fatal(err)
+			}
 			seedOIDCUser(t, "duplicate-admin", "shared@example.test", "admin", "active")
 			seedOIDCUser(t, "duplicate-member", "SHARED@example.test", "member", status)
 			login, location := startOIDCLogin(t)

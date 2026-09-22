@@ -80,6 +80,15 @@ describe('projectDetail service', () => {
     expect(api.get).not.toHaveBeenCalledWith('/views')
   })
 
+  it('does not request the global customer catalog for restricted review', async () => {
+    vi.mocked(api.get).mockImplementation(async path => (path === '/projects/33' ? {id:33} : []) as never)
+    const data = await loadProjectDetailData(33, '', '', {}, {includeCustomers: false})
+    expect(data.project.id).toBe(33)
+    expect(data.customers).toEqual([])
+    expect(api.get).not.toHaveBeenCalledWith('/customers')
+    vi.mocked(api.get).mockReset()
+  })
+
   it('preserves project issue envelope metadata when requested', async () => {
     const envelope = {
       issues: [{ id: 1 }],

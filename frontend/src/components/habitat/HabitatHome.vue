@@ -21,6 +21,7 @@ const props = defineProps<{
   fresh: boolean
   attentionOnly?: boolean
   authority: string
+  reviewer?: boolean
 }>()
 const emit = defineEmits<{
   assign: [projectId?: number]
@@ -177,7 +178,7 @@ function projectStatus(id: number) {
       }}</span>
     </div>
 
-    <section v-if="noWorkers && !attentionOnly" class="habitat-welcome">
+    <section v-if="!reviewer && noWorkers && !attentionOnly" class="habitat-welcome">
       <div>
         <h2>{{ nextStep.title }}</h2>
         <p>{{ nextStep.description }}</p>
@@ -204,7 +205,7 @@ function projectStatus(id: number) {
               Needs you
               <span v-if="!attentionUnknown" class="habitat-count">{{ attentionCount }}</span>
             </h2>
-            <RouterLink :to="{ query: { ...route.query, view: 'sessions' } }"
+            <RouterLink v-if="!reviewer" :to="{ query: { ...route.query, view: 'sessions' } }"
               >Messages <ArrowRight :size="13"
             /></RouterLink>
           </div>
@@ -225,6 +226,7 @@ function projectStatus(id: number) {
                 {{ row.totals?.exception_messages }} exceptional messages.
               </p>
               <RouterLink
+                v-if="!reviewer"
                 class="habitat-button habitat-primary"
                 :to="{
                   query: { ...route.query, project: String(row.projectId), view: 'sessions' },
@@ -420,7 +422,7 @@ function projectStatus(id: number) {
               <p v-if="!atWork.length" class="habitat-roster-empty">
                 No workers are included at this level of detail.
               </p>
-              <div class="habitat-roster-root">
+              <div v-if="!reviewer" class="habitat-roster-root">
                 <span>{{
                   root.configured_identity?.display_label || 'Coordinator not configured'
                 }}</span
@@ -460,6 +462,7 @@ function projectStatus(id: number) {
           </section>
         </template>
         <HabitatRuntimeHealth
+          v-if="!reviewer"
           :project-ids="projects.map((row) => row.project.id)"
           :authority="authority"
           :fresh="fresh"

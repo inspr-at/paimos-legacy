@@ -20,6 +20,7 @@ import HabitatSetup from './HabitatSetup.vue'
 import HabitatDeliveryEvidence from './HabitatDeliveryEvidence.vue'
 
 const auth = useAuthStore()
+const isReviewer = computed(() => auth.user?.role === 'reviewer')
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n({
@@ -303,6 +304,7 @@ function setZoom(value: string) {
   void router.replace({ query: { ...route.query, zoom: value } })
 }
 function assign(project?: number, sessionId?: string) {
+  if (isReviewer.value) return
   if (inspectorOpen.value) closeInspector()
   void router.replace({
     query: {
@@ -328,6 +330,7 @@ const noProductSession = computed(() => null)
 registerContext?.({
   selectedSessionId: noProductSession,
   openTalk: () => {
+    if (isReviewer.value) return
     if (selectedWorker.value) {
       void inspectorActions.value?.openVoice()
       return
@@ -390,7 +393,7 @@ onScopeDispose(() => registerContext?.(null))
         <h1>{{ pageTitle }}</h1>
       </div>
       <button
-        v-if="!['assign', 'home', 'attention'].includes(view)"
+        v-if="!isReviewer && !['assign', 'home', 'attention'].includes(view)"
         type="button"
         class="habitat-primary"
         @click="assign()"
@@ -472,7 +475,7 @@ onScopeDispose(() => registerContext?.(null))
             @refresh="habitat.refresh()"
           />
           <template v-else>
-            <section v-if="!['home', 'attention'].includes(view)" class="habitat-card habitat-root">
+            <section v-if="!isReviewer && !['home', 'attention'].includes(view)" class="habitat-card habitat-root">
               <span
                 class="habitat-orb"
                 :data-state="rootWorker?.liveness.state ?? 'unknown'"
@@ -504,6 +507,7 @@ onScopeDispose(() => registerContext?.(null))
             </section>
             <HabitatHome
               v-if="view === 'home' || view === 'attention'"
+              :reviewer="isReviewer"
               :snapshot="snapshot"
               :deliveries="deliveries?.deliveries ?? []"
               :messages="messageAttention"
@@ -637,7 +641,7 @@ onScopeDispose(() => registerContext?.(null))
                     No worker generations in this sample. A canonical agent and a running process
                     are separate resources.
                   </p>
-                  <button type="button" @click="assign(project.project.id)">Set up a worker</button>
+                  <button v-if="!isReviewer" type="button" @click="assign(project.project.id)">Set up a worker</button>
                 </div>
               </section>
             </section>

@@ -225,3 +225,72 @@ func TestReviewerProductionRouterScopesHumanToExplicitViewerProjects(t *testing.
 		t.Fatalf("revocation not enforced: %d", got.Code)
 	}
 }
+
+// Any editable profile can otherwise poison the verified-email OIDC lookup of
+// another principal. Check the real middleware and handlers, not just the SQL.
+func TestUserEmailUniquenessAcrossRolesAndStatuses(t *testing.T) {
+	openSeedTestDB(t)
+	router := sessionHomeProductionRouter()
+	admin := seedSessionHomeRouterUser(t, "email-operator", "admin", "active", false)
+	adminCookie := seedSessionHomeRouterCookie(t, admin, "000000003001")
+	request := func(method, path, cookie, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set(auth.CSRFHeaderName, "csrf")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	for index, status := range []string{"active", "inactive", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			target := seedSessionHomeRouterUser(t, "email-target-"+status, "admin", status, false)
+			email := status + "@example.test"
+			if _, err := db.DB.Exec("UPDATE users SET email=? WHERE id=?", email, target); err != nil {
+				t.Fatal(err)
+			}
+			for roleIndex, role := range []string{"member", "external"} {
+				t.Run(role, func(t *testing.T) {
+					actor := seedSessionHomeRouterUser(t, "email-actor-"+status+"-"+role, role, "active", false)
+					cookie := seedSessionHomeRouterCookie(t, actor, fmt.Sprintf("%012d", 3100+index*10+roleIndex))
+					if _, err := db.DB.Exec("UPDATE users SET first_name='Original',intake_confidence_threshold=75 WHERE id=?", actor); err != nil {
+						t.Fatal(err)
+					}
+					payload := fmt.Sprintf(`{"email":" %s ","first_name":"Changed","intake_confidence_threshold":0}`, strings.ToUpper(email))
+					if got := request("PATCH", "/api/auth/me", cookie, payload); got.Code != 400 {
+						t.Fatalf("self-service collision status=%d", got.Code)
+					}
+					var actualEmail, firstName string
+					var confidence int
+					if err := db.DB.QueryRow("SELECT email,first_name,intake_confidence_threshold FROM users WHERE id=?", actor).Scan(&actualEmail, &firstName, &confidence); err != nil {
+						t.Fatal(err)
+					}
+					if actualEmail != "" || firstName != "Original" || confidence != 75 {
+						t.Fatal("rejected profile update partially changed account")
+					}
+					if got := request("PUT", fmt.Sprintf("/api/users/%d", actor), adminCookie, payload); got.Code != 400 {
+						t.Fatalf("admin update collision status=%d", got.Code)
+					}
+					if _, err := db.DB.Exec("UPDATE users SET email=? WHERE id=?", " "+strings.ToUpper(email)+" ", actor); err == nil {
+						t.Fatal("direct writer bypassed uniqueness")
+					}
+					unique := fmt.Sprintf(`{"email":"unique-%d@example.test","intake_confidence_threshold":0}`, actor)
+					if got := request("PATCH", "/api/auth/me", cookie, unique); got.Code != 200 {
+						t.Fatalf("unique self-service email status=%d", got.Code)
+					}
+					if got := request("PATCH", "/api/auth/me", cookie, unique); got.Code != 200 {
+						t.Fatalf("same own email status=%d", got.Code)
+					}
+				})
+			}
+			for _, role := range []string{"admin", "member", "external", "reviewer"} {
+				payload := fmt.Sprintf(`{"username":"new-%s-%s","email":" %s ","role":"%s","password":"synthetic-test-password"}`, status, role, strings.ToUpper(email), role)
+				if got := request("POST", "/api/users", adminCookie, payload); got.Code != 400 {
+					t.Fatalf("%s create collision status=%d", role, got.Code)
+				}
+			}
+		})
+	}
+}

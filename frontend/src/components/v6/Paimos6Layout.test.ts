@@ -49,7 +49,7 @@ describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ schema_version: 1, effective_shortcut: 'Mod+KeyK', source: 'default' } as never)
     const mounted = await mountComponent(Paimos6Layout, {}, { default: () => h('main', 'Shared workspace') })
     expect(mounted.el.textContent).toContain('Read-only access to shared projects')
-    for (const text of ['Classic workspace', 'Settings', 'Start work']) expect(mounted.el.textContent).not.toContain(text)
+    for (const text of ['Classic workspace', 'Settings', 'Start work', 'Product sessions']) expect(mounted.el.textContent).not.toContain(text)
     mounted.el.querySelector<HTMLButtonElement>('.p6-command-mount')!.click()
     await nextTick()
     for (const text of ['Open voice panel','Command shortcut settings','Open 5.x dashboard']) expect(mounted.el.textContent).not.toContain(text)

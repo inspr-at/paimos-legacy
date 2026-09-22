@@ -65,12 +65,12 @@ function run(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function mountSection(canWrite = false) {
+function mountSection(canWrite = false, reviewer = false) {
   const el = document.createElement('div')
   document.body.appendChild(el)
   const Host = defineComponent({
     render() {
-      return h(ProjectAgentsSection, { projectId: 9, canWrite })
+      return h(ProjectAgentsSection, { projectId: 9, canWrite, reviewer })
     },
   })
   const app = createApp(Host)
@@ -93,6 +93,17 @@ describe('ProjectAgentsSection launchpad', () => {
   afterEach(() => {
     document.body.innerHTML = ''
     vi.restoreAllMocks()
+  })
+
+  it('shows reviewer agent definitions without mounting or fetching the launchpad', async () => {
+    vi.mocked(listProjectAgents).mockResolvedValue([agent()])
+    const {el, unmount} = mountSection(false, true)
+    await settle()
+    expect(el.textContent).toContain('codex')
+    expect(el.querySelector('[aria-label="Agent launchpad"]')).toBeNull()
+    expect(el.querySelector('.pa-error')).toBeNull()
+    expect(api.get).not.toHaveBeenCalled()
+    unmount()
   })
 
   it('shows artifact links, runner adapters, commands, and recent runs for an agent', async () => {

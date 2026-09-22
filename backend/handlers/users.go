@@ -159,7 +159,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if !validateReviewerEmail(w, r, tx, 0, body.Email, publicRole) {
+	if !validateUniqueUserEmail(w, r, tx, 0, body.Email) {
 		return
 	}
 	res, err := tx.ExecContext(r.Context(),
@@ -289,23 +289,10 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if body.Email != nil || body.Role != nil {
-			effectiveRole := oldRole
-			if body.Role != nil {
-				effectiveRole = *body.Role
-			}
-			var effectiveEmail string
-			if err := tx.QueryRowContext(r.Context(), "SELECT COALESCE(email,'') FROM users WHERE id=?", id).Scan(&effectiveEmail); err != nil {
-				jsonError(w, "cannot verify email identity", http.StatusInternalServerError)
-				return
-			}
-			if body.Email != nil {
-				effectiveEmail = *body.Email
-			}
-			if !validateReviewerEmail(w, r, tx, id, effectiveEmail, effectiveRole) {
-				return
-			}
+		if body.Email != nil && !validateUniqueUserEmail(w, r, tx, id, *body.Email) {
+			return
 		}
+
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE users SET
 				username             = COALESCE(?, username),

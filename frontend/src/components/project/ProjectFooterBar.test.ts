@@ -44,6 +44,13 @@ describe('ProjectFooterBar (PAI-967 mobile footer)', () => {
     await mounted.unmount()
   })
 
+  it('keeps only readable project tabs for a restricted reviewer', async () => {
+    const mounted = await mountComponent(ProjectFooterBar, {modelValue: 'issues', reviewer: true})
+    expect([...mounted.el.querySelectorAll('[role="tab"]')].map(tab => tab.getAttribute('aria-label')))
+      .toEqual(['Issues', 'Overview', 'Knowledge', 'Agents', 'Context'])
+    await mounted.unmount()
+  })
+
   it('exposes explicit accessible names for icon-only tabs', async () => {
     const mounted = await mountComponent(ProjectFooterBar, {
       modelValue: 'issues',

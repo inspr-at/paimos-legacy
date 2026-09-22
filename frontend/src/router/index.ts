@@ -282,7 +282,7 @@ router.beforeEach(async (to) => {
     return redirect || (auth.user.role === "external" ? "/portal" : "/");
   }
   if (auth.user?.role === "reviewer" && !to.meta.public &&
-      (!reviewerRouteAllowed(to.path) || (to.path === "/" && ["assign", "talk"].includes(String(to.query.view))))) {
+      !reviewerRouteAllowed(to.path, to.query)) {
     return { path: "/", query: { access: "reviewer" } };
   }
   // PAI-179: legacy /settings?tab=crm deep links redirect to the new

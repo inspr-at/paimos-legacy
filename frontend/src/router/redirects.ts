@@ -30,8 +30,17 @@ export function postLoginRedirectOrFallback(raw: unknown, fallback = '/'): strin
 
 // Keep restricted human navigation on the same internal UI, with a closed
 // read-only route vocabulary. New pages require a deliberate reviewer audit.
-export function reviewerRouteAllowed(path: string): boolean {
-  return path === '/' || path === '/projects' || path === '/issues' ||
+export function reviewerRouteAllowed(path: string, query: Record<string, unknown> = {}): boolean {
+  if (path === '/')
+    return (
+      query.session === undefined &&
+      (query.view === undefined ||
+        ['home', 'workers', 'projects', 'attention'].includes(String(query.view)))
+    )
+  return (
+    path === '/projects' ||
+    path === '/issues' ||
     /^\/projects\/[1-9]\d*(?:\/issues\/[1-9]\d*)?$/.test(path) ||
     /^\/issues\/[1-9]\d*$/.test(path)
+  )
 }

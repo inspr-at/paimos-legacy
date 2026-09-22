@@ -2119,7 +2119,7 @@ func TestMigration186AcceptanceTargetBindings(t *testing.T) {
 	}
 }
 
-func TestMigration199PreservesLegacyIdentitiesAndRejectsReviewerCollisions(t *testing.T) {
+func TestMigration199PreservesLegacyIdentitiesAndRejectsEmailCollisions(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m199-upgrade.db")+"?_txlock=immediate")
 	if err != nil {
 		t.Fatal(err)
@@ -2144,6 +2144,22 @@ func TestMigration199PreservesLegacyIdentitiesAndRejectsReviewerCollisions(t *te
 	}
 	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,is_reviewer,status) VALUES('reviewer-collision','x','external','external','same@example.test',1,'active')`); err == nil {
 		t.Fatal("reviewer collision accepted")
+	}
+	// New enforcement does not rewrite or block unrelated edits to legacy
+	// duplicates; their OIDC login is separately rejected as ambiguous.
+	if _, err := database.Exec(`UPDATE users SET nickname='Updated',email=COALESCE(NULL,email) WHERE username='old-member'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"admin", "member", "external"} {
+		if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES(?,'x',?,?,' SAME@example.test ','active')`, "collision-"+role, role, role); err == nil {
+			t.Fatalf("%s insert collision accepted", role)
+		}
+		if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES(?,'x',?,?,'','active')`, "blank-"+role, role, role); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`UPDATE users SET email=' SAME@example.test ' WHERE username=?`, "blank-"+role); err == nil {
+			t.Fatalf("%s update collision accepted", role)
+		}
 	}
 	if err := database.QueryRow("SELECT COUNT(*) FROM flow_projection_credentials").Scan(&count); err != nil || count != 0 {
 		t.Fatal("migration created a credential")

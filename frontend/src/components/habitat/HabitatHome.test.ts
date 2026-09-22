@@ -7,11 +7,24 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
   RouterLink: { props: ['to'], template: '<a><slot /></a>' },
 }))
-vi.mock('./HabitatRuntimeHealth.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('./HabitatRuntimeHealth.vue', () => ({ default: { template: '<div data-testid="connections-poller" />' } }))
 afterEach(() => {
   document.body.innerHTML = ''
 })
 describe('Home presents actual next steps', () => {
+  it('omits reviewer setup, sessions links and the connections polling component', async () => {
+    const mounted = await mountComponent(HabitatHome, {
+      snapshot: habitatFixture('10', null, true), deliveries: [], messages: [],
+      messageState: 'ready', deliveryState: 'ready', fresh: true,
+      authority: 'reviewer:1', reviewer: true,
+    })
+    expect(mounted.el.querySelector('[data-testid="connections-poller"]')).toBeNull()
+    expect(mounted.el.querySelector('.habitat-welcome')).toBeNull()
+    expect(mounted.el.querySelector('.habitat-roster-root')).toBeNull()
+    expect(mounted.el.textContent).not.toContain('Set up coordinator')
+    expect(mounted.el.textContent).not.toContain('Messages')
+    await mounted.unmount()
+  })
   it('shows intentional stops as history while preserving coordinator start and independent attention', async () => {
     const snapshot = habitatFixture()
     for (const worker of snapshot.fleet.workers) {

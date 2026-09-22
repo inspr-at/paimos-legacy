@@ -361,6 +361,14 @@ DELETE /users/:id                   admin only
 POST   /users/:id/reset-totp        admin only
 ```
 
+Nonblank email assignments in user creation, admin updates and self-service
+profile updates must be unique after trimming and case normalization, including
+inactive and deleted users. Database triggers prevent new collisions from other
+writers. Existing duplicate rows are not rewritten: deployments must audit them
+using counts only, and OIDC refuses an ambiguous verified email rather than
+choosing an arbitrary principal. Clear or replace an old address explicitly
+before reusing it for another account.
+
 ## User memberships (project access)
 
 `reviewer` is an internal human role for read-only review of explicitly shared
@@ -381,7 +389,12 @@ global CRM/customer/offer data, instance memory and orchestrator configuration,
 live event streams, API keys, security enrollment and unknown future endpoints
 are unavailable. Instance-root identity/revision is withheld from reviewer
 orchestration snapshots. The sole allowed application mutation is sign-out.
-The UI marks the account read-only; existing public assets, login endpoints,
+The UI marks the account read-only and omits settings, Docs/Coop, knowledge graph,
+agent launchpads, Product sessions, worker controls and Connections polling. The
+project list, issues, overview, knowledge list, agent definitions and context
+remain readable. Hidden count sentinels do not mount for reviewers. Unsupported
+private page routes return to the shared workspace with an access explanation.
+Existing public assets, login endpoints,
 health/version and public capability-link routes retain their independent access
 contracts and do not gain authority from reviewer login.
 
@@ -412,7 +425,7 @@ access across projects. No existing account is converted by the migration.
 
 ```
 GET    /users/:id/memberships                     admin — effective per-project level for every project
-PUT    /users/:id/memberships/:projectId          admin — upsert grant {level: "none"|"viewer"|"editor"}
+PUT    /users/:id/memberships/:projectId          admin — upsert grant {access_level: "none"|"viewer"|"editor"}
 DELETE /users/:id/memberships/:projectId          admin — revert to role default
 
 GET    /users/:id/projects                        admin — legacy portal-grant list (kept for compat)
