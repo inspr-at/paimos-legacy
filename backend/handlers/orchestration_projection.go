@@ -116,8 +116,20 @@ func readOrchestration(ctx context.Context, database *sql.DB, request workerflee
 		if err != nil {
 			return nil, err
 		}
+		var reviewer bool
+		if err := tx.QueryRowContext(ctx, "SELECT is_reviewer FROM users WHERE id=?", request.UserID).Scan(&reviewer); err != nil {
+			return nil, err
+		}
+		if reviewer {
+			// The instance root can belong to a production project. Neither its
+			// label nor its binding revision is part of a reviewer's sandbox.
+			state = orchestratorState{}
+		}
 		out.InstanceRoot = OrchestrationRoot{BindingRevision: state.Revision, BindingUpdatedAt: state.UpdatedAt,
 			ActiveGeneration: workerfleet.Orchestrator{State: "unset", Reason: "root_not_configured"}}
+		if reviewer {
+			out.InstanceRoot.ActiveGeneration = workerfleet.Orchestrator{State: "unknown", Reason: "reviewer_scope"}
+		}
 		if state.Target != nil {
 			out.InstanceRoot.ConfiguredIdentity = &models.OrchestratorProjection{DisplayLabel: state.Target.DisplayLabel}
 			out.InstanceRoot.ActiveGeneration = workerfleet.Orchestrator{State: "unknown", Reason: "generation_unavailable"}

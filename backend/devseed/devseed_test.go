@@ -10,6 +10,7 @@
 package devseed_test
 
 import (
+	"fmt"
 	"image/jpeg"
 	"os"
 	"path/filepath"
@@ -433,6 +434,35 @@ func TestRun_DebugAccountsSeededFromEnv(t *testing.T) {
 	assertMembership(t, "debug-customer", "ACME", "viewer")
 	assertNoMembership(t, "debug-customer", "PAI")
 	assertNoMembership(t, "debug-customer", "EXTR")
+}
+
+func TestRun_DebugAccountsRejectOtherEmailOwner(t *testing.T) {
+	for _, existingDebugAccount := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_debug_account_%t", existingDebugAccount), func(t *testing.T) {
+			openDevseedTestDB(t)
+			t.Setenv("PAIMOS_DEBUG_ACCOUNTS", "1")
+			for _, name := range []string{"SUPERADMIN", "ADMIN", "USER", "CUSTOMER"} {
+				t.Setenv("PAIMOS_DEBUG_"+name+"_PASSWORD", strings.Repeat("test-only-password-", 3))
+			}
+			if existingDebugAccount {
+				if err := devseed.Run(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.DB.Exec(`UPDATE users SET email='previous-debug-owner@local.invalid' WHERE username='debug-superadmin'`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.DB.Exec(`INSERT INTO users(username,password,role,email) VALUES('other-email-owner','unchanged','member',' DEBUG-SUPERADMIN@local.invalid ')`); err != nil {
+				t.Fatal(err)
+			}
+			if err := devseed.Run(); err == nil || !strings.Contains(err.Error(), "email must uniquely identify one user") {
+				t.Fatalf("seed with another email owner must fail, got %v", err)
+			}
+			if got := count(t, `SELECT COUNT(*) FROM users WHERE username='other-email-owner' AND password='unchanged' AND role='member'`); got != 1 {
+				t.Fatal("failed seed changed the existing email owner")
+			}
+		})
+	}
 }
 
 func count(t *testing.T, query string, args ...any) int {

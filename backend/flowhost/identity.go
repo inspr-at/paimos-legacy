@@ -100,13 +100,16 @@ func initialsFromRef(ref string) string {
 }
 
 func actorKindOf(principal auth.Principal) ActorKind {
-	if principal.Kind() == auth.PrincipalAPIKey {
+	if principal.Kind() != auth.PrincipalSession {
 		return ActorAgent
 	}
 	return ActorHuman
 }
 
 func principalMaterial(principal auth.Principal) string {
+	if principal.Kind() == auth.PrincipalFlowProjection {
+		return fmt.Sprintf("flow_projection:%d", principal.APIKeyID())
+	}
 	if principal.Kind() == auth.PrincipalAPIKey {
 		return fmt.Sprintf("api:%d", principal.APIKeyID())
 	}

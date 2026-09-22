@@ -15,12 +15,20 @@
 
 package handlers
 
-import "github.com/inspr-at/paimos/backend/models"
+import (
+	"context"
+	"database/sql"
+	"net/http"
+	"strings"
+
+	"github.com/inspr-at/paimos/backend/models"
+)
 
 // userSelectCols is the full column list for the users table (bare names, for
 // direct "SELECT ... FROM users" queries). Role reads are canonicalized through
 // role_key; role/is_super_admin remain compatibility shims.
 const userRoleSelectExpr = `CASE
+	WHEN is_reviewer = 1 THEN 'reviewer'
 	WHEN is_super_admin = 1 THEN 'super_admin'
 	WHEN role_key = 'member' AND role IN ('admin','external') THEN role
 	WHEN role_key IN ('admin','member','external','super_admin') THEN role_key
@@ -55,4 +63,25 @@ func scanUserWithTOTP(row interface{ Scan(...any) error }, u *models.User) error
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses, &u.IsSuperAdmin,
 		&u.SearchScopeShortcut, &u.CommandPaletteShortcut, &u.TotpEnabled)
+}
+
+// Nonblank email identities stay unique across every role, including inactive
+// and deleted rows. M199 triggers enforce the same rule across all writers.
+func validateUniqueUserEmail(w http.ResponseWriter, r *http.Request, query interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, id int64, email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return true
+	}
+	var count int
+	if err := query.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users WHERE id!=? AND lower(trim(email))=?", id, email).Scan(&count); err != nil {
+		jsonError(w, "cannot verify email identity", http.StatusInternalServerError)
+		return false
+	}
+	if count != 0 {
+		jsonError(w, "email must uniquely identify one user", http.StatusBadRequest)
+		return false
+	}
+	return true
 }

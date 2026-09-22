@@ -206,6 +206,7 @@ func IsViaOIDC(ctx context.Context) bool {
 }
 
 func Middleware(next http.Handler) http.Handler {
+	next = reviewerReadOnly(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. Try API key: Authorization: Bearer <BRAND_API_KEY_PREFIX>...
 		if hdr := r.Header.Get("Authorization"); strings.HasPrefix(hdr, "Bearer "+brand.Default.APIKeyPrefix) {
@@ -213,6 +214,11 @@ func Middleware(next http.Handler) http.Handler {
 			user, principal, err := ResolveAPIKeyPrincipal(rawKey)
 			if err != nil {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			if principal.Kind() == PrincipalFlowProjection && !flowProjectionRouteAllowed(r, principal) {
+				w.Header().Set("Cache-Control", "private, no-store")
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return
 			}
 			if principal.Kind() == PrincipalMachineNotifier && !machineNotifierRouteAllowed(r) {
@@ -429,6 +435,7 @@ func userScanDests(u *models.User) []any {
 // reads are canonicalized through role_key; the legacy role/is_super_admin
 // columns stay as compatibility shims.
 const userRoleSelectExpr = `CASE
+	WHEN u.is_reviewer = 1 THEN 'reviewer'
 	WHEN u.is_super_admin = 1 THEN 'super_admin'
 	WHEN u.role_key = 'member' AND u.role IN ('admin','external') THEN u.role
 	WHEN u.role_key IN ('admin','member','external','super_admin') THEN u.role_key

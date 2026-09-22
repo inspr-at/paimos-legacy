@@ -31,6 +31,7 @@ import { publicURL } from '@/publicPath'
 const props = defineProps<{
   projectId: number
   canWrite: boolean
+  reviewer?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -211,7 +212,7 @@ async function load() {
     .finally(() => {
       loading.value = false
     })
-  await Promise.all([agentsTask, loadLaunchpad()])
+  await Promise.all([agentsTask, ...(props.reviewer ? [] : [loadLaunchpad()])])
 }
 
 function startAdd() {
@@ -374,8 +375,8 @@ onMounted(load)
     <LoadingText v-if="loading" class="pa-empty" label="Loading agents…" />
 
     <div v-else-if="!agents.length && !adding" class="pa-empty">
-      No agents declared yet. Add one before rendering a skill, starting a session, or running the
-      watcher.
+      No agents declared yet.<template v-if="!reviewer"> Add one before rendering a skill, starting a session, or running the
+      watcher.</template>
     </div>
 
     <div v-else class="pa-list">
@@ -573,7 +574,7 @@ onMounted(load)
               >
             </div>
 
-            <div class="pa-launchpad" aria-label="Agent launchpad">
+            <div v-if="!reviewer" class="pa-launchpad" aria-label="Agent launchpad">
               <div class="pa-readiness">
                 <span class="pa-ready pa-ready--ok">Active</span>
                 <span class="pa-ready pa-ready--ok">{{ artifactStatus(agent) }}</span>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 import HabitatControlRoom from '@/components/habitat/HabitatControlRoom.vue'
 const route = useRoute()
+const auth = useAuthStore()
 const Sessions = defineAsyncComponent(() => import('./Paimos6SessionsView.vue'))
 const sessions = computed(
-  () => route.query.view === 'sessions' || typeof route.query.session === 'string',
+  () => auth.user?.role !== 'reviewer' && (route.query.view === 'sessions' || typeof route.query.session === 'string'),
 )
 </script>
 <template>

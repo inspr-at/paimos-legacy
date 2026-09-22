@@ -86,15 +86,16 @@ const viewSelectSQL = `
 // Sorted: own views first (by updated_at desc), then shared/admin by title.
 func ListViews(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
+	shared := user.Role != auth.RoleReviewer
 
 	rows, err := db.DB.Query(viewSelectSQL+`
-		WHERE v.user_id = ? OR v.is_shared = 1 OR v.is_admin_default = 1
+		WHERE v.user_id = ? OR (? AND (v.is_shared = 1 OR v.is_admin_default = 1))
 		ORDER BY
 			CASE WHEN v.user_id = ? THEN 0 ELSE 1 END,
 			v.sort_order ASC,
 			v.updated_at DESC,
 			v.title ASC
-	`, user.ID, user.ID, user.ID)
+	`, user.ID, user.ID, shared, user.ID)
 	if err != nil {
 		jsonError(w, "query failed", http.StatusInternalServerError)
 		return

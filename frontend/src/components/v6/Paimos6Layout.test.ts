@@ -6,7 +6,8 @@ import { mountComponent } from '@/components/ai/testMount'
 import { commandShortcutLabel } from '@/v6/commandPalette'
 import { crmEnabled } from '@/api/instance'
 
-const { route, router } = vi.hoisted(() => ({
+const { route, router, authUser } = vi.hoisted(() => ({
+  authUser: { id: 1, username: 'fixture-user', role: 'member', status: 'active' },
   route: { query: { project: '42' } as Record<string, string>, fullPath: '/?project=42' },
   router: {
     replace: vi.fn().mockResolvedValue(undefined),
@@ -26,7 +27,7 @@ vi.mock('vue-router', async () => {
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    user: { id: 1, username: 'fixture-user', role: 'member', status: 'active' },
+    user: authUser,
     allProjects: true,
     accessibleProjects: new Map(),
   }),
@@ -35,11 +36,25 @@ import Paimos6Layout from './Paimos6Layout.vue'
 
 describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
   afterEach(() => {
+    authUser.role = 'member'
     document.body.innerHTML = ''
     window.__PAIMOS_PUBLIC_BASE_PATH__ = ''
     vi.restoreAllMocks()
     router.replace.mockReset().mockResolvedValue(undefined)
     router.push.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('keeps reviewer navigation and palette on readable screens', async () => {
+    authUser.role = 'reviewer'
+    vi.spyOn(api, 'get').mockResolvedValue({ schema_version: 1, effective_shortcut: 'Mod+KeyK', source: 'default' } as never)
+    const mounted = await mountComponent(Paimos6Layout, {}, { default: () => h('main', 'Shared workspace') })
+    expect(mounted.el.textContent).toContain('Read-only access to shared projects')
+    for (const text of ['Classic workspace', 'Settings', 'Start work', 'Product sessions']) expect(mounted.el.textContent).not.toContain(text)
+    mounted.el.querySelector<HTMLButtonElement>('.p6-command-mount')!.click()
+    await nextTick()
+    for (const text of ['Open voice panel','Command shortcut settings','Open 5.x dashboard']) expect(mounted.el.textContent).not.toContain(text)
+    expect(mounted.el.querySelector('[aria-label="Log out"]')).not.toBeNull()
+    await mounted.unmount()
   })
 
   it('keeps the v6 brand navigation inside a configured public mount', async () => {

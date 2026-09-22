@@ -86,6 +86,22 @@ async function flush() {
 describe('auth store response-local permissions authority', () => {
   let auth: ReturnType<typeof useAuthStore> | null = null
 
+  it('keeps an internal reviewer limited to explicitly shared viewer projects', async () => {
+    vi.spyOn(api, 'getWithMeta').mockImplementation(async () => {
+      permissionsEpoch.value = '1'
+      return meta(me(fakeUser({ role: 'reviewer' }), false, { '7': 'viewer' }), '1')
+    })
+    auth = useAuthStore()
+    await auth.fetchMe()
+    expect(auth.user?.role).toBe('reviewer')
+    expect(auth.isAdmin).toBe(false)
+    expect(auth.allProjects).toBe(false)
+    expect(auth.canView(7)).toBe(true)
+    expect(auth.canEdit(7)).toBe(false)
+    expect(auth.canView(8)).toBe(false)
+    expect(auth.canView(null)).toBe(false)
+  })
+
   beforeEach(() => {
     resetPermissionsEpoch()
     sessionExpired.value = false

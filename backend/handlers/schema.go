@@ -36,6 +36,7 @@ import (
 //
 // The version doubles as cache key: clients refetch when the value changes.
 //
+// 2.10.0 (PAI-1054): added scoped Flow projection credential administration.
 // 2.9.0 (PAI-1024): added owner-authorized terminal handoff evidence.
 // 2.3.0 (PAI-810): froze the external-stage v1 routes, media/header contract,
 // and the separate handoff/reporter/evidence enum families.
@@ -90,7 +91,7 @@ import (
 // and republished the v2 fixture digest with the calendar v2 owner cases.
 // 2.4.0 (PAI-876): added the additive external-stage v2 media type,
 // fixture digest, contract major, and explicit release-version scheme.
-const SchemaVersion = "2.9.0"
+const SchemaVersion = "2.10.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {

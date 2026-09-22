@@ -466,6 +466,43 @@ func TestOIDCCallbackInviteOnlyRejectsUnknownUser(t *testing.T) {
 	}
 }
 
+func TestOIDCCallbackKeepsReviewerHumanAndExplicitlyScoped(t *testing.T) {
+	issuer := newOIDCMockIssuer(t, map[string]any{"sub": "reviewer-subject", "email": "reviewer@example.test", "email_verified": true})
+	setupOIDCTest(t, issuer)
+	userID := seedOIDCUser(t, "reviewer", "reviewer@example.test", "external", "active")
+	if _, err := db.DB.Exec("UPDATE users SET role_key='external',is_reviewer=1 WHERE id=?", userID); err != nil {
+		t.Fatal(err)
+	}
+	login, location := startOIDCLogin(t)
+	callback := finishOIDCCallback(t, login, location.Query().Get("state"))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("callback: %d", callback.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	for _, cookie := range callback.Result().Cookies() {
+		request.AddCookie(cookie)
+	}
+	called := false
+	Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		user := GetUser(r)
+		if user == nil || user.Role != RoleReviewer || !IsViaOIDC(r.Context()) || IsViaDevLogin(r.Context()) {
+			t.Fatal("OIDC reviewer identity lost")
+		}
+		principal, ok := GetPrincipal(r)
+		if !ok || principal.Kind() != PrincipalSession {
+			t.Fatal("reviewer did not receive a human browser session")
+		}
+		access := BuildAccessResponse(user)
+		if access.AllProjects || len(access.Levels) != 0 {
+			t.Fatal("OIDC login granted implicit projects")
+		}
+	})).ServeHTTP(httptest.NewRecorder(), request)
+	if !called {
+		t.Fatal("reviewer auth/me rejected")
+	}
+}
+
 func TestOIDCCallbackAutoCreateExternalUser(t *testing.T) {
 	issuer := newOIDCMockIssuer(t, map[string]any{
 		"sub":                "sub-auto",
@@ -536,6 +573,32 @@ func TestOIDCCallbackRequiresExplicitVerifiedEmail(t *testing.T) {
 			callbackRec := finishOIDCCallback(t, loginRec, loc.Query().Get("state"))
 			if got := callbackRec.Header().Get("Location"); got != "/login?sso_error=email_required" {
 				t.Fatalf("callback location = %q, want email_required", got)
+			}
+		})
+	}
+}
+
+func TestOIDCCallbackRejectsAmbiguousEmailIdentity(t *testing.T) {
+	for _, status := range []string{"active", "inactive", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			issuer := newOIDCMockIssuer(t, map[string]any{"sub": "ambiguous-subject", "email": "shared@example.test", "email_verified": true})
+			setupOIDCTest(t, issuer)
+			// Model duplicate rows already present before M199. Production
+			// writers now reject new duplicates; OIDC must also fail closed
+			// for preserved legacy identities.
+			if _, err := db.DB.Exec("DROP TRIGGER user_email_insert"); err != nil {
+				t.Fatal(err)
+			}
+			seedOIDCUser(t, "duplicate-admin", "shared@example.test", "admin", "active")
+			seedOIDCUser(t, "duplicate-member", "SHARED@example.test", "member", status)
+			login, location := startOIDCLogin(t)
+			callback := finishOIDCCallback(t, login, location.Query().Get("state"))
+			if callback.Header().Get("Location") != "/login?sso_error=provision_failed" {
+				t.Fatalf("ambiguous email login did not fail closed: %d", callback.Code)
+			}
+			var count int
+			if err := db.DB.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count); err != nil || count != 0 {
+				t.Fatal("ambiguous email minted a session")
 			}
 		})
 	}

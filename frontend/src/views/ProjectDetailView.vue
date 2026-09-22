@@ -93,6 +93,7 @@ const auth = useAuthStore()
 const search = useSearchStore()
 const issueRefreshPrompt = useIssueRefreshPromptStore()
 const isAdmin = computed(() => auth.isAdmin)
+const isReviewer = computed(() => auth.user?.role === 'reviewer')
 const projectId = computed(() => Number(route.params.id))
 // Whether the current user can edit inside this project — admins and
 // project editors pass, viewers fall through to read-only rendering.
@@ -271,6 +272,7 @@ const PROJECT_PRIMARY_TABS: ProjectPrimaryTab[] = [
 const initialTab: ProjectPrimaryTab = (() => {
   const t = route.query.tab
   if (typeof t === 'string' && (PROJECT_PRIMARY_TABS as readonly string[]).includes(t)) {
+    if (isReviewer.value && ['docs', 'coop'].includes(t)) return 'issues'
     if (t === 'settings' && !(isAdmin.value && canEditProject.value)) return 'issues'
     return t as ProjectPrimaryTab
   }
@@ -289,7 +291,7 @@ const initialKnowledgeSlug = computed<string>(() => {
 })
 
 // PAI-350 — knowledge tab view mode (list ↔ graph), deep-linked via ?kview=graph.
-const knowledgeView = ref<'list' | 'graph'>(route.query.kview === 'graph' ? 'graph' : 'list')
+const knowledgeView = ref<'list' | 'graph'>(!isReviewer.value && route.query.kview === 'graph' ? 'graph' : 'list')
 watch(knowledgeView, (v) => {
   const q = { ...route.query }
   if (v === 'graph') q.kview = 'graph'
@@ -691,7 +693,7 @@ async function load() {
     offset: 0,
     sort: loadSortKey || undefined,
     order: loadSortKey ? loadSortDir : undefined,
-  })
+  }, { includeCustomers: !isReviewer.value })
   if (request !== projectLoadRequestSeq) return
   project.value = data.project
   projectCtrl.query.projectId = projectId.value
@@ -1028,7 +1030,7 @@ watch(
 
         <!-- Knowledge tab — PAI-360 unified list + PAI-350 graph view. -->
         <template v-else-if="primaryTab === 'knowledge'">
-          <div class="knowledge-view-toggle">
+          <div v-if="!isReviewer" class="knowledge-view-toggle">
             <button
               type="button"
               :class="{ active: knowledgeView === 'list' }"
@@ -1044,7 +1046,7 @@ watch(
               Graph
             </button>
           </div>
-          <KnowledgeGraph v-if="knowledgeView === 'graph'" :project-id="projectId" />
+          <KnowledgeGraph v-if="!isReviewer && knowledgeView === 'graph'" :project-id="projectId" />
           <ProjectKnowledgeUnified
             v-else
             :project-id="projectId"
@@ -1060,6 +1062,7 @@ watch(
         <ProjectAgentsTab
           v-else-if="primaryTab === 'agents'"
           :project-id="projectId"
+          :reviewer="isReviewer"
           :can-write="isAdmin && canEditProject"
           @count="(n: number) => (agentCount = n)"
         />
@@ -1071,14 +1074,14 @@ watch(
            keeps the footer-bar badges live whether or not the user
            is currently on that tab. -->
         <DocumentsSection
-          v-else-if="primaryTab === 'docs'"
+          v-else-if="!isReviewer && primaryTab === 'docs'"
           scope="project"
           :scope-id="projectId"
           :can-write="isAdmin && canEditProject"
           @count="(n: number) => (docCount = n)"
         />
         <CooperationSection
-          v-else-if="primaryTab === 'coop'"
+          v-else-if="!isReviewer && primaryTab === 'coop'"
           :project-id="projectId"
           :can-write="isAdmin && canEditProject"
           @populated="(v: boolean) => (cooperationPopulated = v)"
@@ -1379,7 +1382,7 @@ watch(
            clicked. They mirror the @count / @populated emits but
            render with display:none. Skipped for the active tab to
            avoid double-mount + double-fetch. -->
-      <div class="pd-sentinels" aria-hidden="true">
+      <div v-if="!isReviewer" class="pd-sentinels" aria-hidden="true">
         <!-- PAI-504: agent-count sentinel. can-write=false so the
              hidden mount never exposes write affordances; skipped when
              Agents is the active tab to avoid double-mount + double
@@ -1420,6 +1423,7 @@ watch(
       <Teleport to="#project-footer-slot">
         <ProjectFooterBar
           v-model="primaryTab"
+          :reviewer="isReviewer"
           :open-issues="issues.length"
           :knowledge-entries="project.counts?.knowledge_entries ?? null"
           :agent-count="agentCount"

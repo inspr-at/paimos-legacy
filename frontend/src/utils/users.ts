@@ -13,7 +13,7 @@ export interface AssignableIssueUserCandidate {
 }
 
 export function isAssignableIssueUser(user: AssignableIssueUserCandidate): boolean {
-  return user.status === 'active' && user.role !== 'external'
+  return user.status === 'active' && user.role !== 'external' && user.role !== 'reviewer'
 }
 
 export function assignableIssueUsers<T extends AssignableIssueUserCandidate>(users: readonly T[]): T[] {

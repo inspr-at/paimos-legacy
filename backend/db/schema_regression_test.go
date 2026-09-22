@@ -32,7 +32,46 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 197
+const latestSchemaVersion = 199
+
+func TestMigration198PreservesExistingUsersAndGrants(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m198-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 197); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,status) VALUES
+	 ('m198-member','x','member','member','active'),('m198-admin','x','admin','admin','active'),('m198-external','x','external','external','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M198 existing','M198');
+	 INSERT INTO project_members(user_id,project_id,access_level) SELECT users.id,projects.id,'editor' FROM users CROSS JOIN projects WHERE users.role='member'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatalf("migration not idempotent: %v", err)
+	}
+	var users, reviewers, grants int
+	if err := database.QueryRow("SELECT COUNT(*),SUM(is_reviewer) FROM users").Scan(&users, &reviewers); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM project_members WHERE access_level='editor'").Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if users != 3 || reviewers != 0 || grants != 1 {
+		t.Fatalf("existing identity or grants changed: users=%d reviewers=%d grants=%d", users, reviewers, grants)
+	}
+	var mismatched int
+	if err := database.QueryRow("SELECT COUNT(*) FROM users WHERE role != role_key OR status != 'active'").Scan(&mismatched); err != nil || mismatched != 0 {
+		t.Fatalf("legacy roles changed: %d %v", mismatched, err)
+	}
+}
 
 func TestMigration197KeepsRevokedConversationCredentialDedicated(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m197-upgrade.db")+"?_txlock=immediate")
@@ -2077,5 +2116,52 @@ func TestMigration186AcceptanceTargetBindings(t *testing.T) {
 	}
 	if !columnExists(t, database, "acceptance_target_bindings", "registration_id") {
 		t.Fatal("M186 registration_id missing")
+	}
+}
+
+func TestMigration199PreservesLegacyIdentitiesAndRejectsEmailCollisions(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m199-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES
+ ('old-admin','x','admin','admin','same@example.test','active'),('old-member','x','member','member','same@example.test','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 199); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 199); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.QueryRow("SELECT COUNT(*) FROM users WHERE email='same@example.test'").Scan(&count); err != nil || count != 2 {
+		t.Fatal("migration rewrote existing identities")
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,is_reviewer,status) VALUES('reviewer-collision','x','external','external','same@example.test',1,'active')`); err == nil {
+		t.Fatal("reviewer collision accepted")
+	}
+	// New enforcement does not rewrite or block unrelated edits to legacy
+	// duplicates; their OIDC login is separately rejected as ambiguous.
+	if _, err := database.Exec(`UPDATE users SET nickname='Updated',email=COALESCE(NULL,email) WHERE username='old-member'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"admin", "member", "external"} {
+		if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES(?,'x',?,?,' SAME@example.test ','active')`, "collision-"+role, role, role); err == nil {
+			t.Fatalf("%s insert collision accepted", role)
+		}
+		if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,email,status) VALUES(?,'x',?,?,'','active')`, "blank-"+role, role, role); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`UPDATE users SET email=' SAME@example.test ' WHERE username=?`, "blank-"+role); err == nil {
+			t.Fatalf("%s update collision accepted", role)
+		}
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM flow_projection_credentials").Scan(&count); err != nil || count != 0 {
+		t.Fatal("migration created a credential")
 	}
 }

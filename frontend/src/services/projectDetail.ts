@@ -71,6 +71,7 @@ export async function loadProjectDetailData(
   query: string,
   filters = '',
   issueOpts: ProjectIssuesRequestOptions = {},
+  access: { includeCustomers?: boolean } = {},
 ): Promise<ProjectDetailData> {
   const [project, issuePayload, users, costUnits, releases, allTags, customers] = await Promise.all([
     api.get<Project>(`/projects/${projectId}`),
@@ -81,7 +82,7 @@ export async function loadProjectDetailData(
     api.get<string[]>(`/projects/${projectId}/cost-units`).catch(() => []),
     api.get<string[]>(`/projects/${projectId}/releases`).catch(() => []),
     api.get<Tag[]>('/tags'),
-    api.get<Customer[]>('/customers').catch(() => [] as Customer[]),
+    access.includeCustomers === false ? Promise.resolve([] as Customer[]) : api.get<Customer[]>('/customers').catch(() => [] as Customer[]),
   ])
 
   const issues = Array.isArray(issuePayload) ? issuePayload : issuePayload.issues

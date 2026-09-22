@@ -15,6 +15,7 @@ import ProjectAgentsSection from '@/components/project/ProjectAgentsSection.vue'
 defineProps<{
   projectId: number
   canWrite: boolean
+  reviewer?: boolean
 }>()
 
 defineEmits<{
@@ -27,6 +28,7 @@ defineEmits<{
     <ProjectAgentsSection
       :project-id="projectId"
       :can-write="canWrite"
+      :reviewer="reviewer"
       @count="(n: number) => $emit('count', n)"
     />
   </div>

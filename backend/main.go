@@ -289,6 +289,7 @@ func liveUpdatesConfigured() bool {
 }
 
 func instanceHandler(w http.ResponseWriter, r *http.Request) {
+	reviewer := auth.GetUser(r) != nil && auth.GetUser(r).Role == auth.RoleReviewer
 	label := os.Getenv("INSTANCE_LABEL")
 	hostname, _ := os.Hostname()
 	w.Header().Set("Content-Type", "application/json")
@@ -301,8 +302,8 @@ func instanceHandler(w http.ResponseWriter, r *http.Request) {
 		"label":                label,
 		"hostname":             hostname,
 		"attachments_enabled":  storage.Enabled(),
-		"live_updates_enabled": liveUpdatesConfigured(),
-		"crm_enabled":          handlers.CRMModuleEnabled(r.Context()),
+		"live_updates_enabled": liveUpdatesConfigured() && !reviewer,
+		"crm_enabled":          handlers.CRMModuleEnabled(r.Context()) && !reviewer,
 	})
 }
 
@@ -508,6 +509,8 @@ func mountAPI(r chi.Router) {
 		r.Post("/auth/totp/disable", auth.TOTPDisable)
 
 		// API keys
+		r.With(auth.RequireAdmin, auth.RequireScope(auth.ScopeFlowCredentialsWrite)).Post("/auth/flow-projection-credentials", handlers.CreateFlowProjectionCredential)
+		r.With(auth.RequireAdmin, auth.RequireScope(auth.ScopeFlowCredentialsWrite)).Delete("/auth/flow-projection-credentials/{id}", handlers.RevokeFlowProjectionCredential)
 		r.Get("/auth/api-keys", handlers.ListAPIKeys)
 		r.Post("/auth/api-keys", handlers.CreateAPIKey)
 		r.Delete("/auth/api-keys/{id}", handlers.DeleteAPIKey)

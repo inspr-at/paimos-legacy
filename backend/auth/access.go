@@ -151,6 +151,12 @@ func effectiveLevel(ctx context.Context, user *models.User, projectID int64) Acc
 	if IsAdmin(user) {
 		return AccessEditor
 	}
+	if user.Role == RoleReviewer {
+		var status string
+		if err := db.DB.QueryRow("SELECT status FROM projects WHERE id=?", projectID).Scan(&status); err != nil || status == "deleted" {
+			return AccessNone
+		}
+	}
 	lvl := lookup(ctx, user.ID, projectID)
 	if lvl != AccessUnset {
 		// Explicit row — honor it, including 'none' which denies access
@@ -198,6 +204,12 @@ func CanViewProjectTx(ctx context.Context, tx *sql.Tx, userID, projectID int64) 
 	}
 	if IsAdminRole(role) {
 		return true
+	}
+	if role == RoleReviewer {
+		var projectStatus string
+		if err := tx.QueryRowContext(ctx, "SELECT status FROM projects WHERE id=?", projectID).Scan(&projectStatus); err != nil || projectStatus == "deleted" {
+			return false
+		}
 	}
 	if explicit.Valid {
 		return explicit.String == string(AccessViewer) || explicit.String == string(AccessEditor)
@@ -256,10 +268,10 @@ func AccessibleProjectIDs(r *http.Request) []int64 {
 		}
 	}
 
-	if user.Role == "external" {
+	if user.Role == RoleExternal || user.Role == RoleReviewer {
 		ids := make([]int64, 0, len(explicit))
 		for pid, lvl := range explicit {
-			if lvl == AccessViewer || lvl == AccessEditor {
+			if (lvl == AccessViewer || lvl == AccessEditor) && (user.Role != RoleReviewer || effectiveLevel(r.Context(), user, pid) == AccessViewer) {
 				ids = append(ids, pid)
 			}
 		}
@@ -319,7 +331,7 @@ func AccessibleProjectIDsForUser(userID int64) []int64 {
 		}
 		explicit[pid] = AccessLevel(lvl)
 	}
-	if role == "external" {
+	if role == RoleExternal || role == RoleReviewer {
 		ids := make([]int64, 0, len(explicit))
 		for pid, lvl := range explicit {
 			if lvl == AccessViewer || lvl == AccessEditor {
@@ -352,7 +364,7 @@ func AccessibleProjectIDsForUser(userID int64) []int64 {
 // for a newly created admin/member. External users are not seeded — they
 // must receive explicit grants via the user-memberships endpoints.
 func SeedAccessForUser(userID int64, role string) {
-	if !IsInternalRole(role) {
+	if !HasDefaultProjectAccess(role) {
 		return
 	}
 	_, err := db.DB.Exec(`
@@ -373,7 +385,7 @@ func SeedAccessForProject(projectID int64) {
 		INSERT OR IGNORE INTO project_members(user_id, project_id, access_level)
 		SELECT u.id, ?, 'editor'
 		FROM users u
-		WHERE CASE
+		WHERE u.is_reviewer = 0 AND CASE
 		        WHEN u.is_super_admin = 1 THEN 'super_admin'
 		        WHEN u.role_key = 'member' AND u.role IN ('admin','external') THEN u.role
 		        WHEN u.role_key IN ('admin','member','external','super_admin') THEN u.role_key
@@ -432,7 +444,7 @@ func BuildAccessResponse(user *models.User) AccessResponse {
 		}
 	}
 
-	if user.Role == "external" {
+	if user.Role == RoleExternal || user.Role == RoleReviewer {
 		for pid, lvl := range explicit {
 			if lvl == AccessViewer || lvl == AccessEditor {
 				resp.Levels[int64ToString(pid)] = string(lvl)

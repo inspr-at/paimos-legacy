@@ -314,8 +314,9 @@ func (f *fixture) seedPharosOwner(environment string) pharosOwner {
 		f.t.Fatal(err)
 	}
 	deliveryID, _ := delivery.LastInsertId()
+	username := "pharos-owner-" + uuid.NewString()[:8]
 	user, err := appdb.DB.Exec(`INSERT INTO users(username,password,role,status,email) VALUES(?,?,?,'active',?)`,
-		"pharos-owner-"+uuid.NewString()[:8], "x", "member", "pharos-owner@example.test")
+		username, "x", "member", username+"@example.test")
 	if err != nil {
 		f.t.Fatal(err)
 	}

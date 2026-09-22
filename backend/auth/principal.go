@@ -23,6 +23,7 @@ import (
 type PrincipalKind string
 
 const (
+	PrincipalFlowProjection      PrincipalKind = "flow_projection"
 	PrincipalSession             PrincipalKind = "session"
 	PrincipalAPIKey              PrincipalKind = "api_key"
 	PrincipalMachineNotifier     PrincipalKind = "machine_notifier"
@@ -46,6 +47,7 @@ type Principal struct {
 	userID              int64
 	impersonated        bool
 	scopes              ScopeSet
+	flowProjectID       int64
 }
 
 type principalKeyType struct{}
@@ -138,7 +140,7 @@ func (principal Principal) SafeCredentialID() string {
 	if principal.kind == PrincipalSession {
 		return principal.sessionCredentialID
 	}
-	if principal.kind == PrincipalAPIKey || principal.kind == PrincipalMachineNotifier || principal.kind == PrincipalConversationService {
+	if principal.kind == PrincipalFlowProjection || principal.kind == PrincipalAPIKey || principal.kind == PrincipalMachineNotifier || principal.kind == PrincipalConversationService {
 		return strconv.FormatInt(principal.apiKeyID, 10)
 	}
 	return ""
@@ -186,6 +188,8 @@ func ReauthorizePrincipalTx(ctx context.Context, tx *sql.Tx, principal Principal
 		return nil, Principal{}, ErrCredentialUnavailable
 	}
 	switch principal.kind {
+	case PrincipalFlowProjection:
+		return reauthorizeFlowProjectionTx(ctx, tx, principal, now)
 	case PrincipalSession:
 		return reauthorizeSessionPrincipalTx(ctx, tx, principal, now)
 	case PrincipalAPIKey, PrincipalMachineNotifier, PrincipalConversationService:
@@ -319,11 +323,13 @@ func samePrincipalIdentity(left, right Principal) bool {
 		left.apiKeyID == right.apiKeyID &&
 		left.actorUserID == right.actorUserID &&
 		left.userID == right.userID &&
-		left.impersonated == right.impersonated
+		left.impersonated == right.impersonated && left.flowProjectID == right.flowProjectID
 }
 
 func (principal Principal) valid() bool {
 	switch principal.kind {
+	case PrincipalFlowProjection:
+		return principal.sessionCredentialID == "" && principal.apiKeyID > 0 && principal.userID > 0 && principal.actorUserID == principal.userID && !principal.impersonated && principal.flowProjectID > 0 && len(principal.scopes) == 0
 	case PrincipalSession:
 		return validSessionCredentialID(principal.sessionCredentialID) && principal.apiKeyID == 0 &&
 			principal.actorUserID > 0 && principal.userID > 0 &&

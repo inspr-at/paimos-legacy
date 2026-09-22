@@ -14224,6 +14224,55 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 BEGIN SELECT RAISE(ABORT,'conversation event is durable'); END`,
 	}})
 
+	// M198 / PAI-1054: scoped internal human reviewer. The compatibility roles
+	// stay external so old binaries cannot reinterpret the identity as a member.
+	migrations = append(migrations, migration{version: 198, steps: []string{
+		`ALTER TABLE users ADD COLUMN is_reviewer INTEGER NOT NULL DEFAULT 0 CHECK(is_reviewer IN (0,1))`,
+		`CREATE TRIGGER reviewer_identity_insert BEFORE INSERT ON users
+		 WHEN NEW.is_reviewer=1 AND (NEW.role!='external' OR NEW.role_key!='external' OR NEW.is_super_admin!=0)
+		 BEGIN SELECT RAISE(ABORT,'reviewer requires external compatibility roles'); END`,
+		`CREATE TRIGGER reviewer_identity_update BEFORE UPDATE ON users
+		 WHEN NEW.is_reviewer=1 AND (NEW.role!='external' OR NEW.role_key!='external' OR NEW.is_super_admin!=0 OR
+		 EXISTS(SELECT 1 FROM project_members WHERE user_id=NEW.id AND access_level='editor'))
+		 BEGIN SELECT RAISE(ABORT,'reviewer requires explicit viewer-only access'); END`,
+		`CREATE TRIGGER reviewer_membership_insert BEFORE INSERT ON project_members
+		 WHEN NEW.access_level='editor' AND EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND is_reviewer=1)
+		 BEGIN SELECT RAISE(ABORT,'reviewer cannot receive editor access'); END`,
+		`CREATE TRIGGER reviewer_membership_update BEFORE UPDATE ON project_members
+		 WHEN NEW.access_level='editor' AND EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND is_reviewer=1)
+		 BEGIN SELECT RAISE(ABORT,'reviewer cannot receive editor access'); END`,
+	}})
+
+	// M199 / PAI-1054: prevent new ambiguous email identities for every role.
+	// Existing rows remain untouched; deployments audit duplicates beforehand.
+	// A Flow projection credential is never a general API key.
+	// Older readers cannot find its hash in api_keys and therefore fail closed.
+	migrations = append(migrations, migration{version: 199, steps: []string{
+		`CREATE TRIGGER user_email_insert BEFORE INSERT ON users
+   WHEN trim(COALESCE(NEW.email,''))!='' AND EXISTS(SELECT 1 FROM users existing WHERE lower(trim(existing.email))=lower(trim(NEW.email)))
+   BEGIN SELECT RAISE(ABORT,'email must uniquely identify one user'); END`,
+		`CREATE TRIGGER user_email_update BEFORE UPDATE OF email ON users
+   WHEN trim(COALESCE(NEW.email,''))!='' AND lower(trim(COALESCE(NEW.email,'')))!=lower(trim(COALESCE(OLD.email,''))) AND EXISTS(SELECT 1 FROM users existing WHERE existing.id!=NEW.id AND lower(trim(existing.email))=lower(trim(NEW.email)))
+   BEGIN SELECT RAISE(ABORT,'email must uniquely identify one user'); END`,
+		`CREATE TABLE flow_projection_credentials (
+		 id INTEGER PRIMARY KEY AUTOINCREMENT,
+		 user_id INTEGER NOT NULL REFERENCES users(id),
+		 project_id INTEGER NOT NULL REFERENCES projects(id),
+		 name TEXT NOT NULL CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 128),
+		 key_hash TEXT NOT NULL UNIQUE CHECK(length(key_hash)=64 AND key_hash NOT GLOB '*[^0-9a-f]*'),
+		 created_at TEXT NOT NULL,
+		 expires_at TEXT NOT NULL CHECK(julianday(expires_at) IS NOT NULL AND julianday(created_at) IS NOT NULL AND julianday(expires_at)>julianday(created_at) AND julianday(expires_at)<=julianday(created_at)+30),
+		 disabled_at TEXT
+		)`,
+		`CREATE TRIGGER flow_projection_identity_immutable BEFORE UPDATE OF id,user_id,project_id,name,key_hash,created_at,expires_at ON flow_projection_credentials
+		 BEGIN SELECT RAISE(ABORT,'Flow projection credential identity is immutable'); END`,
+		`CREATE TRIGGER flow_projection_revocation_terminal BEFORE UPDATE OF disabled_at ON flow_projection_credentials
+		 WHEN OLD.disabled_at IS NOT NULL OR NEW.disabled_at IS NULL
+		 BEGIN SELECT RAISE(ABORT,'Flow projection revocation is terminal'); END`,
+		`CREATE TRIGGER flow_projection_no_delete BEFORE DELETE ON flow_projection_credentials
+		 BEGIN SELECT RAISE(ABORT,'Flow projection credential audit is durable'); END`,
+	}})
+
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

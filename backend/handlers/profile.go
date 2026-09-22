@@ -60,6 +60,9 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if body.Email != nil && !validateUniqueUserEmail(w, r, db.DB, user.ID, *body.Email) {
+		return
+	}
 	// PAI-368: search-scope shortcut. Empty string disables. Otherwise
 	// must be a JSON object with `code` and at least one true modifier
 	// among ctrl/alt/meta — shift-only chords collide with normal typing.
@@ -86,13 +89,6 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		if v != 0 && (v < 50 || v > 100) {
 			jsonError(w, "intake_confidence_threshold must be between 50 and 100 (or 0 to clear)", http.StatusBadRequest)
 			return
-		}
-		if v == 0 {
-			if _, err := db.DB.Exec(`UPDATE users SET intake_confidence_threshold=NULL WHERE id=?`, user.ID); err != nil {
-				jsonError(w, "update failed", http.StatusInternalServerError)
-				return
-			}
-			body.IntakeConfidenceThreshold = nil
 		}
 	}
 	// Convert *bool to *int for SQLite COALESCE (SQLite has no native bool)
@@ -141,9 +137,9 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			accruals_stats_enabled  = COALESCE(?, accruals_stats_enabled),
 			accruals_extra_statuses = COALESCE(?, accruals_extra_statuses),
 			search_scope_shortcut   = COALESCE(?, search_scope_shortcut),
-			intake_confidence_threshold = COALESCE(?, intake_confidence_threshold)
+			intake_confidence_threshold = CASE WHEN ?=0 THEN NULL ELSE COALESCE(?, intake_confidence_threshold) END
 		WHERE id = ?
-	`, body.FirstName, body.LastName, body.Email, mdDefault, monoFields, body.RecentProjectsLimit, body.RecentTimersLimit, body.Timezone, altTable, altDetail, body.Locale, body.PreviewHoverDelay, issueAutoRefreshEnabled, body.IssueAutoRefreshSeconds, accrualsEnabled, body.AccrualsExtraStatuses, body.SearchScopeShortcut, body.IntakeConfidenceThreshold, user.ID)
+	`, body.FirstName, body.LastName, body.Email, mdDefault, monoFields, body.RecentProjectsLimit, body.RecentTimersLimit, body.Timezone, altTable, altDetail, body.Locale, body.PreviewHoverDelay, issueAutoRefreshEnabled, body.IssueAutoRefreshSeconds, accrualsEnabled, body.AccrualsExtraStatuses, body.SearchScopeShortcut, body.IntakeConfidenceThreshold, body.IntakeConfidenceThreshold, user.ID)
 	if err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return

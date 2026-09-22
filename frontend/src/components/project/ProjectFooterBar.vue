@@ -46,6 +46,7 @@ const props = defineProps<{
   // edit rights on this project see it; non-admins never get the button
   // (deep-link access is separately guarded in ProjectDetailView).
   canEditSettings?: boolean
+  reviewer?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -66,8 +67,10 @@ const tabs = computed<TabSpec[]>(() => [
   { key: 'overview',  label: 'Overview',  icon: 'house',          count: null                                            },
   { key: 'knowledge', label: 'Knowledge', icon: 'book-open',      count: props.knowledgeEntries ?? null                  },
   { key: 'agents',    label: 'Agents',    icon: 'bot',            count: props.agentCount       ?? null                  },
+  ...(!props.reviewer ? [
   { key: 'docs',      label: 'Docs',      icon: 'file-text',      count: props.docsCount        ?? null                  },
   { key: 'coop',      label: 'Coop',      icon: 'handshake',      dot: props.coopPopulated === true                       },
+  ] as TabSpec[] : []),
   { key: 'context',   label: 'Context',   icon: 'git-branch',     count: props.contextRepos     ?? null                  },
 ])
 

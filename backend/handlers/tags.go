@@ -69,6 +69,32 @@ func IsValidTagColor(color string) bool {
 // ── Tag CRUD ────────────────────────────────────────────────────────────────
 
 func ListTags(w http.ResponseWriter, r *http.Request) {
+	if user := auth.GetUser(r); user != nil && user.Role == auth.RoleReviewer {
+		// A vocabulary entry may itself reveal a production project. Return
+		// only tags already attached to an explicitly shared project or issue.
+		rows, err := db.DB.Query(`SELECT DISTINCT t.id,t.name,t.color,t.description,t.system,t.created_at
+		 FROM tags t WHERE EXISTS(SELECT 1 FROM project_tags pt JOIN project_members pm ON pm.project_id=pt.project_id
+		 WHERE pt.tag_id=t.id AND pm.user_id=? AND pm.access_level='viewer')
+		 OR EXISTS(SELECT 1 FROM issue_tags it JOIN issues i ON i.id=it.issue_id
+		 JOIN project_members pm ON pm.project_id=i.project_id
+		 WHERE it.tag_id=t.id AND i.deleted_at IS NULL AND pm.user_id=? AND pm.access_level='viewer') ORDER BY t.name`, user.ID, user.ID)
+		if err != nil {
+			jsonError(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		tags := []models.Tag{}
+		for rows.Next() {
+			var tag models.Tag
+			if err := rows.Scan(&tag.ID, &tag.Name, &tag.Color, &tag.Description, &tag.System, &tag.CreatedAt); err != nil {
+				jsonError(w, "scan failed", http.StatusInternalServerError)
+				return
+			}
+			tags = append(tags, tag)
+		}
+		jsonOK(w, tags)
+		return
+	}
 	rows, err := db.DB.Query(
 		`SELECT id, name, color, description, system, created_at FROM tags ORDER BY name`)
 	if err != nil {

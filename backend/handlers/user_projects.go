@@ -205,7 +205,7 @@ func ListUserMemberships(w http.ResponseWriter, r *http.Request) {
 		}
 		if lvl == "" {
 			// No explicit row — apply the default for this user's role.
-			if auth.IsInternalRole(role) {
+			if auth.HasDefaultProjectAccess(role) {
 				m.AccessLevel = "editor"
 			} else {
 				m.AccessLevel = "none"
@@ -241,6 +241,15 @@ func UpsertUserMembership(w http.ResponseWriter, r *http.Request) {
 	lvl := auth.AccessLevel(body.AccessLevel)
 	if lvl != auth.AccessNone && lvl != auth.AccessViewer && lvl != auth.AccessEditor {
 		jsonError(w, "access_level must be none, viewer, or editor", http.StatusBadRequest)
+		return
+	}
+	var reviewer bool
+	if err := db.DB.QueryRow("SELECT is_reviewer FROM users WHERE id=?", userID).Scan(&reviewer); err != nil {
+		jsonError(w, "user not found", http.StatusNotFound)
+		return
+	}
+	if reviewer && lvl == auth.AccessEditor {
+		jsonError(w, "reviewers may only receive viewer or none access", http.StatusBadRequest)
 		return
 	}
 

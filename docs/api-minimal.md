@@ -361,11 +361,71 @@ DELETE /users/:id                   admin only
 POST   /users/:id/reset-totp        admin only
 ```
 
+Nonblank email assignments in user creation, admin updates and self-service
+profile updates must be unique after trimming and case normalization, including
+inactive and deleted users. Database triggers prevent new collisions from other
+writers. Existing duplicate rows are not rewritten: deployments must audit them
+using counts only, and OIDC refuses an ambiguous verified email rather than
+choosing an arbitrary principal. Clear or replace an old address explicitly
+before reusing it for another account.
+
 ## User memberships (project access)
+
+`reviewer` is an internal human role for read-only review of explicitly shared
+projects (PAI-1054). Create it with `POST /users` using `role: "reviewer"`, then
+grant `access_level: "viewer"` with the membership endpoint. It starts with no
+projects; neither creating a user nor adding a future project seeds access.
+Editor grants are rejected by both the API and the database. Converting an
+existing user to reviewer requires revoking existing grants first. All other
+roles retain their existing defaults. Real OIDC login matches the verified email
+of this pre-provisioned user; no application admin role or machine login substitutes for this human browser login.
+
+Reviewer reads are a closed allowlist in `backend/auth/reviewer.go`. They include
+the normal internal landing workspace, scoped project/issue lists and details,
+search, session-home, command palette, Agent Mode snapshots, and Flow state.
+User lists contain only the reviewer, tags contain only tags used by shared
+projects/issues, and saved views contain only their own views. Unowned issues,
+global CRM/customer/offer data, instance memory and orchestrator configuration,
+live event streams, API keys, security enrollment and unknown future endpoints
+are unavailable. Instance-root identity/revision is withheld from reviewer
+orchestration snapshots. The sole allowed application mutation is sign-out.
+The UI marks the account read-only and omits settings, Docs/Coop, knowledge graph,
+agent launchpads, Product sessions, worker controls and Connections polling. The
+project list, issues, overview, knowledge list, agent definitions and context
+remain readable. Hidden count sentinels do not mount for reviewers. Unsupported
+private page routes return to the shared workspace with an access explanation.
+Existing public assets, login endpoints,
+health/version and public capability-link routes retain their independent access
+contracts and do not gain authority from reviewer login.
+
+Administrators may separately provision a server-only Flow projection credential
+with `POST /auth/flow-projection-credentials` and body `{name, reviewer_user_id,
+project_id, expires_at}`. It requires an existing active reviewer with explicit
+viewer membership on the active project and an RFC3339 expiry within 30 days.
+The administrator must hold `flow:credentials:write` (or `*`); impersonation is
+refused. The response contains `{id, project_id, expires_at, key}` exactly once
+under `Cache-Control: private, no-store`. Capture it directly into protected
+server storage, never logs, tickets or browser evidence. No retrieval endpoint
+exists. `DELETE /auth/flow-projection-credentials/:id` revokes it permanently.
+
+This separate machine credential permits only exact `GET
+/api/projects/:id/baseline-batches/flow-state`, with no query parameters. It has
+no general API, authentication, draft or execution authority. M199 stores its
+hash outside `api_keys`, so older readers reject it. Every request and the
+projection transaction recheck owner, exact project, membership, expiry and
+revocation. The human test account still signs in through real OIDC; this
+credential only lets the Janus server read its sandbox projection. The sandbox
+must opt in via `POST /projects/:id/baseline-batches/opt-in {enabled:true}`.
+
+M198 stores the role as an `is_reviewer` discriminator with both compatibility
+role columns set to `external`. This avoids rebuilding the production users/FK
+tables and makes an older binary fail closed to external portal access. Never
+set the compatibility role to member: member intentionally has default editor
+access across projects. No existing account is converted by the migration.
 
 ```
 GET    /users/:id/memberships                     admin — effective per-project level for every project
-PUT    /users/:id/memberships/:projectId          admin — upsert grant {level: "none"|"viewer"|"editor"}
+PUT    /users/:id/memberships/:projectId          admin — upsert grant {access_level: "none"|"viewer"|"editor"}
 DELETE /users/:id/memberships/:projectId          admin — revert to role default
 
 GET    /users/:id/projects                        admin — legacy portal-grant list (kept for compat)

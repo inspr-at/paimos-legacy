@@ -26,6 +26,7 @@ const emit = defineEmits<{
   assign: [projectId: number, sessionId?: string]
 }>()
 const auth = useAuthStore()
+const isReviewer = computed(() => auth.user?.role === 'reviewer')
 const { locale } = useI18n()
 const editable = computed(() => (props.worker ? auth.canEdit(props.worker.project.id) : false))
 const actions = useHabitatActions({
@@ -237,7 +238,7 @@ onScopeDispose(stopVoice)
         {{ humanize(worker.delivery_trust.reason) }} ·
         {{ worker.delivery_trust.observed_at ?? 'No trusted delivery report' }}
       </p>
-      <HabitatAssignmentHistory :worker="worker" :workers="workers" :authority="authority" />
+      <HabitatAssignmentHistory v-if="!isReviewer" :worker="worker" :workers="workers" :authority="authority" />
       <details>
         <summary>Work contract</summary>
         <p>Output: {{ humanize(worker.work_contract.output_kind) }}</p>
@@ -251,7 +252,7 @@ onScopeDispose(stopVoice)
         </p>
       </details>
     </section>
-    <section>
+    <section v-if="!isReviewer">
       <h3>Controls</h3>
       <p v-if="!editable">Project edit permission is required to send or control.</p>
       <p v-else-if="!fresh">Refresh current evidence before using controls.</p>
@@ -518,7 +519,7 @@ onScopeDispose(stopVoice)
         "
       >
         Inspect coordinator</button
-      ><button v-else type="button" @click="emit('assign', project.project.id)">
+      ><button v-else-if="!isReviewer" type="button" @click="emit('assign', project.project.id)">
         Review coordinator setup
       </button>
     </section>
@@ -556,6 +557,7 @@ onScopeDispose(stopVoice)
         <RouterLink class="habitat-button" :to="`/projects/${project.project.id}?tab=knowledge`"
           >Knowledge</RouterLink
         ><RouterLink
+          v-if="!isReviewer"
           class="habitat-button"
           :to="{ path: '/', query: { view: 'sessions', project: String(project.project.id) } }"
           >Product sessions &amp; decisions</RouterLink

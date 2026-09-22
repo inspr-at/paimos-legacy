@@ -5010,6 +5010,122 @@
     }
   ],
   "paths": {
+    "/api/auth/flow-projection-credentials": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Provision an expiring single-project Flow projection credential",
+        "description": "Requires a current non-impersonated administrator with flow:credentials:write scope or *. Browser requests require CSRF proof. The owner must already be an active human reviewer with explicit viewer membership on the active project. Expiry must be within 30 days. The server credential permits only exact GET /api/projects/{project_id}/baseline-batches/flow-state without query parameters. It does not replace human OIDC browser login. The key is returned once under private, no-store and must be captured directly into protected server storage.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "reviewer_user_id",
+                  "project_id",
+                  "expires_at"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "reviewer_user_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "project_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Enrolled; key delivered once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "project_id",
+                    "expires_at",
+                    "key"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "project_id": {
+                      "type": "integer"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "One-time bearer; never log or include in browser evidence."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid expiry or unavailable reviewer membership"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/auth/flow-projection-credentials/{id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Permanently revoke a Flow projection credential",
+        "description": "Requires the same current administrator and flow:credentials:write scope as enrollment. Does not delete the audit record. Revocation is effective on the next request.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Active credential not found"
+          }
+        }
+      }
+    },
     "/api/models/catalog": {
       "get": {
         "tags": [

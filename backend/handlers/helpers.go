@@ -158,6 +158,9 @@ func handleDBError(w http.ResponseWriter, err error, entity string) bool {
 // For other users with no accessible projects, the clause evaluates to
 // an always-false predicate so the query returns zero rows.
 func projectIDFilter(r *http.Request, column string, allowOrphans bool) (string, []any) {
+	if user := auth.GetUser(r); user != nil && user.Role == auth.RoleReviewer {
+		allowOrphans = false // an unowned row is not an explicit project grant
+	}
 	ids := auth.AccessibleProjectIDs(r)
 	if ids == nil {
 		return "", nil // admin — no filter

@@ -30,6 +30,7 @@ const props = defineProps<{
   returnFocus: HTMLElement | null
   // PAI-980: instance CRM switch; adds the Customers door when on.
   crmEnabled?: boolean
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -77,7 +78,7 @@ const items = computed<PaletteItem[]>(() => {
     key: 'action:clear_session', group: 'Shell actions', label: 'Clear selected session',
     detail: 'Clear the current authorized v6 selection', activation: { kind: 'action', action: 'clear_session' },
   })
-  return [...result, ...actions]
+  return [...result, ...actions.filter(item => !props.readOnly || item.key === 'action:clear_session')]
 })
 const activeId = computed(() => items.value[activeIndex.value] ? `p6-command-${activeIndex.value}` : undefined)
 

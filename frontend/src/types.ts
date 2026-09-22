@@ -736,7 +736,7 @@ export interface Sprint {
 export interface User {
   id: number
   username: string
-  role: 'admin' | 'member' | 'external' | 'super_admin'
+  role: 'admin' | 'member' | 'reviewer' | 'external' | 'super_admin'
   status: 'active' | 'inactive' | 'deleted'
   nickname: string
   first_name: string

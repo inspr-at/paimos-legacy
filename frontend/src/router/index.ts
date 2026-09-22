@@ -18,7 +18,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useUndoStore } from "@/stores/undo";
-import { safePostLoginRedirect } from "@/router/redirects";
+import { safePostLoginRedirect, reviewerRouteAllowed } from "@/router/redirects";
 import { mustChangePassword } from "@/api/client";
 import { publicURL, routerHistoryBase } from "@/publicPath";
 import type { AppShell } from "@/router/shell";
@@ -281,6 +281,10 @@ router.beforeEach(async (to) => {
     const redirect = safePostLoginRedirect(to.query.redirect);
     return redirect || (auth.user.role === "external" ? "/portal" : "/");
   }
+  if (auth.user?.role === "reviewer" && !to.meta.public &&
+      !reviewerRouteAllowed(to.path, to.query)) {
+    return { path: "/", query: { access: "reviewer" } };
+  }
   // PAI-179: legacy /settings?tab=crm deep links redirect to the new
   // location under Integrations. Keep this redirect indefinitely —
   // bookmarks have a long tail.
@@ -303,7 +307,7 @@ router.beforeEach(async (to) => {
     return "/portal";
   }
   // Internal users accessing portal (admins can, members redirect home)
-  if (auth.user && auth.user.role === "member" && to.meta.portal) {
+  if (auth.user && ["member", "reviewer"].includes(auth.user.role) && to.meta.portal) {
     return "/";
   }
   // Per-project view access. Routes opt in by setting meta.projectIdParam

@@ -189,6 +189,7 @@ function toggleTheme() {
   }
 }
 function openTalk() {
+  if (auth.user?.role === 'reviewer') return
   if (commandContext.value) commandContext.value.openTalk()
   else void router.replace({ query: { ...route.query, view: 'sessions' } })
 }
@@ -241,14 +242,16 @@ onScopeDispose(() => {
         <div class="habitat-rail-bottom">
           <RouterLink
             class="habitat-rail-start"
+            v-if="auth.user?.role !== 'reviewer'"
             aria-label="Start work"
             :to="{ path: '/', query: { ...route.query, view: 'assign', session: undefined } }"
             ><Plus :size="18" aria-hidden="true" /><span>Start work</span></RouterLink
           >
-          <RouterLink class="habitat-rail-settings" to="/settings" aria-label="Settings"
+          <RouterLink v-if="auth.user?.role !== 'reviewer'" class="habitat-rail-settings" to="/settings" aria-label="Settings"
             ><Settings :size="17" aria-hidden="true" /><span>Settings</span></RouterLink
           >
           <RouterLink
+            v-if="auth.user?.role !== 'reviewer'"
             class="habitat-rail-account"
             to="/settings?tab=account"
             :aria-label="`Signed in as ${displayName}. Open settings`"
@@ -272,7 +275,7 @@ onScopeDispose(() => {
                 <span>Workspace</span><span>/</span><strong>{{ locationLabel }}</strong>
               </div>
               <div class="habitat-header-tools">
-                <button type="button" class="habitat-voice" @click="openTalk">
+                <button v-if="auth.user?.role !== 'reviewer'" type="button" class="habitat-voice" @click="openTalk">
                   <Mic :size="16" aria-hidden="true" /><span>Voice</span>
                 </button>
                 <button
@@ -297,6 +300,7 @@ onScopeDispose(() => {
                   />
                 </button>
                 <RouterLink
+                  v-if="auth.user?.role !== 'reviewer'"
                   class="habitat-account habitat-mobile-account"
                   to="/settings?tab=account"
                   :aria-label="`Signed in as ${displayName}. Open settings`"
@@ -318,14 +322,20 @@ onScopeDispose(() => {
               >
             </div>
           </template>
-          <div class="p6-shell-content"><slot /></div>
+          <div class="p6-shell-content">
+            <p v-if="auth.user?.role === 'reviewer'" role="status" class="reviewer-notice">
+              {{ displayName }} · Reviewer · Read-only access to shared projects. Administration, customer records and execution are unavailable.
+              <span v-if="route.query.access === 'reviewer'">The requested page is outside your shared-project access.</span>
+            </p>
+            <slot />
+          </div>
           <footer class="habitat-footer">
             <span>Agent Intercom · {{ brandName }}</span>
-            <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
               >Product sessions</RouterLink
             >
-            <RouterLink to="/legacy">Classic workspace</RouterLink>
-            <RouterLink to="/settings">Settings</RouterLink>
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/legacy">Classic workspace</RouterLink>
+            <RouterLink v-if="auth.user?.role !== 'reviewer'" to="/settings">Settings</RouterLink>
           </footer>
         </FlowHost>
       </div>
@@ -340,6 +350,7 @@ onScopeDispose(() => {
       :shortcut-source="palette.settings.value?.source ?? null"
       :selected-session-id="selectedSessionId"
       :crm-enabled="crmEnabled"
+      :read-only="auth.user?.role === 'reviewer'"
       :announcement="palette.announcement.value"
       :return-focus="commandButton"
       @update:query="palette.query.value = $event"
@@ -348,3 +359,14 @@ onScopeDispose(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.reviewer-notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  color: var(--h-muted);
+  background: var(--h-surface);
+  font-size: 0.875rem;
+}
+</style>

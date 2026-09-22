@@ -17,6 +17,7 @@ import (
 const AgentModeAuthorizationCTE = `WITH requester AS (
  SELECT u.id AS user_id,u.permissions_epoch,
   CASE
+   WHEN u.is_reviewer=1 THEN 'reviewer'
    WHEN u.is_super_admin=1 THEN 'super_admin'
    WHEN u.role_key='member' AND u.role IN ('admin','external') THEN u.role
    WHEN u.role_key IN ('admin','member','external','super_admin') THEN u.role_key
