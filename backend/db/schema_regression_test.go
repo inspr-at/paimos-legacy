@@ -32,7 +32,46 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 197
+const latestSchemaVersion = 198
+
+func TestMigration198PreservesExistingUsersAndGrants(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m198-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 197); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO users(username,password,role,role_key,status) VALUES
+	 ('m198-member','x','member','member','active'),('m198-admin','x','admin','admin','active'),('m198-external','x','external','external','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M198 existing','M198');
+	 INSERT INTO project_members(user_id,project_id,access_level) SELECT users.id,projects.id,'editor' FROM users CROSS JOIN projects WHERE users.role='member'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 198); err != nil {
+		t.Fatalf("migration not idempotent: %v", err)
+	}
+	var users, reviewers, grants int
+	if err := database.QueryRow("SELECT COUNT(*),SUM(is_reviewer) FROM users").Scan(&users, &reviewers); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow("SELECT COUNT(*) FROM project_members WHERE access_level='editor'").Scan(&grants); err != nil {
+		t.Fatal(err)
+	}
+	if users != 3 || reviewers != 0 || grants != 1 {
+		t.Fatalf("existing identity or grants changed: users=%d reviewers=%d grants=%d", users, reviewers, grants)
+	}
+	var mismatched int
+	if err := database.QueryRow("SELECT COUNT(*) FROM users WHERE role != role_key OR status != 'active'").Scan(&mismatched); err != nil || mismatched != 0 {
+		t.Fatalf("legacy roles changed: %d %v", mismatched, err)
+	}
+}
 
 func TestMigration197KeepsRevokedConversationCredentialDedicated(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m197-upgrade.db")+"?_txlock=immediate")

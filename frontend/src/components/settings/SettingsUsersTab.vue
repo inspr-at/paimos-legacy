@@ -17,6 +17,7 @@ const router = useRouter()
 
 const ROLE_OPTIONS: MetaOption[] = [
   { value: 'member', label: 'Member' },
+  { value: 'reviewer', label: 'Reviewer (shared projects only)' },
   { value: 'admin', label: 'Admin' },
   { value: 'super_admin', label: 'Super admin' },
   { value: 'external', label: 'External' },
@@ -106,7 +107,7 @@ function relativeTime(ts: string): string {
 
 const { sorted: sortedUsers, sortIndicator: userSortInd, thProps: userThProps } = useSort(visibleUsers, {
   username:   { value: u => u.username,   type: 'string' },
-  role:       { value: u => u.role,       type: { order: ['super_admin','admin','member','external'] } },
+  role:       { value: u => u.role,       type: { order: ['super_admin','admin','member','reviewer','external'] } },
   rate:       { value: u => u.internal_rate_hourly ?? 0, type: 'number' },
   created_at: { value: u => u.created_at, type: 'date' },
 })
@@ -136,19 +137,19 @@ const filter              = ref<FilterMode>('all')
 const addProjectId        = ref<number | null>(null)
 const addLevel            = ref<AccessLevel>('viewer')
 
-const isExternal = computed(() => membershipsTarget.value?.role === 'external')
-// Role default mirrors backend logic in ListUserMemberships: internal roles → editor, external → none.
-const roleDefault = computed<AccessLevel>(() => isExternal.value ? 'none' : 'editor')
+const explicitAccessOnly = computed(() => ['external', 'reviewer'].includes(membershipsTarget.value?.role ?? ''))
+// Reviewers and externals have no default project access.
+const roleDefault = computed<AccessLevel>(() => explicitAccessOnly.value ? 'none' : 'editor')
 const roleDefaultLabel = computed(() => roleDefault.value)
 const roleHint = computed(() => {
   if (!membershipsTarget.value) return ''
-  return isExternal.value
-    ? 'Externals start with no access. Grant per project below.'
-            : 'Internal users default to editor. Use this to override per project.'
+  return explicitAccessOnly.value
+    ? 'This role starts with no access. Grant read-only access per project below.'
+    : 'Members and admins default to editor. Use this to override per project.'
 })
-// Externals can only be None or Viewer; the Editor level is hidden for them.
+// Reviewers and externals are granted read-only access in this editor.
 const visibleLevels = computed(() =>
-  isExternal.value ? ACCESS_LEVELS.filter(l => l.value !== 'editor') : ACCESS_LEVELS
+  explicitAccessOnly.value ? ACCESS_LEVELS.filter(l => l.value !== 'editor') : ACCESS_LEVELS
 )
 const explicitRows = computed(() =>
   memberships.value
@@ -179,7 +180,7 @@ async function openMemberships(u: User) {
   // External rows are sparse (no seeded grants) — explicit-only is the
   // useful default. Staff defaults to editor everywhere — show all so
   // overrides are visible.
-  filter.value = u.role === 'external' ? 'explicit' : 'all'
+  filter.value = ['external', 'reviewer'].includes(u.role) ? 'explicit' : 'all'
   addProjectId.value = null
   addLevel.value = 'viewer'
   try {
@@ -218,7 +219,7 @@ async function addRow() {
   if (!membershipsTarget.value || !addProjectId.value) return
   const uid = membershipsTarget.value.id
   const pid = addProjectId.value
-  const lvl: AccessLevel = isExternal.value ? 'viewer' : addLevel.value
+  const lvl: AccessLevel = explicitAccessOnly.value ? 'viewer' : addLevel.value
   const row = memberships.value.find(r => r.project_id === pid)
   const prev = row?.access_level
   if (row) row.access_level = lvl // optimistic
@@ -585,7 +586,7 @@ loadUsers()
               {{ p.project_key }} — {{ p.project_name }}
             </option>
           </select>
-          <select v-if="!isExternal" v-model="addLevel" class="memb-add__field memb-add__lvl">
+          <select v-if="!explicitAccessOnly" v-model="addLevel" class="memb-add__field memb-add__lvl">
             <option value="viewer">Viewer</option>
             <option value="editor">Editor</option>
           </select>

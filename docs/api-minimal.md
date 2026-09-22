@@ -363,6 +363,34 @@ POST   /users/:id/reset-totp        admin only
 
 ## User memberships (project access)
 
+`reviewer` is an internal human role for read-only review of explicitly shared
+projects (PAI-1054). Create it with `POST /users` using `role: "reviewer"`, then
+grant `access_level: "viewer"` with the membership endpoint. It starts with no
+projects; neither creating a user nor adding a future project seeds access.
+Editor grants are rejected by both the API and the database. Converting an
+existing user to reviewer requires revoking existing grants first. All other
+roles retain their existing defaults. Real OIDC login matches the verified email
+of this pre-provisioned user; no application admin role or machine login is needed.
+
+Reviewer reads are a closed allowlist in `backend/auth/reviewer.go`. They include
+the normal internal landing workspace, scoped project/issue lists and details,
+search, session-home, command palette, Agent Mode snapshots, and Flow state.
+User lists contain only the reviewer, tags contain only tags used by shared
+projects/issues, and saved views contain only their own views. Unowned issues,
+global CRM/customer/offer data, instance memory and orchestrator configuration,
+live event streams, API keys, security enrollment and unknown future endpoints
+are unavailable. Instance-root identity/revision is withheld from reviewer
+orchestration snapshots. The sole allowed application mutation is sign-out.
+The UI marks the account read-only; existing public assets, login endpoints,
+health/version and public capability-link routes retain their independent access
+contracts and do not gain authority from reviewer login.
+
+M198 stores the role as an `is_reviewer` discriminator with both compatibility
+role columns set to `external`. This avoids rebuilding the production users/FK
+tables and makes an older binary fail closed to external portal access. Never
+set the compatibility role to member: member intentionally has default editor
+access across projects. No existing account is converted by the migration.
+
 ```
 GET    /users/:id/memberships                     admin — effective per-project level for every project
 PUT    /users/:id/memberships/:projectId          admin — upsert grant {level: "none"|"viewer"|"editor"}

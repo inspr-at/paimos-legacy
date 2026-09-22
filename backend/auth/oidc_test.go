@@ -466,6 +466,43 @@ func TestOIDCCallbackInviteOnlyRejectsUnknownUser(t *testing.T) {
 	}
 }
 
+func TestOIDCCallbackKeepsReviewerHumanAndExplicitlyScoped(t *testing.T) {
+	issuer := newOIDCMockIssuer(t, map[string]any{"sub": "reviewer-subject", "email": "reviewer@example.test", "email_verified": true})
+	setupOIDCTest(t, issuer)
+	userID := seedOIDCUser(t, "reviewer", "reviewer@example.test", "external", "active")
+	if _, err := db.DB.Exec("UPDATE users SET role_key='external',is_reviewer=1 WHERE id=?", userID); err != nil {
+		t.Fatal(err)
+	}
+	login, location := startOIDCLogin(t)
+	callback := finishOIDCCallback(t, login, location.Query().Get("state"))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("callback: %d", callback.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	for _, cookie := range callback.Result().Cookies() {
+		request.AddCookie(cookie)
+	}
+	called := false
+	Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		user := GetUser(r)
+		if user == nil || user.Role != RoleReviewer || !IsViaOIDC(r.Context()) || IsViaDevLogin(r.Context()) {
+			t.Fatal("OIDC reviewer identity lost")
+		}
+		principal, ok := GetPrincipal(r)
+		if !ok || principal.Kind() != PrincipalSession {
+			t.Fatal("reviewer did not receive a human browser session")
+		}
+		access := BuildAccessResponse(user)
+		if access.AllProjects || len(access.Levels) != 0 {
+			t.Fatal("OIDC login granted implicit projects")
+		}
+	})).ServeHTTP(httptest.NewRecorder(), request)
+	if !called {
+		t.Fatal("reviewer auth/me rejected")
+	}
+}
+
 func TestOIDCCallbackAutoCreateExternalUser(t *testing.T) {
 	issuer := newOIDCMockIssuer(t, map[string]any{
 		"sub":                "sub-auto",

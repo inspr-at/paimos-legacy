@@ -324,12 +324,12 @@ func commandPaletteCanViewProjectTx(ctx context.Context, tx *sql.Tx, user *model
 	if auth.IsAdmin(user) {
 		return true
 	}
-	if user == nil || user.Status != "active" || user.Role != auth.RoleMember {
+	if user == nil || user.Status != "active" || (user.Role != auth.RoleMember && user.Role != auth.RoleReviewer) {
 		return false
 	}
 	var level string
 	err := tx.QueryRowContext(ctx, `SELECT access_level FROM project_members WHERE user_id=? AND project_id=?`, user.ID, projectID).Scan(&level)
-	return errors.Is(err, sql.ErrNoRows) || (err == nil && (level == "viewer" || level == "editor"))
+	return (user.Role == auth.RoleMember && errors.Is(err, sql.ErrNoRows)) || (err == nil && (level == "viewer" || level == "editor"))
 }
 
 func parseCommandPaletteQuery(uri *url.URL) (string, int, bool) {

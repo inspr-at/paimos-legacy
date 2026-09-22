@@ -218,7 +218,7 @@ func ValidateScopesForRole(s ScopeSet, role string) error {
 // must cost that scope its keys, not silently widen every key that
 // carries it.
 func roleMeetsScopeMinimum(minimumRole, role string) bool {
-	if role == RoleExternal || !IsValidRole(role) {
+	if role == RoleExternal || role == RoleReviewer || !IsValidRole(role) {
 		return false
 	}
 	switch minimumRole {

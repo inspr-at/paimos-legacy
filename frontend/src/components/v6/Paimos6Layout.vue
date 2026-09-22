@@ -241,6 +241,7 @@ onScopeDispose(() => {
         <div class="habitat-rail-bottom">
           <RouterLink
             class="habitat-rail-start"
+            v-if="auth.user?.role !== 'reviewer'"
             aria-label="Start work"
             :to="{ path: '/', query: { ...route.query, view: 'assign', session: undefined } }"
             ><Plus :size="18" aria-hidden="true" /><span>Start work</span></RouterLink
@@ -272,7 +273,7 @@ onScopeDispose(() => {
                 <span>Workspace</span><span>/</span><strong>{{ locationLabel }}</strong>
               </div>
               <div class="habitat-header-tools">
-                <button type="button" class="habitat-voice" @click="openTalk">
+                <button v-if="auth.user?.role !== 'reviewer'" type="button" class="habitat-voice" @click="openTalk">
                   <Mic :size="16" aria-hidden="true" /><span>Voice</span>
                 </button>
                 <button
@@ -318,7 +319,12 @@ onScopeDispose(() => {
               >
             </div>
           </template>
-          <div class="p6-shell-content"><slot /></div>
+          <div class="p6-shell-content">
+            <p v-if="auth.user?.role === 'reviewer'" role="status" class="reviewer-notice">
+              Reviewer · Read-only access to shared projects. Administration, customer records and execution are unavailable.
+            </p>
+            <slot />
+          </div>
           <footer class="habitat-footer">
             <span>Agent Intercom · {{ brandName }}</span>
             <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
@@ -348,3 +354,14 @@ onScopeDispose(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.reviewer-notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  color: var(--h-muted);
+  background: var(--h-surface);
+  font-size: 0.875rem;
+}
+</style>

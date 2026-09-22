@@ -274,6 +274,9 @@ func Search(w http.ResponseWriter, r *http.Request) {
 		}
 		filtered := dedup.list[:0]
 		for _, iss := range dedup.list {
+			if user := auth.GetUser(r); user != nil && user.Role == auth.RoleReviewer && iss.ProjectID == nil {
+				continue
+			}
 			if allowed != nil && iss.ProjectID != nil && !allowed[*iss.ProjectID] {
 				continue
 			}
@@ -412,10 +415,14 @@ func Search(w http.ResponseWriter, r *http.Request) {
 		dedup.addAll(scanIssueRows(issRows))
 	}
 
-	// ── Users ─────────────────────────────────────────────────────────────────
-	userRows, err := db.DB.Query(`
+	// Instance directories and the global tag vocabulary are not shared-project
+	// data. Reviewers search projects/issues only; their tag picker is scoped.
+	if user := auth.GetUser(r); user == nil || user.Role != auth.RoleReviewer {
+		// ── Users ─────────────────────────────────────────────────────────────────
+		userRows, err := db.DB.Query(`
 		SELECT u.id, u.username,
 		       CASE
+		         WHEN u.is_reviewer = 1 THEN 'reviewer'
 		         WHEN u.is_super_admin = 1 THEN 'super_admin'
 		         WHEN u.role_key = 'member' AND u.role IN ('admin','external') THEN u.role
 		         WHEN u.role_key IN ('admin','member','external','super_admin') THEN u.role_key
@@ -428,18 +435,18 @@ func Search(w http.ResponseWriter, r *http.Request) {
 		  AND search_index MATCH ?
 		LIMIT 5
 	`, ftsQuery)
-	if err == nil {
-		defer userRows.Close()
-		for userRows.Next() {
-			var u SearchUser
-			if err := userRows.Scan(&u.ID, &u.Username, &u.Role); err == nil {
-				results.Users = append(results.Users, u)
+		if err == nil {
+			defer userRows.Close()
+			for userRows.Next() {
+				var u SearchUser
+				if err := userRows.Scan(&u.ID, &u.Username, &u.Role); err == nil {
+					results.Users = append(results.Users, u)
+				}
 			}
 		}
-	}
 
-	// ── Tags ──────────────────────────────────────────────────────────────────
-	tagRows, err := db.DB.Query(`
+		// ── Tags ──────────────────────────────────────────────────────────────────
+		tagRows, err := db.DB.Query(`
 		SELECT t.id, t.name, t.color, t.description, t.system, t.created_at
 		FROM search_index si
 		JOIN tags t ON t.id = si.entity_id
@@ -447,16 +454,17 @@ func Search(w http.ResponseWriter, r *http.Request) {
 		  AND search_index MATCH ?
 		LIMIT 5
 	`, ftsQuery)
-	if err == nil {
-		defer tagRows.Close()
-		for tagRows.Next() {
-			var t models.Tag
-			if err := tagRows.Scan(&t.ID, &t.Name, &t.Color, &t.Description, &t.System, &t.CreatedAt); err == nil {
-				results.Tags = append(results.Tags, t)
+		if err == nil {
+			defer tagRows.Close()
+			for tagRows.Next() {
+				var t models.Tag
+				if err := tagRows.Scan(&t.ID, &t.Name, &t.Color, &t.Description, &t.System, &t.CreatedAt); err == nil {
+					results.Tags = append(results.Tags, t)
+				}
 			}
 		}
-	}
 
+	}
 	// ── Issues via tag match ──────────────────────────────────────────────────
 	if len(results.Tags) > 0 {
 		tagIDs := make([]any, len(results.Tags))

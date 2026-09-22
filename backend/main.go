@@ -289,6 +289,7 @@ func liveUpdatesConfigured() bool {
 }
 
 func instanceHandler(w http.ResponseWriter, r *http.Request) {
+	reviewer := auth.GetUser(r) != nil && auth.GetUser(r).Role == auth.RoleReviewer
 	label := os.Getenv("INSTANCE_LABEL")
 	hostname, _ := os.Hostname()
 	w.Header().Set("Content-Type", "application/json")
@@ -301,8 +302,8 @@ func instanceHandler(w http.ResponseWriter, r *http.Request) {
 		"label":                label,
 		"hostname":             hostname,
 		"attachments_enabled":  storage.Enabled(),
-		"live_updates_enabled": liveUpdatesConfigured(),
-		"crm_enabled":          handlers.CRMModuleEnabled(r.Context()),
+		"live_updates_enabled": liveUpdatesConfigured() && !reviewer,
+		"crm_enabled":          handlers.CRMModuleEnabled(r.Context()) && !reviewer,
 	})
 }
 

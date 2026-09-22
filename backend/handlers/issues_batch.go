@@ -786,7 +786,8 @@ func LookupIssuesByKeys(w http.ResponseWriter, r *http.Request) {
 		}
 		// Per-item access — hide inaccessible issues as not-found so the
 		// endpoint doesn't leak existence to callers who can't see them.
-		if issue.ProjectID != nil && !auth.CanViewProject(r, *issue.ProjectID) {
+		reviewerOrphan := auth.GetUser(r) != nil && auth.GetUser(r).Role == auth.RoleReviewer && issue.ProjectID == nil
+		if reviewerOrphan || (issue.ProjectID != nil && !auth.CanViewProject(r, *issue.ProjectID)) {
 			out = append(out, map[string]any{"ref": ref, "error": "not found"})
 			continue
 		}

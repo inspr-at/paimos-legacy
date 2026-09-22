@@ -37,7 +37,7 @@ import { useSearchStore } from '@/stores/search'
 export interface User {
   id: number
   username: string
-  role: 'admin' | 'member' | 'external' | 'super_admin'
+  role: 'admin' | 'member' | 'reviewer' | 'external' | 'super_admin'
   status: 'active' | 'inactive' | 'deleted'
   created_at: string
   // Profile fields (migration 25)
@@ -207,6 +207,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function canView(projectId: number | null | undefined): boolean {
     if (!user.value) return false
+    if (user.value.role === 'reviewer' && projectId == null) return false
     if (projectId == null) return true // orphan / no project — show
     if (allProjects.value) return true
     return accessibleProjects.value.has(projectId)
@@ -214,6 +215,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function canEdit(projectId: number | null | undefined): boolean {
     if (!user.value) return false
+    if (user.value.role === 'reviewer') return false
     if (projectId == null) return true
     if (allProjects.value) return true
     return accessibleProjects.value.get(projectId) === 'editor'

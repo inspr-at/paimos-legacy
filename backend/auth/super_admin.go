@@ -31,13 +31,14 @@ const (
 	RoleAdmin      = "admin"
 	RoleMember     = "member"
 	RoleExternal   = "external"
+	RoleReviewer   = "reviewer"
 	RoleSuperAdmin = "super_admin"
 )
 
 // IsValidRole reports whether role is one of the persisted public roles.
 func IsValidRole(role string) bool {
 	switch role {
-	case RoleAdmin, RoleMember, RoleExternal, RoleSuperAdmin:
+	case RoleAdmin, RoleMember, RoleExternal, RoleSuperAdmin, RoleReviewer:
 		return true
 	default:
 		return false
@@ -52,10 +53,19 @@ func IsAdminRole(role string) bool {
 }
 
 func IsInternalRole(role string) bool {
+	return HasDefaultProjectAccess(role) || role == RoleReviewer
+}
+
+// HasDefaultProjectAccess excludes reviewers: being an internal human does
+// not imply an instance-wide project grant.
+func HasDefaultProjectAccess(role string) bool {
 	return IsAdminRole(role) || role == RoleMember
 }
 
 func LegacyRoleForPublicRole(role string) string {
+	if role == RoleReviewer {
+		return RoleExternal // older readers fail closed to the portal role
+	}
 	if role == RoleSuperAdmin {
 		return RoleAdmin
 	}

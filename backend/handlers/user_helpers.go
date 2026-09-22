@@ -21,6 +21,7 @@ import "github.com/inspr-at/paimos/backend/models"
 // direct "SELECT ... FROM users" queries). Role reads are canonicalized through
 // role_key; role/is_super_admin remain compatibility shims.
 const userRoleSelectExpr = `CASE
+	WHEN is_reviewer = 1 THEN 'reviewer'
 	WHEN is_super_admin = 1 THEN 'super_admin'
 	WHEN role_key = 'member' AND role IN ('admin','external') THEN role
 	WHEN role_key IN ('admin','member','external','super_admin') THEN role_key

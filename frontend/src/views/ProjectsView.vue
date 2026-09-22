@@ -60,6 +60,7 @@ const customerFilter = ref<string>('')
 const customers = ref<Array<{ id: number; name: string }>>([])
 
 async function loadCustomers() {
+  if (auth.user?.role === 'reviewer') return
   try {
     customers.value = (await api.get<Array<{ id: number; name: string }>>('/customers'))
       .map(c => ({ id: c.id, name: c.name }))

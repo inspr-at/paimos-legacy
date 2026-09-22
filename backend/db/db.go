@@ -14224,6 +14224,25 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 BEGIN SELECT RAISE(ABORT,'conversation event is durable'); END`,
 	}})
 
+	// M198 / PAI-1054: scoped internal human reviewer. The compatibility roles
+	// stay external so old binaries cannot reinterpret the identity as a member.
+	migrations = append(migrations, migration{version: 198, steps: []string{
+		`ALTER TABLE users ADD COLUMN is_reviewer INTEGER NOT NULL DEFAULT 0 CHECK(is_reviewer IN (0,1))`,
+		`CREATE TRIGGER reviewer_identity_insert BEFORE INSERT ON users
+		 WHEN NEW.is_reviewer=1 AND (NEW.role!='external' OR NEW.role_key!='external' OR NEW.is_super_admin!=0)
+		 BEGIN SELECT RAISE(ABORT,'reviewer requires external compatibility roles'); END`,
+		`CREATE TRIGGER reviewer_identity_update BEFORE UPDATE ON users
+		 WHEN NEW.is_reviewer=1 AND (NEW.role!='external' OR NEW.role_key!='external' OR NEW.is_super_admin!=0 OR
+		 EXISTS(SELECT 1 FROM project_members WHERE user_id=NEW.id AND access_level='editor'))
+		 BEGIN SELECT RAISE(ABORT,'reviewer requires explicit viewer-only access'); END`,
+		`CREATE TRIGGER reviewer_membership_insert BEFORE INSERT ON project_members
+		 WHEN NEW.access_level='editor' AND EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND is_reviewer=1)
+		 BEGIN SELECT RAISE(ABORT,'reviewer cannot receive editor access'); END`,
+		`CREATE TRIGGER reviewer_membership_update BEFORE UPDATE ON project_members
+		 WHEN NEW.access_level='editor' AND EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND is_reviewer=1)
+		 BEGIN SELECT RAISE(ABORT,'reviewer cannot receive editor access'); END`,
+	}})
+
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

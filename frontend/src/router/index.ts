@@ -303,7 +303,7 @@ router.beforeEach(async (to) => {
     return "/portal";
   }
   // Internal users accessing portal (admins can, members redirect home)
-  if (auth.user && auth.user.role === "member" && to.meta.portal) {
+  if (auth.user && ["member", "reviewer"].includes(auth.user.role) && to.meta.portal) {
     return "/";
   }
   // Per-project view access. Routes opt in by setting meta.projectIdParam

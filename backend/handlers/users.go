@@ -45,7 +45,20 @@ func normalizeUserRole(role string) (publicRole string, legacyRole string, super
 	return publicRole, legacyRole, superAdminFlag, true
 }
 
+// Preserve the existing SQLite role-key constraint and fail closed to external
+// on older versions. M198's discriminator is the canonical reviewer identity.
+func reviewerStorageRole(role string) string {
+	if role == auth.RoleReviewer {
+		return auth.RoleExternal
+	}
+	return role
+}
+
 func ListUsers(w http.ResponseWriter, r *http.Request) {
+	if user := auth.GetUser(r); user != nil && user.Role == auth.RoleReviewer {
+		jsonOK(w, []models.User{*user})
+		return
+	}
 	// By default only active + inactive. Pass ?status=deleted for trash.
 	status := r.URL.Query().Get("status")
 	var rows interface {
@@ -119,7 +132,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	publicRole, legacyRole, superAdminFlag, ok := normalizeUserRole(body.Role)
 	if !ok {
-		jsonError(w, "role must be admin, member, external, or super_admin", http.StatusBadRequest)
+		jsonError(w, "role must be admin, member, reviewer, external, or super_admin", http.StatusBadRequest)
 		return
 	}
 	actor := auth.GetUser(r)
@@ -147,9 +160,9 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(r.Context(),
-		`INSERT INTO users(username,password,role,role_key,is_super_admin,status,must_change_password,nickname,email,internal_rate_hourly,locale)
-		 VALUES(?,?,?,?,?,'active',?,?,?,?,?)`,
-		body.Username, hash, legacyRole, publicRole, superAdminFlag, mustChange,
+		`INSERT INTO users(username,password,role,role_key,is_super_admin,is_reviewer,status,must_change_password,nickname,email,internal_rate_hourly,locale)
+		 VALUES(?,?,?,?,?,?,'active',?,?,?,?,?)`,
+		body.Username, hash, legacyRole, reviewerStorageRole(publicRole), superAdminFlag, publicRole == auth.RoleReviewer, mustChange,
 		body.Nickname, body.Email, body.InternalRateHourly, locale,
 	)
 	if handleDBError(w, err, "username") {
@@ -204,7 +217,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Role != nil {
 		if publicRole, _, _, ok := normalizeUserRole(*body.Role); !ok {
-			jsonError(w, "role must be admin, member, external, or super_admin", http.StatusBadRequest)
+			jsonError(w, "role must be admin, member, reviewer, external, or super_admin", http.StatusBadRequest)
 			return
 		} else {
 			*body.Role = publicRole
@@ -246,11 +259,13 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 		var roleKeyArg any
 		var legacyRoleArg any
 		var superAdminArg any
+		var reviewerArg any
 		if body.Role != nil {
 			roleKey, legacyRole, superAdminFlag, _ := normalizeUserRole(*body.Role)
-			roleKeyArg = roleKey
+			roleKeyArg = reviewerStorageRole(roleKey)
 			legacyRoleArg = legacyRole
 			superAdminArg = superAdminFlag
+			reviewerArg = roleKey == auth.RoleReviewer
 		}
 		tx, err := db.DB.BeginTx(r.Context(), nil)
 		if err != nil {
@@ -259,19 +274,31 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback()
+		if body.Role != nil && *body.Role == auth.RoleReviewer && oldRole != auth.RoleReviewer {
+			var grants int
+			if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM project_members WHERE user_id=? AND access_level != 'none'", id).Scan(&grants); err != nil {
+				jsonError(w, "cannot verify existing project grants", http.StatusInternalServerError)
+				return
+			}
+			if grants != 0 {
+				jsonError(w, "revoke existing project grants before assigning reviewer", http.StatusBadRequest)
+				return
+			}
+		}
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE users SET
 				username             = COALESCE(?, username),
 				role                 = COALESCE(?, role),
 				role_key             = COALESCE(?, role_key),
 				is_super_admin       = COALESCE(?, is_super_admin),
+				is_reviewer          = COALESCE(?, is_reviewer),
 				status               = COALESCE(?, status),
 				nickname             = COALESCE(?, nickname),
 				email                = COALESCE(?, email),
 				internal_rate_hourly = COALESCE(?, internal_rate_hourly),
 				locale               = COALESCE(?, locale)
 			WHERE id = ?
-		`, body.Username, legacyRoleArg, roleKeyArg, superAdminArg, body.Status, body.Nickname, body.Email, body.InternalRateHourly, body.Locale, id)
+		`, body.Username, legacyRoleArg, roleKeyArg, superAdminArg, reviewerArg, body.Status, body.Nickname, body.Email, body.InternalRateHourly, body.Locale, id)
 		if handleDBError(w, err, "user") {
 			return
 		}
@@ -318,8 +345,8 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 		if actor != nil {
 			actorID = actor.ID
 		}
-		wasInternal := auth.IsInternalRole(oldRole)
-		nowInternal := auth.IsInternalRole(newRole)
+		wasInternal := auth.HasDefaultProjectAccess(oldRole)
+		nowInternal := auth.HasDefaultProjectAccess(newRole)
 		ctx := r.Context()
 		switch {
 		case wasInternal && !nowInternal:
