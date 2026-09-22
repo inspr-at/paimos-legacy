@@ -9,6 +9,21 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260922071824.0.0] — 2026-09-22
+
+### Added
+
+- Render native skills for Codex, Grok, Pi and Cursor with native paths, YAML frontmatter and managed drift detection. Discover run, review, resume and spawn command templates offline; model resolutions expose all four pinned operations and reject altered templates (PAI-1050).
+- Resolve model roles through the current catalog with model family, tier, effort, cross-family review routing, expiring instance overrides and an instance-bound offline cache (PAI-1049).
+
+### Fixed
+
+- Release the native send slot before publishing its reply so an immediate reply can acquire the slot without a circular wait (PAI-1047).
+
+### Deployment
+
+- Upgrade the server before operator CLIs: the new CLI fails closed when an older resolver omits operation templates. Native Grok supports skill rendering and syntax discovery; verified xAI model routing remains through Cursor (PAI-1050).
+
 ## [260921101051.0.0] — 2026-09-21
 
 ### Added
