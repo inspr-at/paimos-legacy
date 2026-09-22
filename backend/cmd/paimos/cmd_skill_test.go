@@ -367,3 +367,35 @@ func TestSkillRender_HarnessFromFileEscapeHatch(t *testing.T) {
 		t.Fatalf("manifest adapter output missing canonical header: %s", body)
 	}
 }
+
+func TestNativeSkillRenderAndDriftCheck(t *testing.T) {
+	srv := startFakeArtifactAPI(t)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+	for harness, root := range map[string]string{"codex": ".agents", "grok": ".grok", "pi": ".pi", "cursor": ".cursor"} {
+		t.Run(harness, func(t *testing.T) {
+			workspace := t.TempDir()
+			args := []string{"skill", "render", "--project", "ACME", "--agent", "qa", "--harness", harness, "--workspace", workspace}
+			if _, _, err := executeCLIForTest(t, args...); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(workspace, root, "skills", "qa", "SKILL.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(body), "---\n") {
+				t.Fatal("frontmatter must be first")
+			}
+			if _, _, err := executeCLIForTest(t, append(args, "--check")...); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(body, []byte("drift")...), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := executeCLIForTest(t, append(args, "--check")...); err == nil {
+				t.Fatal("missed drift")
+			}
+		})
+	}
+}

@@ -109,14 +109,14 @@ func BuildHeader(projectKey, agentName, rev, harness string) string {
 // header (PAI-331 entry point). A missing header is the exit-code-2 case
 // in --check mode.
 func HasHeader(body string) bool {
-	return strings.HasPrefix(strings.TrimLeft(stripBOM(body), " \t\r\n"), HeaderPrefix)
+	return ManagedHeader(body) != ""
 }
 
 // injectHeader prepends the header line + a blank line. If the adapter
 // already started its output with a header line (which it shouldn't,
 // but be defensive), we rewrite to use the dispatcher's canonical one.
 func injectHeader(header, content string) string {
-	trimmed := stripBOM(content)
+	frontmatter, trimmed := splitFrontmatter(stripBOM(content))
 	if strings.HasPrefix(trimmed, HeaderPrefix) {
 		// Drop existing header line — replace with ours so rev stays
 		// authoritative.
@@ -128,9 +128,32 @@ func injectHeader(header, content string) string {
 		trimmed = strings.TrimLeft(trimmed, "\n")
 	}
 	if trimmed == "" {
-		return header + "\n"
+		return frontmatter + header + "\n"
 	}
-	return header + "\n\n" + trimmed
+	return frontmatter + header + "\n\n" + trimmed
+}
+
+// ManagedHeader returns only the leading managed header, allowing native skill
+// frontmatter before it. Header-like text elsewhere in the body is not trusted.
+func ManagedHeader(body string) string {
+	_, rest := splitFrontmatter(strings.TrimLeft(stripBOM(body), " \t\r\n"))
+	rest = strings.TrimLeft(rest, " \t\r\n")
+	line, _, _ := strings.Cut(rest, "\n")
+	if strings.HasPrefix(line, HeaderPrefix) {
+		return line
+	}
+	return ""
+}
+
+func splitFrontmatter(content string) (string, string) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", content
+	}
+	if end := strings.Index(content[4:], "\n---\n"); end >= 0 {
+		end += 9
+		return content[:end] + "\n", strings.TrimLeft(content[end:], "\n")
+	}
+	return "", content
 }
 
 // stripBOM removes the UTF-8 BOM (U+FEFF) prefix if present. We never

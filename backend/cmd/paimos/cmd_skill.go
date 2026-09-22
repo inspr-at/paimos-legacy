@@ -24,7 +24,7 @@
 //
 // Adapter resolution order:
 //
-//   1. Built-in registry (claude-code today; PAI-333 will extract).
+//   1. Built-in registry (Claude Code plus native Codex/Grok/Pi/Cursor skills).
 //   2. --harness-from-file <path> — manifest-based adapter loaded for
 //      this invocation. Wins over a built-in of the same name (escape
 //      hatch for forks / experiments before PAI-332's SDK lands).
@@ -43,15 +43,19 @@ import (
 
 	"github.com/inspr-at/paimos/backend/cmd/paimos/adapters"
 	"github.com/inspr-at/paimos/backend/cmd/paimos/adapters/claudecode"
+	"github.com/inspr-at/paimos/backend/cmd/paimos/adapters/native"
 )
 
 // builtInAdaptersFn is the package-level hook tests use to swap in a
-// minimal registry. Production wiring registers the claude-code adapter
+// minimal registry. Production wiring registers the built-in skill adapters
 // and any adapters added via --harness-from-file.
 var builtInAdaptersFn = registerBuiltIns
 
 func registerBuiltIns(reg *adapters.Registry) {
 	reg.Register(claudecode.New())
+	for _, adapter := range native.All() {
+		reg.Register(adapter)
+	}
 }
 
 // adapterDiscoveryFn is the package-level hook for $PAIMOS_ADAPTER_PATH

@@ -25,6 +25,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/cmd/paimos/adapters"
+	"github.com/inspr-at/paimos/backend/cmd/paimos/adapters/native"
 	"github.com/inspr-at/paimos/backend/handlers"
 )
 
@@ -137,5 +139,31 @@ func TestAdapterRegistry_StableOrdering(t *testing.T) {
 			t.Fatalf("adapters not sorted by name: %q < %q", name, prev)
 		}
 		prev = name
+	}
+}
+
+func TestNativeAdapterRegistryMatchesBuiltIns(t *testing.T) {
+	response := fetchRegistry(t, "")
+	for _, adapter := range native.All() {
+		found := false
+		for _, entry := range response.Adapters {
+			if entry.Manifest["name"] == adapter.Name() {
+				found = true
+				expected := adapters.ManifestOf(adapter)
+				raw, _ := json.Marshal(expected)
+				var fields map[string]any
+				if err := json.Unmarshal(raw, &fields); err != nil {
+					t.Fatal(err)
+				}
+				for key, value := range fields {
+					if entry.Manifest[key] != value {
+						t.Fatalf("%s %s mismatch", adapter.Name(), key)
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s", adapter.Name())
+		}
 	}
 }

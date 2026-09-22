@@ -1284,7 +1284,10 @@ wrong, missing, foreign and revoked authority share `consumer_unavailable`.
 - `GET /api/models/catalog`: authenticated dispatch profiles, allowed model
   efforts, family/tier metadata, typed roles, and this instance's overrides.
 - `GET /api/models/resolve?role=<role>[&author_family=<family>][&harness=<harness>]`:
-  pinned profile, exact CLI command template, ordered ladder and skip reasons.
+  pinned profile, exact CLI run `command_template`, `command_templates`
+  (`run`, `review`, `resume`, `spawn`), ordered ladder and skip reasons.
+  Every model candidate carries the same pinned templates; CLI validation
+  rejects missing or altered operations, including skipped candidates.
   Review gates require the author's family; owner fallback has no profile.
 - `PUT /api/models/overrides` (admin): atomically replace
   `{"overrides":[{"profile_id":"claude-fable-xhigh","version":"2","state":"conserved","reason":"reserve allowance","until":"2026-09-30T00:00:00Z"}]}`.

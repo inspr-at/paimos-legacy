@@ -110,23 +110,25 @@ type ResolveRequest struct {
 }
 
 type Candidate struct {
-	ProfileID   string   `json:"profile_id"`
-	Profile     *Profile `json:"profile,omitempty"`
-	Command     string   `json:"command_template,omitempty"`
-	SkipReasons []string `json:"skip_reasons"`
-	Selected    bool     `json:"selected"`
+	ProfileID   string            `json:"profile_id"`
+	Profile     *Profile          `json:"profile,omitempty"`
+	Command     string            `json:"command_template,omitempty"`
+	Commands    *CommandTemplates `json:"command_templates,omitempty"`
+	SkipReasons []string          `json:"skip_reasons"`
+	Selected    bool              `json:"selected"`
 }
 
 type Resolution struct {
-	CatalogVersion string      `json:"catalog_version"`
-	Role           Role        `json:"role"`
-	Profile        *Profile    `json:"profile,omitempty"`
-	Command        string      `json:"command_template,omitempty"`
-	Ladder         []Candidate `json:"ladder"`
-	OwnerRequired  bool        `json:"owner_required"`
-	Source         string      `json:"source"`
-	Stale          bool        `json:"stale"`
-	CachedAt       *time.Time  `json:"cached_at,omitempty"`
+	CatalogVersion string            `json:"catalog_version"`
+	Role           Role              `json:"role"`
+	Profile        *Profile          `json:"profile,omitempty"`
+	Command        string            `json:"command_template,omitempty"`
+	Commands       *CommandTemplates `json:"command_templates,omitempty"`
+	Ladder         []Candidate       `json:"ladder"`
+	OwnerRequired  bool              `json:"owner_required"`
+	Source         string            `json:"source"`
+	Stale          bool              `json:"stale"`
+	CachedAt       *time.Time        `json:"cached_at,omitempty"`
 }
 
 func ValidFamily(f Family) bool { return f == OpenAI || f == Anthropic || f == XAI || f == Cursor }
@@ -190,7 +192,12 @@ func (r Registry) Resolve(request ResolveRequest, now time.Time) (Resolution, er
 			return Resolution{}, errors.New("role references an unavailable profile")
 		}
 		c.Profile = profile
-		c.Command = commandTemplate(*profile, *role)
+		templates, err := profileTemplates(*profile, *role)
+		if err != nil {
+			return Resolution{}, err
+		}
+		c.Commands = &templates
+		c.Command = templates.Run
 		if profile.Harness == request.Harness {
 			matchingHarness = true
 		}
@@ -209,6 +216,7 @@ func (r Registry) Resolve(request ResolveRequest, now time.Time) (Resolution, er
 			c.Selected = true
 			result.Profile = profile
 			result.Command = c.Command
+			result.Commands = c.Commands
 		}
 		result.Ladder = append(result.Ladder, c)
 	}
@@ -219,35 +227,6 @@ func (r Registry) Resolve(request ResolveRequest, now time.Time) (Resolution, er
 		return result, errors.New("no eligible model route")
 	}
 	return result, nil
-}
-
-// Only validated catalog values reach these templates. {prompt} is a literal
-// placeholder, not interpolated user input; resolving never runs the command.
-func commandTemplate(p Profile, role Role) string {
-	switch p.Harness {
-	case "codex":
-		if role.ReadOnly {
-			return fmt.Sprintf("codex exec -m %s -c model_reasoning_effort=%s --sandbox read-only '{prompt}'", p.Model, p.Effort)
-		}
-		return fmt.Sprintf("codex exec -m %s -c model_reasoning_effort=%s '{prompt}'", p.Model, p.Effort)
-	case "claude":
-		if role.ReadOnly {
-			return fmt.Sprintf("claude -p --model %s --effort %s --permission-mode plan '{prompt}'", p.Model, p.Effort)
-		}
-		return fmt.Sprintf("claude -p --model %s --effort %s '{prompt}'", p.Model, p.Effort)
-	case "pi":
-		if role.ReadOnly {
-			return fmt.Sprintf("pi --model %s:%s --tools read,grep,find,ls -p '{prompt}'", p.Model, p.Effort)
-		}
-		return fmt.Sprintf("pi --model %s:%s -p '{prompt}'", p.Model, p.Effort)
-	case "cursor":
-		if role.ReadOnly {
-			return fmt.Sprintf("cursor-agent --trust --mode ask --model %s -p '{prompt}'", p.Model)
-		}
-		return fmt.Sprintf("cursor-agent --trust --model %s -p '{prompt}'", p.Model)
-	default:
-		return ""
-	}
 }
 
 // ValidateResolution prevents an older/malformed server response from becoming
@@ -265,7 +244,7 @@ func ValidateResolution(request ResolveRequest, result Resolution) error {
 	selected := false
 	for i, c := range result.Ladder {
 		baseline := expected.Ladder[i]
-		if c.ProfileID != baseline.ProfileID || !reflect.DeepEqual(c.Profile, baseline.Profile) || c.Command != baseline.Command {
+		if c.ProfileID != baseline.ProfileID || !reflect.DeepEqual(c.Profile, baseline.Profile) || c.Command != baseline.Command || !reflect.DeepEqual(c.Commands, baseline.Commands) {
 			return invalid
 		}
 		for _, required := range baseline.SkipReasons {
@@ -286,10 +265,10 @@ func ValidateResolution(request ResolveRequest, result Resolution) error {
 		if c.Selected {
 			selected = true
 			if c.ProfileID == "owner" {
-				if !result.OwnerRequired || result.Profile != nil || result.Command != "" {
+				if !result.OwnerRequired || result.Profile != nil || result.Command != "" || result.Commands != nil {
 					return invalid
 				}
-			} else if result.OwnerRequired || result.Profile == nil || *result.Profile != *c.Profile || result.Command != c.Command {
+			} else if result.OwnerRequired || result.Profile == nil || *result.Profile != *c.Profile || result.Command != c.Command || !reflect.DeepEqual(result.Commands, c.Commands) {
 				return invalid
 			}
 		}
