@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, nextTick } from 'vue'
 import OfferProse from './OfferProse.vue'
+import type { ProseCommand } from './offerProseSession'
 import type { OfferTextNode } from './types'
 
 type Update = { body: string; nodes?: OfferTextNode[] }
@@ -15,11 +16,12 @@ async function mount(props: { body: string; nodes?: OfferTextNode[] }) {
     label: 'Textbaustein 1',
     onUpdate: (value: Update) => updates.push(value),
   })
-  app.mount(el)
+  const vm = app.mount(el) as unknown as { format: (command: ProseCommand) => void }
   await nextTick()
   return {
     el,
     updates,
+    vm,
     root: el.querySelector<HTMLElement>('.offer-prose')!,
     unmount() {
       app.unmount()
@@ -87,9 +89,7 @@ describe('OfferProse editor', () => {
       ],
     })
     place(mounted.root, 1, 2)
-    const button = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Liste"]')!
-    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    button.click()
+    mounted.vm.format({ type: 'list', kind: 'bullet' })
     await nextTick()
     const saved = lastUpdate(mounted.updates)
     expect(saved?.nodes?.[0]?.kind).toBe('paragraph')
@@ -211,9 +211,7 @@ describe('OfferProse editor', () => {
     const legacy = 'A'.repeat(2002)
     const mounted = await mount({ body: legacy })
     place(mounted.root, 0, legacy.length)
-    const button = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Liste"]')!
-    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    button.click()
+    mounted.vm.format({ type: 'list', kind: 'bullet' })
     await nextTick()
     expect(mounted.updates).toEqual([])
     expect(mounted.el.querySelector('[role="alert"]')?.textContent).toMatch(/zu lang/)
@@ -228,9 +226,7 @@ describe('OfferProse editor', () => {
   it('converts a CRLF legacy body into a list without a carriage return', async () => {
     const mounted = await mount({ body: 'Alpha\r\nBeta' })
     place(mounted.root, 0, 'Alpha\r\nBeta'.length)
-    const button = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Liste"]')!
-    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    button.click()
+    mounted.vm.format({ type: 'list', kind: 'bullet' })
     await nextTick()
     expect(lastUpdate(mounted.updates)?.nodes).toEqual([{ kind: 'item', text: 'Alpha\nBeta' }])
     expect(mounted.root.textContent).not.toContain('\r')

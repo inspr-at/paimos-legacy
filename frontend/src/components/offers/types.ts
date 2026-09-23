@@ -1,9 +1,17 @@
 import { formatDecimal, formatDecimalFlex } from '@/composables/useNumberFormat'
 import { formatDateWithLocale, formatDateTimeWithLocale } from '@/composables/useDateFormat'
+export const OFFER_BULLET_MARKERS = ['disc', 'circle', 'square', 'dash'] as const
+export type OfferBulletMarker = (typeof OFFER_BULLET_MARKERS)[number]
+export type OfferMarker = OfferBulletMarker | 'decimal'
 export interface OfferTextNode {
   kind: 'paragraph' | 'item'
   text: string
   depth?: number
+  marker?: OfferMarker
+}
+export interface OfferFooterLayout {
+  logo_width_mm: number
+  logo_offset_mm: number
 }
 export interface OfferBlock {
   heading: string
@@ -62,6 +70,7 @@ export interface OfferDocument extends OfferDefaults {
   }
   positions: OfferPosition[]
   net_total_cents: number
+  footer?: OfferFooterLayout
 }
 export interface OfferConfirmation {
   state: string

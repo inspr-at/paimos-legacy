@@ -305,9 +305,16 @@ without application chrome; browser Print / Save as PDF exports the same documen
 The v8 visual rules are preserved, with extra pages when the complete terms or
 positions exceed A4. An indivisible item exceeding a whole page must be split or
 shortened before printing. A text-block body may also carry optional `nodes`:
-paragraphs and nested bullet items (depth 0–5). Without `nodes`, `body` stays
+paragraphs and nested bullet or numbered items (depth 0–5). An item may set
+`marker` to `disc`, `circle`, `square`, `dash` or `decimal`. Without `marker`,
+an item keeps the depth glyph (•, ◦, ▪). Decimal numbers restart after a
+paragraph or a non-numbered item at the same depth; nested numbers count on
+their own level. Without `nodes`, `body` stays
 literal plain text, including characters that look like Markdown. The editor,
-public page and PDF share that markup. A block that is still taller than one
+public page and PDF share that markup. Optional `footer.logo_width_mm` (18–96)
+and `footer.logo_offset_mm` (0–10) size and lower only the centered footer mark.
+Absent `footer` keeps the previous lockup. New offers start at 43.3 mm wide and
+2 mm lower. Accepted and other non-draft offers stay immutable. A block that is still taller than one
 page keeps its full text and refuses print instead of clipping it. Headings,
 addresses, the introduction and position lines stay plain. Settings preserve
 `nodes` but do not edit them. Bundled fonts avoid external font dependencies.

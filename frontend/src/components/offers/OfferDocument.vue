@@ -4,17 +4,18 @@ import '@fontsource/manrope/latin-400.css'
 import '@fontsource/manrope/latin-500.css'
 import '@fontsource/manrope/latin-600.css'
 import '@fontsource/manrope/latin-700.css'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import OfferCover from './OfferCover.vue'
 import OfferText from './OfferText.vue'
 import OfferProse from './OfferProse.vue'
 import { offerBlockExceedsPage, offerBlockOverflowMessage } from './offerProse'
 import type { OfferTextNode } from './types'
+import { date, type Offer } from './types'
+import { OFFER_FOOTER_LOGO } from './offerLayout'
 import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
 import OfferFootmark from './OfferFootmark.vue'
 import OfferBrandDots from './OfferBrandDots.vue'
-import { date, type Offer } from './types'
 const props = defineProps<{
   offer: Pick<Offer, 'offer_no' | 'document'> & Partial<Offer>
   zoom?: number
@@ -127,6 +128,15 @@ function move(i: number, direction: number) {
   props.offer.document.positions.splice(j, 0, p)
   emit('change')
 }
+const footerShift = computed(() => {
+  const footer = props.offer.document.footer
+  if (!footer) return undefined
+  const scale = footer.logo_width_mm / OFFER_FOOTER_LOGO.defaultWidthMm
+  return {
+    transform: `translateY(${footer.logo_offset_mm}mm)`,
+    fontSize: `${7.5 * scale}pt`,
+  }
+})
 defineExpose({ paginate })
 </script>
 <template>
@@ -224,7 +234,10 @@ defineExpose({ paginate })
           <span>{{ offer.offer_no }}</span
           ><OfferFootmark
             v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
-          /><span v-else class="footmark">{{ offer.document.sender.company }}</span
+            :layout="offer.document.footer"
+          /><span v-else class="footmark" :style="footerShift">{{
+            offer.document.sender.company
+          }}</span
           ><span class="right">SEITE {{ index + 1 }} VON {{ pages.length }}</span>
         </div>
       </section>

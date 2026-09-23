@@ -1,28 +1,22 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
-import {
-  ArrowLeft,
-  Trash2,
-  Undo2,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  FileCheck2,
-  Link,
-  ListPlus,
-  LoaderCircle,
-  Minus,
-  Plus,
-  Printer,
-  Save,
-  Settings2,
-} from 'lucide-vue-next'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { Trash2, Undo2 } from 'lucide-vue-next'
 import { ensureUTC } from '@/composables/useDateFormat'
 import { OFFER_CHROME_KEY } from '@/composables/useOfferChrome'
 import { publicURL } from '@/publicPath'
-import { offerStatus, receiptTime, validOfferEmail } from '@/components/offers/types'
+import OfferTitleBar from '@/components/offers/OfferTitleBar.vue'
+import {
+  offerToolbarActions,
+  type OfferToolbarActionId,
+} from '@/components/offers/offerToolbarActions'
+import { provideOfferProseSession } from '@/components/offers/offerProseSession'
+import {
+  offerStatus,
+  receiptTime,
+  validOfferEmail,
+  type OfferFooterLayout,
+} from '@/components/offers/types'
 import { api, errMsg, ApiError } from '@/api/client'
 import { crmEnabled, instanceHostname, loadInstance } from '@/api/instance'
 import { useAuthStore } from '@/stores/auth'
@@ -35,28 +29,23 @@ const route = useRoute(),
   auth = useAuthStore()
 const offer = ref<Offer>()
 const collapsed = inject(OFFER_CHROME_KEY, ref(true))
-const toolbar = ref<HTMLElement>()
+provideOfferProseSession()
+const toolbar = ref<{ root?: HTMLElement } | null>(null)
+function toolbarElement(): HTMLElement | undefined {
+  return toolbar.value?.root
+}
 const viewport = ref<HTMLElement>()
 const zoomMode = ref('width')
 const zoom = ref(1)
-const zoomSteps = [50, 75, 100, 125, 150, 175, 200]
 function fitZoom() {
   const width = (viewport.value?.clientWidth ?? window.innerWidth) - 32
-  const height = window.innerHeight - (toolbar.value?.getBoundingClientRect().bottom ?? 0) - 32
+  const height = window.innerHeight - (toolbarElement()?.getBoundingClientRect().bottom ?? 0) - 32
   zoom.value =
     zoomMode.value === 'width'
       ? Math.max(0.1, width / ((210 * 96) / 25.4))
       : zoomMode.value === 'page'
         ? Math.max(0.1, Math.min(width / ((210 * 96) / 25.4), height / ((297 * 96) / 25.4)))
         : Number(zoomMode.value) / 100
-}
-function stepZoom(direction: number) {
-  const current = Math.round(zoom.value * 100)
-  zoomMode.value = String(
-    direction > 0
-      ? (zoomSteps.find((n) => n > current) ?? 200)
-      : ([...zoomSteps].reverse().find((n) => n < current) ?? 50),
-  )
 }
 watch([zoomMode, collapsed], async () => {
   await nextTick()
@@ -88,7 +77,7 @@ const renderer = ref<InstanceType<typeof OfferDocument>>()
 const finalizeDialog = ref<HTMLDialogElement>()
 watch(loading, async () => {
   await nextTick()
-  if (toolbar.value) resizeObserver?.observe(toolbar.value)
+  if (toolbarElement()) resizeObserver?.observe(toolbarElement()!)
   fitZoom()
 })
 watch(finalizeOpen, async (open) => {
@@ -321,6 +310,32 @@ function downloadDraft() {
   link.click()
   URL.revokeObjectURL(url)
 }
+const toolbarActions = computed(() =>
+  offerToolbarActions({
+    hasOffer: !!offer.value,
+    status: offer.value?.status ?? '',
+    printMode: printMode.value,
+    isAdmin: auth.isAdmin,
+    editable: editable.value,
+    saving: saving.value,
+    overflow: !!overflow.value,
+    copied: copied.value,
+    collapsed: collapsed.value,
+    linkAvailable: !!publicUrl.value || auth.isAdmin,
+  }),
+)
+function onToolbarAction(id: OfferToolbarActionId) {
+  if (id === 'link') void copyLink()
+  else if (id === 'settings') settingsOpen.value = true
+  else if (id === 'position') addPosition()
+  else if (id === 'duplicate') void duplicate()
+  else if (id === 'finalize') finalizeOpen.value = true
+  else if (id === 'chrome') collapsed.value = !collapsed.value
+}
+function onFooter(value: OfferFooterLayout) {
+  if (!editable.value || !offer.value) return
+  offer.value.document.footer = value
+}
 function addPosition() {
   offer.value?.document.positions.push({
     short_text: '',
@@ -343,7 +358,7 @@ onMounted(() => {
   window.addEventListener('resize', fitZoom)
   resizeObserver = new ResizeObserver(fitZoom)
   if (viewport.value) resizeObserver.observe(viewport.value)
-  if (toolbar.value) resizeObserver.observe(toolbar.value)
+  if (toolbarElement()) resizeObserver.observe(toolbarElement()!)
   fitZoom()
 })
 const confirmationTimer = setInterval(() => {
@@ -366,155 +381,37 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
 <template>
   <main ref="viewport" class="offer-view" :class="{ 'is-collapsed': collapsed }">
     <template v-if="crmEnabled">
-      <header ref="toolbar" class="offer-tools">
-        <RouterLink
-          class="tool-button icon-only"
-          :to="
-            printMode
-              ? `/crm/offers/${route.params.id}`
-              : offer
-                ? `/crm/${offer.customer_id}`
-                : '/crm'
-          "
-          :title="printMode ? 'Zum Angebot' : 'Zum Kunden'"
-          :aria-label="printMode ? 'Zum Angebot' : 'Zum Kunden'"
-          ><ArrowLeft :size="16"
-        /></RouterLink>
-        <strong class="offer-number" :title="instanceHostname">{{
-          offer?.offer_no || 'Angebot'
-        }}</strong>
-        <div class="save-state" role="status" aria-live="polite">
-          <button
-            v-if="editable"
-            class="save-button tool-button"
-            type="button"
-            :disabled="busy || loading"
-            title="Jetzt speichern"
-            aria-label="Jetzt speichern"
-            @click="save(true)"
-          >
-            <LoaderCircle v-if="busy" :size="15" class="save-spinner" />
-            <template v-else
-              ><Check v-if="!dirty && !saveFailed" :size="15" class="save-check" /><Save
-                :size="15"
-                :class="{ 'save-hover': !dirty && !saveFailed }"
-            /></template>
-          </button>
-          <LoaderCircle v-else-if="busy" :size="15" class="save-spinner" />
-          <span>{{ state }}</span
-          ><time
-            v-if="savedAt"
-            :datetime="offer?.updated_at"
-            :title="`Zuletzt gespeichert: ${savedAt}`"
-            >{{ savedAt }}</time
-          >
-        </div>
-        <div class="offer-actions">
-          <div class="zoom-controls" role="group" aria-label="Dokumentzoom">
-            <button
-              type="button"
-              class="tool-button icon-only"
-              title="Verkleinern"
-              aria-label="Verkleinern"
-              :disabled="zoom <= 0.5"
-              @click="stepZoom(-1)"
-            >
-              <Minus :size="14" />
-            </button>
-            <select v-model="zoomMode" aria-label="Zoom">
-              <option value="width">Seitenbreite</option>
-              <option value="page">Ganze Seite</option>
-              <option v-for="level in zoomSteps" :key="level" :value="String(level)">
-                {{ level }} %
-              </option>
-            </select>
-            <button
-              type="button"
-              class="tool-button icon-only"
-              title="Vergrößern"
-              aria-label="Vergrößern"
-              :disabled="zoom >= 2"
-              @click="stepZoom(1)"
-            >
-              <Plus :size="14" />
-            </button>
-          </div>
-          <button
-            v-if="offer && offer.status !== 'draft' && !printMode && (publicUrl || auth.isAdmin)"
-            class="tool-button"
-            type="button"
-            :title="copied ? 'Link kopiert' : 'Kundenlink kopieren'"
-            aria-label="Kundenlink kopieren"
-            @click="copyLink"
-          >
-            <Link :size="16" /><span class="action-label">{{ copied ? 'Kopiert' : 'Link' }}</span>
-          </button>
-          <button
-            v-if="editable"
-            class="tool-button"
-            type="button"
-            title="Absender & Textbausteine"
-            aria-label="Absender & Textbausteine"
-            @click="settingsOpen = true"
-          >
-            <Settings2 :size="16" /><span class="action-label">Texte</span>
-          </button>
-          <button
-            v-if="editable"
-            class="tool-button"
-            type="button"
-            title="Position hinzufügen"
-            aria-label="Position hinzufügen"
-            @click="addPosition"
-          >
-            <ListPlus :size="16" /><span class="action-label">Position</span>
-          </button>
-          <button
-            v-if="auth.isAdmin && offer && !printMode"
-            class="tool-button"
-            type="button"
-            title="Duplizieren"
-            aria-label="Duplizieren"
-            :disabled="saving"
-            @click="duplicate"
-          >
-            <Copy :size="16" /><span class="action-label">Duplizieren</span>
-          </button>
-          <button
-            v-if="editable"
-            class="tool-button"
-            type="button"
-            title="Finalisieren: Kundenlink und QR-Code erstellen"
-            aria-label="Finalisieren"
-            :disabled="saving || !!overflow"
-            @click="finalizeOpen = true"
-          >
-            <FileCheck2 :size="16" /><span class="action-label">Finalisieren</span>
-          </button>
-          <button
-            v-if="offer"
-            class="tool-button print-button"
-            type="button"
-            title="Druckansicht / PDF"
-            aria-label="Druckansicht / PDF"
-            :disabled="saving || !!overflow || conflict"
-            @click="printOffer"
-          >
-            <Printer :size="16" /><span>PDF</span>
-          </button>
-          <button
-            v-if="!printMode"
-            class="tool-button icon-only"
-            type="button"
-            :aria-expanded="!collapsed"
-            :title="collapsed ? 'Kopfzeilen ausklappen' : 'Kopfzeilen einklappen'"
-            :aria-label="collapsed ? 'Kopfzeilen ausklappen' : 'Kopfzeilen einklappen'"
-            @click="collapsed = !collapsed"
-          >
-            <ChevronDown v-if="collapsed" :size="16" /><ChevronUp v-else :size="16" />
-          </button>
-        </div>
-      </header>
+      <OfferTitleBar
+        ref="toolbar"
+        :back-to="
+          printMode
+            ? `/crm/offers/${route.params.id}`
+            : offer
+              ? `/crm/${offer.customer_id}`
+              : '/crm'
+        "
+        :back-label="printMode ? 'Zum Angebot' : 'Zum Kunden'"
+        :offer-no="offer?.offer_no || 'Angebot'"
+        :hostname="instanceHostname"
+        :editable="editable"
+        :busy="busy"
+        :loading="loading"
+        :dirty="dirty"
+        :save-failed="saveFailed"
+        :state="state"
+        :saved-at="savedAt"
+        :saved-at-iso="offer?.updated_at || ''"
+        v-model:zoom-mode="zoomMode"
+        :zoom="zoom"
+        :print-disabled="saving || !!overflow || conflict"
+        :show-print="!!offer"
+        :actions="toolbarActions"
+        :footer="offer?.document.footer ?? null"
+        @save="save(true)"
+        @print="printOffer"
+        @action="onToolbarAction"
+        @footer="onFooter"
+      />
       <p v-if="loading" class="offer-notice">Angebot wird geladen …</p>
       <p v-if="error || overflow" role="alert" class="offer-notice offer-error">
         {{ error || overflow }}
@@ -676,153 +573,6 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
 
 .offer-view {
   min-width: 0;
-}
-.offer-tools {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 6px 12px;
-  background: var(--h-surface, var(--bg-card));
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 20;
-}
-.offer-number {
-  font-size: 12px;
-  white-space: nowrap;
-}
-.tool-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 30px;
-  min-height: 30px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-decoration: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.tool-button:hover:not(:disabled),
-.tool-button:focus-visible {
-  background: var(--h-hover, #e7f2ef);
-  border-color: var(--border);
-}
-.tool-button:focus-visible,
-select:focus-visible {
-  outline: 2px solid #0e6f6c;
-  outline-offset: 2px;
-}
-.tool-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.icon-only {
-  width: 28px;
-  padding: 0;
-}
-.save-state {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.save-state time {
-  margin-left: 3px;
-  font-variant-numeric: tabular-nums;
-}
-.save-button {
-  width: 27px;
-  padding: 0;
-}
-.save-check {
-  color: #248358;
-}
-.save-hover {
-  display: none;
-}
-.save-button:hover .save-check,
-.save-button:focus-visible .save-check {
-  display: none;
-}
-.save-button:hover .save-hover,
-.save-button:focus-visible .save-hover {
-  display: block;
-}
-.save-spinner {
-  animation: save-spin 1s linear infinite;
-}
-@keyframes save-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .save-spinner {
-    animation: none;
-  }
-}
-.offer-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-}
-.is-collapsed .action-label {
-  display: none;
-}
-.zoom-controls {
-  display: flex;
-  align-items: center;
-  margin-right: 8px;
-}
-.zoom-controls select {
-  max-width: 120px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 4px;
-  line-height: normal;
-  box-sizing: border-box;
-  font: inherit;
-  font-size: 11px;
-  color: inherit;
-  border: 0;
-  border-radius: 4px;
-  background: var(--h-surface, var(--bg-card));
-  cursor: pointer;
-}
-.print-button {
-  color: #0e6f6c;
-  background: #e0f3ef;
-}
-@media (max-width: 760px) {
-  .offer-tools {
-    gap: 4px;
-  }
-  .action-label {
-    display: none;
-  }
-  .offer-actions {
-    max-width: 100%;
-    overflow-x: auto;
-    margin-left: 0;
-  }
-  .offer-actions > * {
-    flex-shrink: 0;
-  }
-  .save-state {
-    font-size: 10px;
-  }
 }
 .offer-notice {
   padding: 8px 20px;
