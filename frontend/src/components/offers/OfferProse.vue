@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import {
   applyStructure,
   backspaceProse,
-  bulletGlyph,
   clipboardPlain,
   createProseHistory,
   deleteForwardProse,
@@ -13,16 +12,25 @@ import {
   insertSoftBreak,
   outdentItem,
   persistProse,
+  proseListState,
+  proseMarkerLabels,
   proseNodes,
   proseNodesStorable,
   rangeEnds,
   reconcileProseTexts,
-  toggleItem,
+  setBulletMarker,
+  setListKind,
   type Caret,
   type ProseEdit,
   type ProseRange,
 } from './offerProse'
 import type { OfferTextNode } from './types'
+import {
+  isOfferChrome,
+  takeOfferProseId,
+  useOfferProseSession,
+  type ProseCommand,
+} from './offerProseSession'
 
 const props = withDefaults(
   defineProps<{
@@ -43,11 +51,15 @@ const selection = ref<ProseRange>({
   focus: { index: 0, offset: 0 },
 })
 const history = createProseHistory()
+const session = useOfferProseSession()
+const proseId = takeOfferProseId()
+const markerLabels = computed(() => proseMarkerLabels(local.value))
 let serial = 1
-let pending: Caret | null = null
-let pinned: ProseRange | null = null
+let pendingRange: ProseRange | null = null
+let held: ProseRange | null = null
 let suppressInput = false
 let composing = false
+let pointerSelecting = false
 
 watch(
   () => [props.body, props.nodes] as const,
@@ -69,27 +81,95 @@ function paint() {
     if (!plain || el.textContent !== want) el.textContent = want
   })
 }
-function restore() {
-  if (!pending || !root.value) return
-  const caret = pending
-  const el = root.value.querySelector<HTMLElement>(`[data-text][data-index="${caret.index}"]`)
-  if (!el) return
-  pending = null
-  const range = document.createRange()
+function pointAt(caret: Caret): { node: Node; offset: number } | null {
+  const el = root.value?.querySelector<HTMLElement>(`[data-text][data-index="${caret.index}"]`)
+  if (!el) return null
   const text = [...el.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
-  if (text) range.setStart(text, Math.min(caret.offset, text.textContent?.length ?? 0))
-  else range.setStart(el, 0)
-  range.collapse(true)
+  if (!text) return { node: el, offset: 0 }
+  return { node: text, offset: Math.min(caret.offset, text.textContent?.length ?? 0) }
+}
+function placeRange(range: ProseRange) {
+  const anchor = pointAt(range.anchor)
+  const focus = pointAt(range.focus)
   const live = window.getSelection()
-  live?.removeAllRanges()
-  live?.addRange(range)
-  selection.value = { anchor: caret, focus: caret }
+  if (!anchor || !focus || !live) return
+  live.removeAllRanges()
+  if (typeof live.setBaseAndExtent === 'function') {
+    try {
+      live.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset)
+      return
+    } catch {
+      // Some engines reject a range that crosses replaced text nodes.
+    }
+  }
+  const docRange = document.createRange()
+  const { start, end } = rangeEnds(range)
+  const startPoint = pointAt(start)
+  const endPoint = pointAt(end)
+  if (!startPoint || !endPoint) return
+  docRange.setStart(startPoint.node, startPoint.offset)
+  docRange.setEnd(endPoint.node, endPoint.offset)
+  live.addRange(docRange)
+}
+function restore() {
+  if (composing || !pendingRange || !root.value) return
+  const range = pendingRange
+  pendingRange = null
+  placeRange(range)
+  selection.value = range
+  held = range
+}
+function remember() {
+  const live = readRange()
+  if (!live) return
+  selection.value = live
+  held = live
+}
+function toolbarRange(): ProseRange {
+  return held ?? selection.value
+}
+function claim() {
+  if (!session || !props.editable) return
+  session.claim({
+    id: proseId,
+    state: () => proseListState(local.value, toolbarRange()),
+    remember,
+    apply: applyCommand,
+  })
+}
+function onSelectionChange() {
+  if (composing || !props.editable || !root.value) return
+  if (isOfferChrome(document.activeElement)) return
+  if (!root.value.contains(document.activeElement)) return
+  remember()
+  if (session?.active.value?.id === proseId) session.touch()
+}
+function onFocusIn(event: FocusEvent) {
+  if (!props.editable || !root.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (root.value.contains(target)) {
+    claim()
+    const fromChrome = isOfferChrome(event.relatedTarget)
+    if (fromChrome && held && !pointerSelecting) pendingRange = held
+    else remember()
+    pointerSelecting = false
+    return
+  }
+  pointerSelecting = false
+  if (isOfferChrome(target)) return
+  session?.release(proseId)
 }
 onMounted(() => {
   paint()
-  document.addEventListener('selectionchange', capture)
+  document.addEventListener('selectionchange', onSelectionChange)
+  document.addEventListener('focusin', onFocusIn)
 })
-onBeforeUnmount(() => document.removeEventListener('selectionchange', capture))
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', onSelectionChange)
+  document.removeEventListener('focusin', onFocusIn)
+  session?.release(proseId)
+})
 onUpdated(() => {
   paint()
   restore()
@@ -127,38 +207,41 @@ function readRange(): ProseRange | null {
   if (!anchor || !focus) return null
   return { anchor, focus }
 }
-function capture() {
-  if (composing) return
-  const range = readRange()
-  if (range) selection.value = range
+function clampRange(nodes: OfferTextNode[], range: ProseRange): ProseRange {
+  const clamp = (caret: Caret): Caret => {
+    const index = Math.max(0, Math.min(caret.index, Math.max(0, nodes.length - 1)))
+    const length = nodes[index]?.text.length ?? 0
+    return { index, offset: Math.max(0, Math.min(caret.offset, length)) }
+  }
+  return { anchor: clamp(range.anchor), focus: clamp(range.focus) }
 }
 function currentRange(): ProseRange {
-  return readRange() ?? pinned ?? selection.value
+  return readRange() ?? held ?? selection.value
 }
 function snapshot() {
   const caret = rangeEnds(selection.value).end
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
-function commit(edit: ProseEdit) {
+function commit(edit: ProseEdit, keep?: ProseRange) {
   const stored = persistProse(edit.nodes)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
   local.value = nodes.map((node) => ({ ...node }))
-  pending = edit.caret
-  selection.value = { anchor: edit.caret, focus: edit.caret }
+  const range = keep ? clampRange(local.value, keep) : { anchor: edit.caret, focus: edit.caret }
+  pendingRange = range
+  selection.value = range
+  held = range
   notice.value = edit.error ?? ''
-  pinned = null
   if (!edit.error) emit('update', stored)
+  if (session?.active.value?.id === proseId) session.touch()
 }
 function apply(edit: ProseEdit) {
   if (edit.error || JSON.stringify(edit.nodes) === JSON.stringify(local.value)) {
     notice.value = edit.error ?? ''
-    pinned = null
     return
   }
   if (!proseNodesStorable(edit.nodes)) {
     notice.value = 'Dieser Absatz ist zu lang.'
-    pinned = null
     return
   }
   history.push({ nodes: local.value.map((node) => ({ ...node })), caret: currentRange().focus })
@@ -167,8 +250,10 @@ function apply(edit: ProseEdit) {
 function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
   if (snap.nodes.length !== local.value.length) keys.value = snap.nodes.map(() => serial++)
   local.value = snap.nodes.map((node) => ({ ...node }))
-  pending = snap.caret
-  selection.value = { anchor: snap.caret, focus: snap.caret }
+  const caret = snap.caret
+  pendingRange = { anchor: caret, focus: caret }
+  selection.value = { anchor: caret, focus: caret }
+  held = selection.value
   notice.value = ''
   emit('update', persistProse(local.value))
 }
@@ -192,7 +277,10 @@ function selectAll() {
   live?.removeAllRanges()
   live?.addRange(range)
   const stored = readRange()
-  if (stored) selection.value = stored
+  if (stored) {
+    selection.value = stored
+    held = stored
+  }
 }
 function onKey(event: KeyboardEvent) {
   if (!props.editable || event.isComposing) return
@@ -372,44 +460,41 @@ function onPaste(event: ClipboardEvent) {
   )
   apply(insertProseText(local.value, currentRange(), text))
 }
-function prepareTool(event: MouseEvent) {
-  pinned = readRange() ?? selection.value
-  selection.value = pinned
-  event.preventDefault()
+function opFor(command: ProseCommand) {
+  if (command.type === 'indent') return indentItem
+  if (command.type === 'outdent') return outdentItem
+  if (command.type === 'marker')
+    return (nodes: OfferTextNode[], index: number) => setBulletMarker(nodes, index, command.marker)
+  return (nodes: OfferTextNode[], index: number) => setListKind(nodes, index, command.kind)
 }
-function act(kind: 'toggle' | 'indent' | 'outdent') {
-  const range = pinned ?? readRange() ?? selection.value
-  pinned = null
-  const op = kind === 'toggle' ? toggleItem : kind === 'indent' ? indentItem : outdentItem
-  apply(applyStructure(local.value, range, op))
+function applyCommand(command: ProseCommand) {
+  if (!props.editable) return
+  if (session && session.active.value?.id !== proseId) return
+  if (!isOfferChrome(document.activeElement)) remember()
+  const range = toolbarRange()
+  const edit = applyStructure(local.value, range, opFor(command))
+  if (edit.error || JSON.stringify(edit.nodes) === JSON.stringify(local.value)) {
+    notice.value = edit.error ?? ''
+    return
+  }
+  if (!proseNodesStorable(edit.nodes)) {
+    notice.value = 'Dieser Absatz ist zu lang.'
+    return
+  }
+  history.push({ nodes: local.value.map((node) => ({ ...node })), caret: rangeEnds(range).end })
+  commit(edit, range)
 }
+defineExpose({ format: applyCommand })
 function nodeClass(node: OfferTextNode, index: number) {
   return [node.kind === 'item' ? 'item' : 'paragraph', index > 0 ? 'spaced' : '']
 }
 </script>
 <template>
-  <div class="offer-prose-field" @mouseup="capture" @keyup="capture">
-    <div
-      v-if="editable"
-      class="offer-prose-tools"
-      role="toolbar"
-      aria-label="Aufzählung"
-      @mousedown="prepareTool"
-    >
-      <button
-        type="button"
-        :aria-pressed="local[selection.focus.index]?.kind === 'item'"
-        aria-label="Liste"
-        @click="act('toggle')"
-      >
-        Liste
-      </button>
-      <button type="button" aria-label="Einrücken" @click="act('indent')">Einrücken</button>
-      <button type="button" aria-label="Ausrücken" @click="act('outdent')">Ausrücken</button>
-    </div>
+  <div class="offer-prose-field">
     <div
       ref="root"
       class="offer-prose"
+      @pointerdown="pointerSelecting = true"
       :data-prose="local.some((node) => node.kind === 'item') ? 'list' : 'plain'"
       :contenteditable="editable ? 'true' : 'false'"
       role="textbox"
@@ -428,7 +513,8 @@ function nodeClass(node: OfferTextNode, index: number) {
         :key="keys[index]"
         :data-node="index"
         :class="nodeClass(node, index)"
-        :data-bullet="node.kind === 'item' ? bulletGlyph(node.depth ?? 0) : undefined"
+        :data-bullet="node.kind === 'item' ? markerLabels[index] : undefined"
+        :data-marker="node.marker || undefined"
         :style="node.kind === 'item' ? { '--depth': String(node.depth ?? 0) } : undefined"
       >
         <span data-text :data-index="index" />

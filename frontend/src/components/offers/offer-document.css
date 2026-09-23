@@ -78,8 +78,8 @@
 .offer-document .bar button:focus-visible,
 .offer-document .page [contenteditable]:focus-visible,
 .offer-document .page input:focus-visible {
-  outline: 2px solid var(--aqua);
-  outline-offset: 2px;
+  outline: 1px solid #0e6f6c;
+  outline-offset: 1px;
 }
 .offer-document .bar output {
   font-size: 12px;
@@ -160,6 +160,14 @@
   height: 1em;
   width: auto;
   display: block;
+}
+.offer-document .ftr .footmark.is-set .brand-dots {
+  width: var(--dots-w);
+  height: var(--dots-h);
+}
+.offer-document .ftr .footmark.is-set .logotype {
+  width: var(--word-w);
+  height: var(--word-h);
 }
 .offer-document .ftr .logotype * {
   fill: var(--muted) !important;
@@ -366,32 +374,18 @@
   font-weight: 700;
   user-select: none;
 }
-.offer-document .offer-prose-tools {
-  position: absolute;
-  z-index: 2;
-  left: 0;
-  bottom: calc(100% + 2px);
-  display: none;
-  gap: 4px;
+.offer-document .offer-prose .item[data-marker='decimal'] {
+  grid-template-columns: 1.9em minmax(0, 1fr);
+  column-gap: 0.4em;
+  margin-left: calc(var(--depth, 0) * 1.55em);
+  align-items: baseline;
 }
-.offer-document .offer-prose-field:focus-within .offer-prose-tools {
-  display: flex;
+.offer-document .offer-prose .item[data-marker='decimal']::before {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
 }
-.offer-document .offer-prose-tools button {
-  appearance: none;
-  font: inherit;
-  font-size: 8pt;
-  font-weight: 700;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--rule-2);
-  border-radius: 999px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.offer-document .offer-prose-tools button[aria-pressed='true'] {
-  background: #e7f8f5;
-  border-color: var(--aqua);
+.offer-document .offer-prose .item[data-marker='decimal'].spaced {
+  padding-top: 0.22em;
 }
 .offer-document .offer-prose-notice {
   position: absolute;
@@ -409,9 +403,10 @@
   background: rgba(85, 208, 192, 0.1);
 }
 .offer-document [contenteditable]:focus {
-  background: rgba(85, 208, 192, 0.14);
-  outline: none;
-  box-shadow: 0 0 0 2px var(--aqua) inset;
+  background: rgba(199, 239, 236, 0.35);
+  outline: 1px solid #0e6f6c;
+  outline-offset: 1px;
+  box-shadow: none;
 }
 .offer-document .ph {
   background: var(--mark);
@@ -785,8 +780,8 @@
   .offer-document [contenteditable] {
     background: transparent !important;
     box-shadow: none !important;
+    outline: none !important;
   }
-  .offer-document .offer-prose-tools,
   .offer-document .offer-prose-notice {
     display: none !important;
   }

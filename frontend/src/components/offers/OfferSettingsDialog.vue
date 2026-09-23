@@ -31,13 +31,20 @@ const senderFields: { key: keyof OfferSender; label: string; required?: boolean 
 watch(
   () => props.open,
   async (open) => {
-    if (!open) { dialog.value?.close(); return }
+    if (!open) {
+      dialog.value?.close()
+      return
+    }
     await nextTick()
     if (dialog.value && !dialog.value.open) dialog.value.showModal()
     error.value = ''
     try {
       settings.value = await api.get<OfferSettings>('/integrations/crm/offers')
-      if (!settings.value.defaults.blocks.length && !settings.value.defaults.intro && !settings.value.defaults.accept_text)
+      if (
+        !settings.value.defaults.blocks.length &&
+        !settings.value.defaults.intro &&
+        !settings.value.defaults.accept_text
+      )
         settings.value.defaults = structuredClone(defaults)
       await nextTick()
       form.value?.querySelector<HTMLElement>('button')?.focus()
@@ -63,12 +70,17 @@ async function save() {
 }
 </script>
 <template>
-  <dialog ref="dialog" class="offer-settings-dialog" aria-label="Angebots-Einstellungen" @cancel.prevent="emit('close')"><header><h2>Angebots-Einstellungen</h2><button type="button" aria-label="Schließen" @click="emit('close')">×</button></header><form
-      novalidate
-      ref="form"
-      class="offer-settings"
-      @submit.prevent="save"
-    >
+  <dialog
+    ref="dialog"
+    class="offer-settings-dialog"
+    aria-label="Angebots-Einstellungen"
+    @cancel.prevent="emit('close')"
+  >
+    <header>
+      <h2>Angebots-Einstellungen</h2>
+      <button type="button" aria-label="Schließen" @click="emit('close')">×</button>
+    </header>
+    <form novalidate ref="form" class="offer-settings" @submit.prevent="save">
       <div class="settings-tabs">
         <button type="button" class="btn" :aria-pressed="tab === 'sender'" @click="tab = 'sender'">
           Absender</button
@@ -101,14 +113,12 @@ async function save() {
               rows="4"
               :readonly="!!block.nodes?.length"
               :aria-label="`Text Abschnitt ${i + 1}`"
-            /><p v-if="block.nodes?.length">
-              Dieser Baustein enthält eine Aufzählung. Sie wird im Angebot bearbeitet und bleibt beim
-              Speichern erhalten.
-            </p><button
-              type="button"
-              class="btn btn-sm"
-              @click="settings.defaults.blocks.splice(i, 1)"
-            >
+            />
+            <p v-if="block.nodes?.length">
+              Dieser Baustein enthält eine Aufzählung oder Nummerierung. Sie wird im Angebot
+              bearbeitet und bleibt beim Speichern erhalten.
+            </p>
+            <button type="button" class="btn btn-sm" @click="settings.defaults.blocks.splice(i, 1)">
               Abschnitt entfernen
             </button>
           </div>
@@ -130,15 +140,53 @@ async function save() {
         </div></template
       >
       <p v-else>Lädt …</p>
-    </form></dialog>
+    </form>
+  </dialog>
 </template>
 <style scoped>
-.offer-settings-dialog { --bg-card:#fffefa; --bg:#f7f6f2; --text:#203c3d; --text-muted:#596e70; --border:#dfe6e5; color:var(--text); background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:20px 24px; width:min(680px,calc(100vw - 32px)); max-height:85vh; overflow:auto; box-shadow:0 12px 40px #10232733; }
-.offer-settings-dialog::backdrop { background:#10232788; }
-.offer-settings-dialog>header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-bottom:14px; }
-.offer-settings-dialog h2 { margin:0; font-size:18px; }
-.offer-settings-dialog>header button { border:0; background:transparent; color:inherit; font-size:26px; cursor:pointer; }
-.settings-actions { position:sticky; bottom:-20px; padding:14px 0; background:var(--bg-card); }
+.offer-settings-dialog {
+  --bg-card: #fffefa;
+  --bg: #f7f6f2;
+  --text: #203c3d;
+  --text-muted: #596e70;
+  --border: #dfe6e5;
+  color: var(--text);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  width: min(680px, calc(100vw - 32px));
+  max-height: 85vh;
+  overflow: auto;
+  box-shadow: 0 12px 40px #10232733;
+}
+.offer-settings-dialog::backdrop {
+  background: #10232788;
+}
+.offer-settings-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+}
+.offer-settings-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.offer-settings-dialog > header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 26px;
+  cursor: pointer;
+}
+.settings-actions {
+  position: sticky;
+  bottom: -20px;
+  padding: 14px 0;
+  background: var(--bg-card);
+}
 
 .offer-settings,
 .text-fields {
