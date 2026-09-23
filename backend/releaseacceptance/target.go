@@ -70,7 +70,7 @@ func isTargetDigest(v string) bool {
 }
 
 func (s *Service) BindTarget(ctx context.Context, actor Actor, projectID, releaseID int64, req BindTargetRequest) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
