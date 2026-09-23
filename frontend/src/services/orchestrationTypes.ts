@@ -212,6 +212,7 @@ export type OrchestrationRootV1 = {
       | 'generation_not_in_sample'
       | 'root_generation_unknown'
       | 'single_active_root_generation'
+      | 'reviewer_scope'
     session_id: string | null
   }
 }

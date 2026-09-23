@@ -207,9 +207,18 @@ export function parseOrchestrationSnapshot(value: unknown): OrchestrationSnapsho
   }
   const active = root.active_generation
   const generation = active.session_id === null ? undefined : workers.get(active.session_id)
+  const reviewerScope =
+    active.reason === 'reviewer_scope' &&
+    active.state === 'unknown' &&
+    active.session_id === null &&
+    root.configured_identity === null &&
+    root.binding_revision === 0 &&
+    root.binding_updated_at === null
   if (
     (active.state === 'resolved') !== (active.session_id !== null) ||
+    (active.reason === 'reviewer_scope') !== reviewerScope ||
     (root.configured_identity === null &&
+      !reviewerScope &&
       (active.state !== 'unset' || active.reason !== 'root_not_configured')) ||
     (active.state === 'resolved' &&
       (!generation ||

@@ -2,6 +2,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"reflect"
@@ -106,6 +107,103 @@ func TestOrchestrationSchemaClosedAndFleetV2Unchanged(t *testing.T) {
 		ref := operation["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"]
 		if ref != "#/components/schemas/OrchestrationSnapshotV1" {
 			t.Fatal("versioned route schema drift")
+		}
+	}
+}
+
+func TestOrchestrationReviewerScopeFixture(t *testing.T) {
+	raw, err := os.ReadFile("../contracts/orchestration-v1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err = json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	root := schema["$defs"].(map[string]any)["OrchestrationRootV1"].(map[string]any)
+	branches, ok := root["oneOf"].([]any)
+	if !ok || len(branches) != 2 {
+		t.Fatal("reviewer root must be an explicit variant")
+	}
+	var reviewer, ordinary map[string]any
+	for _, branch := range branches {
+		object := branch.(map[string]any)
+		generation := object["properties"].(map[string]any)["active_generation"].(map[string]any)
+		reason := generation["properties"].(map[string]any)["reason"].(map[string]any)
+		if reason["const"] == "reviewer_scope" {
+			reviewer = object
+			continue
+		}
+		ordinary = object
+	}
+	if reviewer == nil || ordinary == nil {
+		t.Fatal("missing reviewer_scope variant")
+	}
+	properties := reviewer["properties"].(map[string]any)
+	generation := properties["active_generation"].(map[string]any)
+	generationProperties := generation["properties"].(map[string]any)
+	if reviewer["additionalProperties"] != false || generation["additionalProperties"] != false ||
+		properties["configured_identity"].(map[string]any)["type"] != "null" ||
+		properties["binding_revision"].(map[string]any)["const"] != float64(0) ||
+		properties["binding_updated_at"].(map[string]any)["type"] != "null" ||
+		generationProperties["state"].(map[string]any)["const"] != "unknown" ||
+		generationProperties["session_id"].(map[string]any)["type"] != "null" {
+		t.Fatal("reviewer_scope variant is not closed")
+	}
+	reasons := ordinary["properties"].(map[string]any)["active_generation"].(map[string]any)["properties"].(map[string]any)["reason"].(map[string]any)["enum"].([]any)
+	for _, reason := range reasons {
+		if reason == "reviewer_scope" {
+			t.Fatal("ordinary root accepts reviewer_scope")
+		}
+	}
+
+	fixture, err := os.ReadFile("../contracts/fixtures/orchestration-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(fixture))
+	decoder.DisallowUnknownFields()
+	var ordinarySnapshot handlers.OrchestrationSnapshotV1
+	if err = decoder.Decode(&ordinarySnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if ordinarySnapshot.InstanceRoot.ConfiguredIdentity != nil || ordinarySnapshot.InstanceRoot.BindingRevision != 0 || ordinarySnapshot.InstanceRoot.BindingUpdatedAt != nil || ordinarySnapshot.InstanceRoot.ActiveGeneration.State != "unset" || ordinarySnapshot.InstanceRoot.ActiveGeneration.Reason != "root_not_configured" || ordinarySnapshot.InstanceRoot.ActiveGeneration.SessionID != nil {
+		t.Fatal("ordinary root fixture drifted")
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(fixture, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["instance_root"] = map[string]any{
+		"configured_identity": nil,
+		"binding_revision":    0,
+		"binding_updated_at":  nil,
+		"active_generation": map[string]any{
+			"state":      "unknown",
+			"reason":     "reviewer_scope",
+			"session_id": nil,
+		},
+	}
+	for _, row := range payload["project_coordination"].([]any) {
+		row.(map[string]any)["root_binding_revision"] = nil
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerDecoder := json.NewDecoder(bytes.NewReader(encoded))
+	reviewerDecoder.DisallowUnknownFields()
+	var snapshot handlers.OrchestrationSnapshotV1
+	if err = reviewerDecoder.Decode(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SchemaVersion != 1 || snapshot.InstanceRoot.ConfiguredIdentity != nil || snapshot.InstanceRoot.BindingRevision != 0 || snapshot.InstanceRoot.BindingUpdatedAt != nil || snapshot.InstanceRoot.ActiveGeneration.State != "unknown" || snapshot.InstanceRoot.ActiveGeneration.Reason != "reviewer_scope" || snapshot.InstanceRoot.ActiveGeneration.SessionID != nil {
+		t.Fatal("reviewer fixture drifted")
+	}
+	for _, row := range snapshot.ProjectCoordination {
+		if row.RootBindingRevision != nil {
+			t.Fatal("reviewer revision leak")
 		}
 	}
 }

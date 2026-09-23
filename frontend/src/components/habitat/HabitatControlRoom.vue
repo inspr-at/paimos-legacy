@@ -441,7 +441,9 @@ onScopeDispose(() => registerContext?.(null))
       <div class="habitat-actions">
         <button type="button" @click="habitat.refresh()">Retry</button
         ><RouterLink class="habitat-button" to="/">Open portfolio</RouterLink
-        ><RouterLink class="habitat-button" to="/settings?tab=account">Account settings</RouterLink>
+        ><RouterLink v-if="!isReviewer" class="habitat-button" to="/settings?tab=account"
+          >Account settings</RouterLink
+        >
       </div>
     </div>
     <template v-else-if="snapshot">
