@@ -42,7 +42,8 @@ export function offerToolbarActions(input: {
       {
         id: 'settings',
         label: 'Absender und Textbausteine',
-        detail: 'Bearbeitet den Absender und die Vorlagen für neue Angebote.',
+        detail:
+          'Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt unverändert.',
         disabled: false,
       },
       {

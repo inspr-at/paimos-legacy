@@ -23,7 +23,7 @@ import { useAuthStore } from '@/stores/auth'
 import OfferConfirmationStatus from '@/components/offers/OfferConfirmationStatus.vue'
 import OfferDocument from '@/components/offers/OfferDocument.vue'
 import OfferSettingsDialog from '@/components/offers/OfferSettingsDialog.vue'
-import type { Offer, OfferSettings } from '@/components/offers/types'
+import type { Offer } from '@/components/offers/types'
 const route = useRoute(),
   router = useRouter(),
   auth = useAuthStore()
@@ -295,9 +295,6 @@ async function duplicate() {
     saving.value = false
   }
 }
-function applySettings(s: OfferSettings) {
-  if (editable.value && offer.value) offer.value.document.sender = structuredClone(s.sender)
-}
 function downloadDraft() {
   if (!offer.value) return
   const blob = new Blob([JSON.stringify(offer.value.document, null, 2)], {
@@ -490,11 +487,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :editable="editable"
         @overflow="overflow = $event"
       />
-      <OfferSettingsDialog
-        :open="settingsOpen"
-        @close="settingsOpen = false"
-        @saved="applySettings"
-      />
+      <OfferSettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
       <dialog
         ref="finalizeDialog"
         class="finalize-dialog"
