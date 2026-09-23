@@ -20,6 +20,7 @@ import {
   rangeEnds,
   reconcileProseTexts,
   setBulletMarker,
+  setDecimalControl,
   setListKind,
   type Caret,
   type ProseEdit,
@@ -513,6 +514,14 @@ function opFor(command: ProseCommand) {
   if (command.type === 'outdent') return outdentItem
   if (command.type === 'marker')
     return (nodes: OfferTextNode[], index: number) => setBulletMarker(nodes, index, command.marker)
+  if (command.type === 'numbering') {
+    let first = true
+    return (nodes: OfferTextNode[], index: number) => {
+      const mode = first ? command.mode : 'follow'
+      first = false
+      return setDecimalControl(nodes, index, mode, command.start)
+    }
+  }
   return (nodes: OfferTextNode[], index: number) => setListKind(nodes, index, command.kind)
 }
 function applyCommand(command: ProseCommand) {
@@ -571,6 +580,7 @@ function nodeClass(node: OfferTextNode, index: number) {
         :class="nodeClass(node, index)"
         :data-bullet="node.kind === 'item' ? markerLabels[index] : undefined"
         :data-marker="node.marker || undefined"
+        :data-numbering="node.numbering || undefined"
         :style="node.kind === 'item' ? { '--depth': String(node.depth ?? 0) } : undefined"
       >
         <span data-text :data-index="index" />

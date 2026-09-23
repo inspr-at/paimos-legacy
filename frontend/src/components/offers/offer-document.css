@@ -413,6 +413,44 @@
 .offer-document .offer-prose .item[data-marker='decimal'].spaced {
   padding-top: 0.22em;
 }
+.offer-document .offer-prose .item[data-numbering='outline'] {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+.offer-document .section-tools {
+  position: sticky;
+  top: 46px;
+  z-index: 6;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  width: min(210mm, 100%);
+  padding: 4px;
+  background: var(--paper, #fffefa);
+  border: 1px solid var(--rule, #d8e2df);
+  border-radius: 8px;
+}
+.offer-document .section-tools button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink, #203c3d);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.offer-document .section-tools button:hover:not(:disabled) {
+  background: #e0f3f0;
+}
+.offer-document .section-tools button:focus-visible {
+  outline: 1px solid #0e6f6c;
+  outline-offset: 2px;
+}
+.offer-document .section-tools button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .offer-document .offer-prose-notice {
   position: absolute;
   left: 0;
@@ -800,7 +838,8 @@
     break-after: auto;
     page-break-after: auto;
   }
-  .offer-document .rowtools {
+  .offer-document .rowtools,
+  .offer-document .section-tools {
     display: none !important;
   }
   .offer-document [contenteditable] {

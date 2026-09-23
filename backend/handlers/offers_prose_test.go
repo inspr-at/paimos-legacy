@@ -104,3 +104,56 @@ func TestNormalizeOfferProseMarkersAndFooter(t *testing.T) {
 		t.Fatal("wide footer was accepted")
 	}
 }
+
+func TestOutlineNumberingAndSignedFooterOffset(t *testing.T) {
+	nodes := []OfferTextNode{
+		{Kind: "item", Text: "A", Marker: "decimal", Numbering: "outline", ListStart: 3},
+		{Kind: "item", Text: "B", Depth: 1, Marker: "decimal", Numbering: "outline"},
+		{Kind: "item", Text: "C", Depth: 2, Marker: "decimal", Numbering: "outline"},
+		{Kind: "paragraph", Text: ""},
+		{Kind: "item", Text: "D", Depth: 2, Marker: "decimal", Numbering: "outline", ListContinue: true},
+		{Kind: "item", Text: "E", Marker: "decimal", Numbering: "outline", ListStart: 1},
+		{Kind: "item", Text: "F", Marker: "decimal", Numbering: "outline"},
+	}
+	body, stored, err := normalizeOfferProse("ignored", nodes)
+	const want = "3 A\n  3.1 B\n    3.1.1 C\n\n    3.1.2 D\n1 E\n2 F"
+	if err != nil || body != want || stored[0].ListStart != 3 || stored[4].ListContinue != true || stored[3].Numbering != "" {
+		t.Fatalf("outline = %q %#v %v", body, stored, err)
+	}
+	independent := []OfferTextNode{
+		{Kind: "item", Text: "A", Marker: "decimal", Numbering: "outline", ListStart: 3},
+		{Kind: "paragraph", Text: ""},
+		{Kind: "item", Text: "B", Marker: "decimal", Numbering: "outline"},
+	}
+	body, _, err = normalizeOfferProse("ignored", independent)
+	if err != nil || body != "3 A\n\n1 B" {
+		t.Fatalf("independent = %q %v", body, err)
+	}
+	continued := []OfferTextNode{
+		{Kind: "item", Text: "A", Marker: "decimal"},
+		{Kind: "paragraph", Text: "dazwischen"},
+		{Kind: "item", Text: "B", Marker: "decimal", ListContinue: true},
+	}
+	body, _, err = normalizeOfferProse("ignored", continued)
+	if err != nil || body != "1. A\ndazwischen\n2. B" {
+		t.Fatalf("continue = %q %v", body, err)
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "decimal", Numbering: "outline", ListStart: 3, ListContinue: true}}); err == nil {
+		t.Fatal("start and continue together were accepted")
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", Numbering: "outline"}}); err == nil {
+		t.Fatal("outline on a bullet was accepted")
+	}
+	for _, offset := range []float64{-6, 0, 2, 10} {
+		doc := OfferDocument{OfferDate: "2026-09-23", ValidUntil: "2026-10-23", Footer: &OfferFooterLayout{LogoWidthMM: 43.3, LogoOffsetMM: offset}}
+		if err = calculateOffer(&doc, false); err != nil || doc.Footer.LogoOffsetMM != offset {
+			t.Fatalf("offset %v = %#v %v", offset, doc.Footer, err)
+		}
+	}
+	for _, offset := range []float64{-6.1, 10.1} {
+		doc := OfferDocument{OfferDate: "2026-09-23", ValidUntil: "2026-10-23", Footer: &OfferFooterLayout{LogoWidthMM: 43.3, LogoOffsetMM: offset}}
+		if err = calculateOffer(&doc, false); err == nil {
+			t.Fatalf("offset %v was accepted", offset)
+		}
+	}
+}
