@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, nextTick } from 'vue'
+import { createApp, nextTick, reactive } from 'vue'
 import { readFileSync } from 'node:fs'
 import OfferDocument from './OfferDocument.vue'
 import { footerLogoBox } from './offerLayout'
@@ -153,7 +153,7 @@ describe('offer document prose', () => {
       return rect(40)
     }
     installFonts()
-    const sample = offer([{ heading: 'Leistung', body: 'Kurz.' }])
+    const sample = reactive(offer([{ heading: 'Leistung', body: 'Kurz.' }]))
     sample.document.sender.company = 'Augmentoring GmbH'
     const plain = document.createElement('div')
     document.body.appendChild(plain)
@@ -218,10 +218,12 @@ describe('offer document prose', () => {
       return rect(40)
     }
     installFonts()
-    const sample = offer([
-      { heading: 'Eins', body: 'Alpha' },
-      { heading: 'Zwei', body: 'Beta' },
-    ])
+    const sample = reactive(
+      offer([
+        { heading: 'Eins', body: 'Alpha' },
+        { heading: 'Zwei', body: 'Beta' },
+      ]),
+    )
     const el = document.createElement('div')
     document.body.appendChild(el)
     const app = createApp(OfferDocument, { offer: sample, editable: true })
@@ -229,6 +231,7 @@ describe('offer document prose', () => {
     await vm.paginate()
     await nextTick()
     el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+    await nextTick()
     const up = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach oben"]')
     const down = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')
     expect(up?.disabled).toBe(true)
