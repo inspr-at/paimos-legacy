@@ -143,6 +143,8 @@ async function load() {
     conflict.value = false
     saveFailed.value = false
     document.title = `${offer.value.offer_no} · Angebot`
+    await nextTick()
+    renderer.value?.resetHistory()
   } catch (e) {
     error.value = errMsg(e)
   } finally {
@@ -260,6 +262,8 @@ async function finalize() {
     offer.value = result
     dirty.value = false
     finalizeOpen.value = false
+    await nextTick()
+    renderer.value?.resetHistory()
   } catch (e) {
     error.value = errMsg(e)
   } finally {
@@ -331,8 +335,10 @@ function onToolbarAction(id: OfferToolbarActionId) {
   else if (id === 'duplicate') void duplicate()
   else if (id === 'finalize') finalizeOpen.value = true
   else if (id === 'chrome') collapsed.value = !collapsed.value
-  else if (id === 'delete') offer.value?.deleted ? void setDeleted() : (deleteOpen.value = true)
-  else if (id === 'layout') renderer.value?.selectFooter()
+  else if (id === 'delete') {
+    if (offer.value?.deleted) void setDeleted()
+    else deleteOpen.value = true
+  } else if (id === 'layout') renderer.value?.selectFooter()
 }
 function onFooter(value: OfferFooterLayout) {
   if (!editable.value || !offer.value) return

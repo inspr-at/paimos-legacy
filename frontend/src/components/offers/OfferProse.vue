@@ -11,6 +11,7 @@ import {
   indentItem,
   insertProseText,
   insertSoftBreak,
+  numberingCommandForIndex,
   outdentItem,
   persistProse,
   proseListState,
@@ -345,6 +346,20 @@ function redo() {
   const snap = historyStack().redo(snapshot())
   if (snap) restoreSnap(snap)
 }
+function dispatchUndo() {
+  if (props.memory) {
+    props.memory.requestUndo?.()
+    return
+  }
+  undo()
+}
+function dispatchRedo() {
+  if (props.memory) {
+    props.memory.requestRedo?.()
+    return
+  }
+  redo()
+}
 function selectAll() {
   const texts = [...(root.value?.querySelectorAll<HTMLElement>('[data-text]') ?? [])]
   const first = texts[0]
@@ -370,24 +385,11 @@ function onKey(event: KeyboardEvent) {
     selectAll()
     return
   }
-  if ((event.metaKey || event.ctrlKey) && key === 'z') {
+  if ((event.metaKey || event.ctrlKey) && (key === 'z' || key === 'y')) {
     event.preventDefault()
-    suppressInput = true
-    queueMicrotask(() => {
-      suppressInput = false
-    })
-    if (props.memory?.requestUndo) {
-      if (event.shiftKey) props.memory.requestRedo?.()
-      else props.memory.requestUndo()
-      return
-    }
-    if (event.shiftKey) redo()
-    else undo()
-    return
-  }
-  if ((event.metaKey || event.ctrlKey) && key === 'y') {
-    event.preventDefault()
-    redo()
+    holdNativeInput()
+    if (key === 'y' || event.shiftKey) dispatchRedo()
+    else dispatchUndo()
     return
   }
   if (event.key === 'Enter') {
@@ -447,13 +449,13 @@ function onBeforeInput(event: InputEvent) {
   if (type === 'historyUndo') {
     event.preventDefault()
     holdNativeInput()
-    undo()
+    dispatchUndo()
     return
   }
   if (type === 'historyRedo') {
     event.preventDefault()
     holdNativeInput()
-    redo()
+    dispatchRedo()
     return
   }
   if (type === 'insertText') {
@@ -551,16 +553,10 @@ function opFor(command: ProseCommand) {
   if (command.type === 'marker')
     return (nodes: OfferTextNode[], index: number) => setBulletMarker(nodes, index, command.marker)
   if (command.type === 'numbering') {
-    let first = true
+    let position = 0
     return (nodes: OfferTextNode[], index: number) => {
-      const mode = first
-        ? command.mode
-        : command.mode === 'section'
-          ? 'bound'
-          : command.mode === 'independent'
-            ? 'unbound'
-            : 'follow'
-      first = false
+      const mode = numberingCommandForIndex(command.mode, position)
+      position += 1
       return setDecimalControl(nodes, index, mode, command.start)
     }
   }

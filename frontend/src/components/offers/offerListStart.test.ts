@@ -20,6 +20,8 @@ function click(target: Element) {
 
 async function mount() {
   const updates: { body: string; nodes?: OfferTextNode[] }[] = []
+  const actionsEmitted: string[] = []
+  const footerSelects = { count: 0 }
   const footer = ref<OfferFooterLayout>({ logo_width_mm: 43.3, logo_offset_mm: 2 })
   const el = document.createElement('div')
   document.body.appendChild(el)
@@ -57,6 +59,12 @@ async function mount() {
             onFooter: (value: OfferFooterLayout) => {
               footer.value = value
             },
+            onAction: (id: string) => {
+              actionsEmitted.push(id)
+            },
+            onSelectFooter: () => {
+              footerSelects.count += 1
+            },
           }),
           h(OfferProse, {
             body: prose.value.body,
@@ -87,6 +95,8 @@ async function mount() {
     el,
     updates,
     footer,
+    actionsEmitted,
+    footerSelects,
     unmount() {
       app.unmount()
       el.remove()
@@ -161,11 +171,13 @@ describe('offer list start and signed offset', () => {
     const mounted = await mount()
     click(mounted.el.querySelector('[aria-label="Einstellungen"]')!)
     await nextTick()
-    const layout = [...mounted.el.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Fußzeilenlogo'),
+    expect(mounted.el.querySelector('#this-offer-heading')?.textContent).toBe('Dieses Angebot')
+    expect(mounted.el.textContent).toContain('nur für dieses Angebot')
+    expect(mounted.footerSelects.count).toBe(0)
+    const templates = [...mounted.el.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Vorlagen für neue Angebote'),
     )
-    click(layout!)
-    await nextTick()
+    expect(templates?.closest('[aria-label="Vorlagen für neue Angebote"]')).toBeTruthy()
     const offset = mounted.el.querySelector<HTMLInputElement>(
       '[aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."]',
     )!
@@ -194,6 +206,11 @@ describe('offer list start and signed offset', () => {
     await nextTick()
     expect(mounted.footer.value.logo_width_mm).toBe(55.5)
     expect(width.value).toBe('55.5')
+    click(templates!)
+    await nextTick()
+    expect(mounted.actionsEmitted).toEqual(['settings'])
+    expect(mounted.footerSelects.count).toBe(0)
+    expect(mounted.footer.value).toEqual({ logo_width_mm: 55.5, logo_offset_mm: -6 })
     mounted.unmount()
   })
 })

@@ -25,8 +25,7 @@ import {
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { OfferBulletMarker, OfferFooterLayout, OfferSelection } from './types'
-import type { ProseListKind } from './offerProse'
-import { OFFER_BULLET_GLYPH } from './offerProse'
+import { OFFER_BULLET_GLYPH, type LevelLimit, type ProseListKind } from './offerProse'
 import { explicitFooter, OFFER_FOOTER_LOGO } from './offerLayout'
 import { useOfferProseSession, type ProseCommand } from './offerProseSession'
 import type { OfferToolbarAction, OfferToolbarActionId } from './offerToolbarActions'
@@ -79,6 +78,8 @@ const listButton = ref<HTMLButtonElement>()
 const listPopover = ref<HTMLElement>()
 const menuButton = ref<HTMLButtonElement>()
 const menuPopover = ref<HTMLElement>()
+const gearButton = ref<HTMLButtonElement>()
+const gearPopover = ref<HTMLElement>()
 const layoutPopover = ref<HTMLElement>()
 const widthField = ref<HTMLInputElement>()
 const offsetField = ref<HTMLInputElement>()
@@ -125,9 +126,53 @@ const listState = computed(() => {
     continued: false as const,
     start: null,
     sectionBound: false as const,
+    indent: false,
+    outdent: false,
+    indentLimit: null,
+    outdentLimit: null,
   }
   return { ...state, revision }
 })
+const canIndent = computed(() => listState.value.indent === true)
+const canOutdent = computed(() => listState.value.outdent === true)
+function limitTip(limit: LevelLimit | null | undefined, direction: 'deeper' | 'higher'): string {
+  switch (limit) {
+    case 'max-depth':
+      return 'Maximale Ebene ist erreicht.'
+    case 'no-previous':
+      return 'Kein vorheriger Listeneintrag.'
+    case 'boundary':
+      return direction === 'deeper'
+        ? 'Nicht tiefer als der vorherige Eintrag.'
+        : 'Diese Ebene kann nicht höher.'
+    case 'not-list':
+      return 'Nur Listeneinträge können eine Ebene höher.'
+    case 'mixed':
+      return direction === 'deeper'
+        ? 'Die Auswahl kann nicht tiefer.'
+        : 'Die Auswahl kann nicht höher.'
+    default:
+      return direction === 'deeper'
+        ? 'Einrücken ist für diese Auswahl nicht möglich.'
+        : 'Ausrücken ist für diese Auswahl nicht möglich.'
+  }
+}
+const deeperTip = computed(() =>
+  canIndent.value ? 'Eine Listenebene tiefer' : limitTip(listState.value.indentLimit, 'deeper'),
+)
+const higherTip = computed(() =>
+  canOutdent.value ? 'Eine Listenebene höher' : limitTip(listState.value.outdentLimit, 'higher'),
+)
+const deeperName = computed(() =>
+  canIndent.value ? 'Eine Listenebene tiefer' : `Eine Listenebene tiefer. ${deeperTip.value}`,
+)
+const higherName = computed(() =>
+  canOutdent.value ? 'Eine Listenebene höher' : `Eine Listenebene höher. ${higherTip.value}`,
+)
+const indentName = computed(() => (canIndent.value ? 'Einrücken' : `Einrücken. ${deeperTip.value}`))
+const outdentName = computed(() =>
+  canOutdent.value ? 'Ausrücken' : `Ausrücken. ${higherTip.value}`,
+)
 const shownWidth = computed(() => props.footer?.logo_width_mm ?? OFFER_FOOTER_LOGO.defaultWidthMm)
 const shownOffset = computed(() => props.footer?.logo_offset_mm ?? OFFER_FOOTER_LOGO.legacyOffsetMm)
 
@@ -140,11 +185,12 @@ watch(
     if (!on) layoutOpen.value = false
   },
 )
-watch([listOpen, menuOpen, layoutOpen], async () => {
+watch([listOpen, menuOpen, layoutOpen, gearOpen], async () => {
   await nextTick()
   if (listOpen.value) place(listButton.value, listPopover.value, 'start')
   if (menuOpen.value) place(menuButton.value, menuPopover.value, 'end')
   if (layoutOpen.value) place(menuButton.value, layoutPopover.value, 'end')
+  if (gearOpen.value) place(gearButton.value, gearPopover.value, 'start')
 })
 
 function place(
@@ -170,17 +216,25 @@ function prime(event: MouseEvent) {
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
   event.preventDefault()
 }
-function openThisOffer() {
-  gearOpen.value = false
-  emit('select-footer')
-}
 function openTemplates() {
+  finishWidth()
+  finishOffset()
   gearOpen.value = false
   emit('action', 'settings')
 }
-function openLogo() {
-  gearOpen.value = false
-  layoutOpen.value = true
+function toggleGear() {
+  listOpen.value = false
+  menuOpen.value = false
+  layoutOpen.value = false
+  insertOpen.value = false
+  if (gearOpen.value) {
+    finishWidth()
+    finishOffset()
+    gearOpen.value = false
+    return
+  }
+  gearOpen.value = true
+  void nextTick(() => gearPopover.value?.querySelector<HTMLInputElement>('input')?.focus())
 }
 function chooseInsert(kind: 'section' | 'position') {
   insertOpen.value = false
@@ -188,6 +242,8 @@ function chooseInsert(kind: 'section' | 'position') {
   else emit('insert-position')
 }
 function run(command: ProseCommand) {
+  if (command.type === 'indent' && !canIndent.value) return
+  if (command.type === 'outdent' && !canOutdent.value) return
   if (!(command.type === 'numbering' && command.mode === 'start')) startDraft.value = null
   session?.active.value?.apply(command)
 }
@@ -195,6 +251,7 @@ function toggleList(event: MouseEvent) {
   if (!listEnabled.value) return
   menuOpen.value = false
   layoutOpen.value = false
+  gearOpen.value = false
   listOpen.value = !listOpen.value
   if (listOpen.value && event.detail === 0)
     void nextTick(() => listPopover.value?.querySelector('button')?.focus())
@@ -202,6 +259,7 @@ function toggleList(event: MouseEvent) {
 function toggleMenu(event: MouseEvent) {
   listOpen.value = false
   layoutOpen.value = false
+  gearOpen.value = false
   menuOpen.value = !menuOpen.value
   if (menuOpen.value && event.detail === 0)
     void nextTick(() =>
@@ -326,6 +384,14 @@ function onDocPointer(event: PointerEvent) {
 }
 function onDocKey(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
+  if (gearOpen.value) {
+    finishWidth()
+    finishOffset()
+    gearOpen.value = false
+    gearButton.value?.focus()
+    event.preventDefault()
+    return
+  }
   if (layoutOpen.value) {
     finishWidth()
     finishOffset()
@@ -355,6 +421,7 @@ function reposition() {
   if (listOpen.value) place(listButton.value, listPopover.value, 'start')
   if (menuOpen.value) place(menuButton.value, menuPopover.value, 'end')
   if (layoutOpen.value) place(menuButton.value, layoutPopover.value, 'end')
+  if (gearOpen.value) place(gearButton.value, gearPopover.value, 'start')
 }
 onMounted(() => {
   window.addEventListener('pointerdown', onDocPointer)
@@ -446,28 +513,72 @@ defineExpose({ root })
         <button type="button" @click="chooseInsert('position')">Leistungsposition</button>
       </div>
       <button
+        ref="gearButton"
         v-if="editable"
         type="button"
         class="tool-button icon-only"
+        aria-haspopup="dialog"
+        :aria-expanded="gearOpen"
         aria-label="Einstellungen"
         title="Einstellungen"
-        @click="gearOpen = !gearOpen"
+        @click="toggleGear"
       >
         <Settings2 :size="16" />
       </button>
-      <div v-if="gearOpen" class="chrome-popover gear-popover" data-offer-chrome role="menu">
-        <button type="button" @click="openThisOffer">Dieses Angebot</button>
-        <p class="hint">Fußzeilenlogo und Listen gelten nur für dieses Angebot.</p>
-        <button type="button" @click="openTemplates">
-          Vorlagen für neue Angebote
-          <small
-            >Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt
-            unverändert.</small
-          >
-        </button>
-        <button type="button" @click="openLogo">
-          Fußzeilenlogo
-        </button>
+      <div
+        v-if="gearOpen"
+        ref="gearPopover"
+        class="chrome-popover gear-popover offer-settings"
+        data-offer-chrome
+        role="dialog"
+        aria-labelledby="this-offer-heading"
+      >
+        <section class="this-offer" aria-labelledby="this-offer-heading">
+          <h2 id="this-offer-heading" class="panel-heading">Dieses Angebot</h2>
+          <p class="hint">Breite und Versatz gelten nur für dieses Angebot.</p>
+          <label>
+            Breite
+            <span class="mm">
+              <input
+                type="text"
+                inputmode="decimal"
+                :value="widthDraft ?? shownWidth"
+                aria-label="Breite des Fußzeilenlogos in Millimetern"
+                @input="onWidth"
+                @blur="finishWidth"
+                @keydown.enter.prevent="finishWidth"
+              />
+              mm
+            </span>
+          </label>
+          <label>
+            Versatz
+            <span class="mm">
+              <input
+                type="text"
+                inputmode="decimal"
+                :value="offsetDraft ?? shownOffset"
+                aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
+                @input="onOffset"
+                @blur="finishOffset"
+                @keydown.enter.prevent="finishOffset"
+              />
+              mm
+            </span>
+          </label>
+          <p class="hint">
+            Negativ nach oben, positiv nach unten. Nummer, Linie und Seitenzahl bleiben.
+          </p>
+        </section>
+        <div class="gear-future" role="group" aria-label="Vorlagen für neue Angebote">
+          <button type="button" class="gear-templates" @click="openTemplates">
+            Vorlagen für neue Angebote
+            <small
+              >Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt
+              unverändert.</small
+            >
+          </button>
+        </div>
       </div>
       <div class="list-anchor">
         <button
@@ -530,12 +641,26 @@ defineExpose({ root })
             </button>
           </div>
           <div class="indent-row">
-            <button type="button" aria-label="Einrücken" @click="run({ type: 'indent' })">
-              Einrücken
-            </button>
-            <button type="button" aria-label="Ausrücken" @click="run({ type: 'outdent' })">
-              Ausrücken
-            </button>
+            <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+              <button
+                type="button"
+                :disabled="!canIndent"
+                :aria-label="indentName"
+                @click="run({ type: 'indent' })"
+              >
+                Einrücken
+              </button>
+            </span>
+            <span class="level-tip" :data-tip="higherTip" :title="higherTip">
+              <button
+                type="button"
+                :disabled="!canOutdent"
+                :aria-label="outdentName"
+                @click="run({ type: 'outdent' })"
+              >
+                Ausrücken
+              </button>
+            </span>
           </div>
           <div v-if="listState.kind !== 'bullet'" class="indent-row">
             <button
@@ -737,24 +862,28 @@ defineExpose({ root })
       </template>
       <template v-else-if="selection?.kind === 'text'">
         <span>Text in Abschnitt {{ selection.index + 1 }}</span>
-        <button
-          type="button"
-          title="Eine Listenebene höher"
-          aria-label="Eine Listenebene höher"
-          @mousedown="prime"
-          @click="run({ type: 'outdent' })"
-        >
-          Ebene höher
-        </button>
-        <button
-          type="button"
-          title="Eine Listenebene tiefer"
-          aria-label="Eine Listenebene tiefer"
-          @mousedown="prime"
-          @click="run({ type: 'indent' })"
-        >
-          Ebene tiefer
-        </button>
+        <span class="level-tip" :data-tip="higherTip" :title="higherTip">
+          <button
+            type="button"
+            :disabled="!canOutdent"
+            :aria-label="higherName"
+            @mousedown="prime"
+            @click="run({ type: 'outdent' })"
+          >
+            Ebene höher
+          </button>
+        </span>
+        <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+          <button
+            type="button"
+            :disabled="!canIndent"
+            :aria-label="deeperName"
+            @mousedown="prime"
+            @click="run({ type: 'indent' })"
+          >
+            Ebene tiefer
+          </button>
+        </span>
         <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'none' })">
           Text
         </button>
@@ -865,9 +994,59 @@ defineExpose({ root })
   outline: 1px solid var(--h-mint, #0e6f6c);
   outline-offset: 2px;
 }
-.context-row button:disabled {
+.context-row button:disabled,
+.indent-row button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+.level-tip {
+  position: relative;
+  display: inline-flex;
+}
+.level-tip:hover::after,
+.level-tip:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 70;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: max-content;
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--h-text, #203c3d);
+  color: var(--h-surface, #fffefa);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 8px 24px #10232714;
+}
+.panel-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--h-text, #203c3d);
+}
+.this-offer {
+  display: grid;
+  gap: 8px;
+}
+.gear-future {
+  border-top: 1px solid var(--h-line, #d8e2df);
+  padding-top: 8px;
+}
+.gear-templates {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+}
+.gear-templates small {
+  color: var(--h-muted, #596e70);
+  font-size: 11px;
+  line-height: 1.35;
 }
 .gear-popover {
   position: absolute;
@@ -1038,6 +1217,13 @@ select:focus-visible,
 .bullets button {
   font-size: 16px;
 }
+.indent-row .level-tip {
+  display: flex;
+  flex: 1;
+}
+.indent-row .level-tip button {
+  width: 100%;
+}
 .indent-row button {
   font-size: 12px;
 }
@@ -1105,11 +1291,15 @@ select:focus-visible,
   line-height: 1.35;
   white-space: normal;
 }
-.layout-popover label {
+.layout-popover label,
+.offer-settings label {
   display: grid;
   gap: 4px;
   margin-bottom: 8px;
   font-size: 12px;
+}
+.offer-settings {
+  width: min(292px, calc(100vw - 16px));
 }
 .mm {
   display: flex;

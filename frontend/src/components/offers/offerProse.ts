@@ -47,7 +47,10 @@ export type NumberingCommand =
   | 'independent'
   | 'bound'
   | 'unbound'
+export type NumberingMode = 'restart' | 'continue' | 'start' | 'section' | 'independent'
 export const OFFER_LIST_START_MAX = 9999
+/** Why indent or outdent would leave the current selection unchanged. */
+export type LevelLimit = 'max-depth' | 'no-previous' | 'boundary' | 'not-list' | 'mixed'
 export type ProseListState = {
   kind: ProseListKind | 'mixed'
   bullet: OfferBulletMarker | 'mixed' | null
@@ -55,6 +58,18 @@ export type ProseListState = {
   continued: boolean | 'mixed'
   start: number | 'mixed' | null
   sectionBound: boolean | 'mixed'
+  indent: boolean
+  outdent: boolean
+  indentLimit: LevelLimit | null
+  outdentLimit: LevelLimit | null
+}
+
+/** First selected item keeps the command. Later items follow, except ownership which stays per item. */
+export function numberingCommandForIndex(mode: NumberingMode, position: number): NumberingCommand {
+  if (position <= 0) return mode
+  if (mode === 'section') return 'bound'
+  if (mode === 'independent') return 'unbound'
+  return 'follow'
 }
 
 export function isOfferMarker(value: unknown): value is OfferMarker {
@@ -461,23 +476,29 @@ export function proseListState(nodes: OfferTextNode[], input: Caret | ProseRange
     bounds.add(node.section_bound === true)
   }
   const kind = kinds.size === 1 ? [...kinds][0]! : 'mixed'
-  const outline = outlines.size === 1 ? [...outlines][0]! : outlines.size > 1 ? 'mixed' : false
-  const continued = continues.size === 1 ? [...continues][0]! : continues.size > 1 ? 'mixed' : false
-  const startValue = starts.size === 1 ? [...starts][0]! : starts.size > 1 ? 'mixed' : null
-  const sectionBound = bounds.size === 1 ? [...bounds][0]! : bounds.size > 1 ? 'mixed' : false
-  if (kind !== 'bullet')
-    return { kind, bullet: null, outline, continued, start: startValue, sectionBound }
-  if (bullets.size !== 1)
-    return { kind, bullet: 'mixed', outline, continued, start: startValue, sectionBound }
-  const only = [...bullets][0]!
-  return {
-    kind,
-    bullet: only === 'depth' ? null : only,
+  const outline: ProseListState['outline'] =
+    outlines.size === 1 ? [...outlines][0]! : outlines.size > 1 ? 'mixed' : false
+  const continued: ProseListState['continued'] =
+    continues.size === 1 ? [...continues][0]! : continues.size > 1 ? 'mixed' : false
+  const startValue: ProseListState['start'] =
+    starts.size === 1 ? [...starts][0]! : starts.size > 1 ? 'mixed' : null
+  const sectionBound: ProseListState['sectionBound'] =
+    bounds.size === 1 ? [...bounds][0]! : bounds.size > 1 ? 'mixed' : false
+  const level = proseLevelMoves(nodes, input)
+  const shared = {
     outline,
     continued,
     start: startValue,
     sectionBound,
+    indent: level.indent,
+    outdent: level.outdent,
+    indentLimit: level.indentLimit,
+    outdentLimit: level.outdentLimit,
   }
+  if (kind !== 'bullet') return { kind, bullet: null, ...shared }
+  if (bullets.size !== 1) return { kind, bullet: 'mixed', ...shared }
+  const only = [...bullets][0]!
+  return { kind, bullet: only === 'depth' ? null : only, ...shared }
 }
 
 function clampCaret(nodes: OfferTextNode[], caret: Caret): Caret {
@@ -606,6 +627,80 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   return clampProse(next)
 }
 
+function structureMoves(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+  op: (nodes: OfferTextNode[], index: number) => OfferTextNode[],
+): boolean {
+  const edit = applyStructure(nodes, input, op)
+  return !edit.error && JSON.stringify(edit.nodes) !== JSON.stringify(nodes)
+}
+
+function indentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null {
+  const node = nodes[index]
+  if (!node) return 'boundary'
+  if (node.kind !== 'item') return null
+  const current = node.depth ?? 0
+  if (structuralDepth(nodes, index, current + 1) > current) return null
+  if (current >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
+  const previous = previousItemDepth(nodes, index)
+  if (previous < 0) return 'no-previous'
+  const max = Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
+  if (current >= max && max >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
+  return 'boundary'
+}
+
+function outdentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null {
+  const node = nodes[index]
+  if (!node || node.kind !== 'item') return 'not-list'
+  const current = node.depth ?? 0
+  if (current <= 0) return null
+  const stepped = current - 1
+  const structural = structuralDepth(nodes, index, stepped)
+  const nextDepth = node.list_continue && structural < stepped ? stepped : structural
+  if (nextDepth === current) return 'boundary'
+  return null
+}
+
+function aggregateLimit(reasons: Array<LevelLimit | null>): LevelLimit | null {
+  if (reasons.some((reason) => reason == null)) return 'boundary'
+  const limits = reasons.filter((reason): reason is LevelLimit => reason != null)
+  if (limits.length === 0) return 'boundary'
+  const unique = new Set(limits)
+  if (unique.size === 1) return [...unique][0]!
+  return 'mixed'
+}
+
+/** Same structural result as the indent and outdent commands, including a mixed selection. */
+export function proseLevelMoves(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+): Pick<ProseListState, 'indent' | 'outdent' | 'indentLimit' | 'outdentLimit'> {
+  const { start, end } = rangeEnds(proseRange(input))
+  const last = Math.max(0, nodes.length - 1)
+  const from = Math.max(0, Math.min(start.index, last))
+  const to = Math.max(0, Math.min(end.index, last))
+  const indent = structureMoves(nodes, input, indentItem)
+  const outdent = structureMoves(nodes, input, outdentItem)
+  const indentReasons: Array<LevelLimit | null> = []
+  const outdentReasons: Array<LevelLimit | null> = []
+  if (nodes.length === 0) {
+    indentReasons.push('boundary')
+    outdentReasons.push('not-list')
+  } else {
+    for (let index = from; index <= to; index++) {
+      indentReasons.push(indentLimitAt(nodes, index))
+      outdentReasons.push(outdentLimitAt(nodes, index))
+    }
+  }
+  return {
+    indent,
+    outdent,
+    indentLimit: indent ? null : aggregateLimit(indentReasons),
+    outdentLimit: outdent ? null : aggregateLimit(outdentReasons),
+  }
+}
+
 function siblingDepth(nodes: OfferTextNode[], index: number): number {
   const prev = nodes[index - 1]
   return prev?.kind === 'item' ? (prev.depth ?? 0) : 0
@@ -652,7 +747,10 @@ export function setBulletMarker(
   return clampProse(next)
 }
 
-/** Restart, continue, or a positive start. Follow keeps the outline style and drops anchors. */
+/**
+ * Restart, continue, or a positive start. Follow keeps the outline style and drops anchors.
+ * Section and independent ownership keep each item's own start or continuation.
+ */
 export function setDecimalControl(
   nodes: OfferTextNode[],
   index: number,
@@ -671,7 +769,10 @@ export function setDecimalControl(
   )
     anchor.section_bound = true
   if (
-    (command === 'section' || command === 'independent') &&
+    (command === 'section' ||
+      command === 'independent' ||
+      command === 'bound' ||
+      command === 'unbound') &&
     node.kind === 'item' &&
     node.marker === 'decimal'
   ) {

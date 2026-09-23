@@ -17,7 +17,7 @@ import {
   type SectionEditorMemory,
 } from './offerProse'
 import type { OfferBlock, OfferPosition, OfferSelection, OfferTextNode } from './types'
-import { date, type Offer } from './types'
+import { date, type Offer, type OfferDocument as OfferDoc } from './types'
 import { OFFER_FOOTER_LOGO } from './offerLayout'
 import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
@@ -46,6 +46,56 @@ const pages = ref<Page[]>([
   { kind: 'cover', blocks: [], positions: [], acceptance: false },
   { kind: 'positions', blocks: [], positions: [], acceptance: true },
 ])
+function safePages(source: Page[]): Page[] {
+  const blockCount = props.offer.document.blocks.length
+  const positionCount = props.offer.document.positions.length
+  const next = source.map((page) => ({
+    ...page,
+    blocks: page.blocks.filter((index) => index >= 0 && index < blockCount),
+    positions: page.positions.filter((index) => index >= 0 && index < positionCount),
+  }))
+  const seenBlocks = new Set(next.flatMap((page) => page.blocks))
+  const missingBlocks: number[] = []
+  for (let index = 0; index < blockCount; index++) {
+    if (!seenBlocks.has(index)) missingBlocks.push(index)
+  }
+  if (missingBlocks.length) {
+    let host = [...next]
+      .reverse()
+      .find((page) => page.blocks.length > 0 || page.heading === 'terms')
+    if (!host) {
+      host = { kind: 'terms', heading: 'terms', blocks: [], positions: [], acceptance: false }
+      const cover = next.findIndex((page) => page.kind === 'cover')
+      next.splice(cover >= 0 ? cover + 1 : 0, 0, host)
+    }
+    host.blocks.push(...missingBlocks)
+    host.blocks.sort((a, b) => a - b)
+  }
+  const seenPositions = new Set(next.flatMap((page) => page.positions))
+  const missingPositions: number[] = []
+  for (let index = 0; index < positionCount; index++) {
+    if (!seenPositions.has(index)) missingPositions.push(index)
+  }
+  if (missingPositions.length) {
+    let host = [...next]
+      .reverse()
+      .find((page) => page.positions.length > 0 || page.heading === 'positions' || page.acceptance)
+    if (!host) {
+      host = {
+        kind: 'positions',
+        heading: 'positions',
+        blocks: [],
+        positions: [],
+        acceptance: true,
+      }
+      next.push(host)
+    }
+    host.positions.push(...missingPositions)
+    host.positions.sort((a, b) => a - b)
+  }
+  return next
+}
+const renderedPages = computed(() => safePages(pages.value))
 const measure = ref<HTMLElement>()
 const printBlocked = ref('')
 const probe = ref<HTMLElement>()
@@ -157,20 +207,28 @@ function sectionKey(block: object | undefined): number {
   sectionIds.set(block, id)
   return id
 }
+type DocSnap = {
+  data: OfferDoc
+  blocks: OfferBlock[]
+  positions: OfferPosition[]
+}
 type DocUndo =
   | { type: 'prose'; block: OfferBlock }
-  | { type: 'blocks'; before: OfferBlock[]; after: OfferBlock[] }
-  | { type: 'positions'; before: OfferPosition[]; after: OfferPosition[] }
+  | { type: 'document'; before: DocSnap; after: DocSnap }
 const undoStack: DocUndo[] = []
 const redoStack: DocUndo[] = []
-const canUndo = ref(false)
-const canRedo = ref(false)
+const historyVersion = ref(0)
 const activeKind = ref<OfferSelection['kind']>('none')
 const activePosition = ref<number | null>(null)
 const deleteAsk = ref<number | null>(null)
+const canUndo = computed(
+  () => !!props.editable && historyVersion.value >= 0 && undoStack.length > 0,
+)
+const canRedo = computed(
+  () => !!props.editable && historyVersion.value >= 0 && redoStack.length > 0,
+)
 function markHistory() {
-  canUndo.value = undoStack.length > 0
-  canRedo.value = redoStack.length > 0
+  historyVersion.value++
 }
 function recordProse(block: OfferBlock) {
   undoStack.push({ type: 'prose', block })
@@ -182,6 +240,7 @@ function applyProseUndo(
   nodes: OfferTextNode[],
   caret: { index: number; offset: number },
 ) {
+  applying = true
   const index = props.offer.document.blocks.indexOf(block)
   const stored = persistProse(nodes, index >= 0 ? index + 1 : 0)
   block.body = stored.body
@@ -195,8 +254,12 @@ function applyProseUndo(
     activeField.value = 'body'
     focusSection(index, 'body')
   }
+  applying = false
+  baseline = capture()
 }
 function undoDocument() {
+  if (!props.editable) return
+  commitPending()
   const entry = undoStack.pop()
   if (!entry) return
   redoStack.push(entry)
@@ -208,15 +271,13 @@ function undoDocument() {
       caret: memory.caret ?? { index: 0, offset: 0 },
     })
     if (prev) applyProseUndo(entry.block, prev.nodes, prev.caret)
-  } else if (entry.type === 'blocks') {
-    props.offer.document.blocks.splice(0, props.offer.document.blocks.length, ...entry.before)
-  } else {
-    props.offer.document.positions.splice(0, props.offer.document.positions.length, ...entry.before)
-  }
+  } else applySnap(entry.before)
   markHistory()
   emit('change')
 }
 function redoDocument() {
+  if (!props.editable) return
+  commitPending()
   const entry = redoStack.pop()
   if (!entry) return
   undoStack.push(entry)
@@ -228,32 +289,139 @@ function redoDocument() {
       caret: memory.caret ?? { index: 0, offset: 0 },
     })
     if (next) applyProseUndo(entry.block, next.nodes, next.caret)
-  } else if (entry.type === 'blocks') {
-    props.offer.document.blocks.splice(0, props.offer.document.blocks.length, ...entry.after)
-  } else {
-    props.offer.document.positions.splice(0, props.offer.document.positions.length, ...entry.after)
-  }
+  } else applySnap(entry.after)
   markHistory()
   emit('change')
 }
 function withBlocks(mutate: () => void) {
-  const before = props.offer.document.blocks.slice()
   mutate()
-  const after = props.offer.document.blocks.slice()
-  if (before.length === after.length && before.every((block, index) => block === after[index]))
-    return
-  undoStack.push({ type: 'blocks', before, after })
-  redoStack.length = 0
-  markHistory()
 }
 function withPositions(mutate: () => void) {
-  const before = props.offer.document.positions.slice()
   mutate()
-  const after = props.offer.document.positions.slice()
-  if (before.length === after.length && before.every((row, index) => row === after[index])) return
-  undoStack.push({ type: 'positions', before, after })
+}
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+function capture(): DocSnap {
+  const doc = props.offer.document
+  return { data: jsonClone(doc), blocks: doc.blocks.slice(), positions: doc.positions.slice() }
+}
+function withoutProse(doc: OfferDoc): string {
+  const clone = jsonClone(doc)
+  for (const block of clone.blocks) {
+    block.body = ''
+    delete block.nodes
+  }
+  return JSON.stringify(clone)
+}
+function sameOrder(before: object[], after: object[]): boolean {
+  return before.length === after.length && before.every((item, index) => item === after[index])
+}
+let epoch = 0
+let applying = false
+let replacing = false
+let scheduled = false
+let pendingBefore: DocSnap | null = null
+let baseline = capture()
+function commitPending() {
+  if (!pendingBefore || applying || replacing) return
+  const before = pendingBefore
+  pendingBefore = null
+  scheduled = false
+  epoch++
+  const after = capture()
+  if (!props.editable) {
+    baseline = after
+    return
+  }
+  const moved =
+    !sameOrder(before.blocks, after.blocks) || !sameOrder(before.positions, after.positions)
+  if (!moved && JSON.stringify(before.data) === JSON.stringify(after.data)) return
+  if (!moved && withoutProse(before.data) === withoutProse(after.data)) {
+    baseline = after
+    return
+  }
+  undoStack.push({ type: 'document', before, after })
   redoStack.length = 0
+  baseline = after
   markHistory()
+}
+function noteSoon() {
+  if (applying || replacing) return
+  if (!pendingBefore) pendingBefore = baseline
+  if (scheduled) return
+  scheduled = true
+  const token = epoch
+  queueMicrotask(() => {
+    if (token !== epoch) return
+    commitPending()
+  })
+}
+function applySnap(snap: DocSnap) {
+  applying = true
+  const doc = props.offer.document
+  const data = snap.data
+  doc.title = data.title
+  doc.subtitle = data.subtitle
+  doc.project_ref = data.project_ref
+  doc.offer_date = data.offer_date
+  doc.valid_until = data.valid_until
+  doc.intro = data.intro
+  doc.accept_text = data.accept_text
+  doc.vat_note = data.vat_note
+  doc.net_total_cents = data.net_total_cents
+  doc.sender = jsonClone(data.sender)
+  doc.customer = jsonClone(data.customer)
+  if (data.footer) doc.footer = jsonClone(data.footer)
+  else delete doc.footer
+  snap.blocks.forEach((block, index) => {
+    const src = data.blocks[index]
+    if (!src) return
+    block.heading = src.heading
+    block.body = src.body
+    if (src.nodes) block.nodes = jsonClone(src.nodes)
+    else delete block.nodes
+  })
+  doc.blocks.splice(0, doc.blocks.length, ...snap.blocks)
+  snap.positions.forEach((row, index) => {
+    const src = data.positions[index]
+    if (!src) return
+    row.short_text = src.short_text
+    row.long_text = src.long_text
+    row.quantity = src.quantity
+    row.unit = src.unit
+    row.unit_price_cents = src.unit_price_cents
+    row.total_cents = src.total_cents
+  })
+  doc.positions.splice(0, doc.positions.length, ...snap.positions)
+  applying = false
+  baseline = capture()
+  if (activeBlock.value != null && !doc.blocks[activeBlock.value]) {
+    activeBlock.value = doc.blocks.length
+      ? Math.min(activeBlock.value, doc.blocks.length - 1)
+      : null
+    if (activeBlock.value == null) activeKind.value = 'none'
+  }
+  if (activePosition.value != null && !doc.positions[activePosition.value]) {
+    activePosition.value = null
+    if (activeKind.value === 'position') activeKind.value = 'none'
+  }
+}
+function resetHistory() {
+  epoch++
+  replacing = true
+  pendingBefore = null
+  scheduled = false
+  undoStack.length = 0
+  redoStack.length = 0
+  baseline = capture()
+  markHistory()
+  activeKind.value = 'none'
+  activeBlock.value = null
+  activePosition.value = null
+  deleteAsk.value = null
+  emit('select', { kind: 'none' })
+  replacing = false
 }
 function sectionMemory(block: object | undefined): SectionEditorMemory | null {
   if (!block) return null
@@ -414,12 +582,24 @@ const footerShift = computed(() => {
     '--mark-font': `${7.5 * scale}pt`,
   }
 })
+watch(
+  () => props.offer.document,
+  (doc, prev) => {
+    if (prev && doc !== prev) {
+      resetHistory()
+      return
+    }
+    noteSoon()
+  },
+  { deep: true, flush: 'sync' },
+)
 defineExpose({
   paginate,
   undo: undoDocument,
   redo: redoDocument,
   canUndo,
   canRedo,
+  resetHistory,
   addSection,
   moveSection,
   askDeleteSection,
@@ -474,7 +654,7 @@ defineExpose({
       @focusin="onSheetFocusIn"
     >
       <section
-        v-for="(page, index) in pages"
+        v-for="(page, index) in renderedPages"
         :key="index"
         :class="['page', page.kind === 'cover' ? 'p1' : 'p2']"
         :aria-label="`Seite ${index + 1}`"
@@ -495,87 +675,84 @@ defineExpose({
             <OfferBrandDots />
           </h2>
           <div v-if="page.blocks.length" class="sections">
-            <div
-              v-for="i in page.blocks"
-              :key="sectionKey(offer.document.blocks[i])"
-              class="sec"
-              :data-section="i"
-            >
-              <span class="n">{{ i + 1 }}</span
-              ><OfferText
-                v-model="offer.document.blocks[i]!.heading"
-                tag="h3"
-                :editable="editable"
-                :label="`Überschrift Textbaustein ${i + 1}`"
-              /><span
-                v-if="editable"
-                class="sec-actions"
-                :aria-label="`Aktionen für Abschnitt ${i + 1}`"
-              >
-                <button
-                  type="button"
-                  title="Abschnitt danach hinzufügen"
-                  :aria-label="`Abschnitt ${i + 1} danach hinzufügen`"
-                  :disabled="!canAdd"
-                  @mousedown.prevent
-                  @click="
-                    () => {
-                      activeBlock = i
-                      addSection()
-                    }
-                  "
+            <template v-for="i in page.blocks" :key="sectionKey(offer.document.blocks[i])">
+              <div v-if="offer.document.blocks[i]" class="sec" :data-section="i">
+                <span class="n">{{ i + 1 }}</span
+                ><OfferText
+                  v-model="offer.document.blocks[i]!.heading"
+                  tag="h3"
+                  :editable="editable"
+                  :label="`Überschrift Textbaustein ${i + 1}`"
+                /><span
+                  v-if="editable"
+                  class="sec-actions"
+                  :aria-label="`Aktionen für Abschnitt ${i + 1}`"
                 >
-                  +
-                </button>
-                <button
-                  type="button"
-                  title="Abschnitt nach oben verschieben"
-                  aria-label="Abschnitt nach oben"
-                  :disabled="i === 0"
-                  @mousedown.prevent
-                  @click="
-                    () => {
-                      activeBlock = i
-                      moveSection(-1)
-                    }
-                  "
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  title="Abschnitt nach unten verschieben"
-                  aria-label="Abschnitt nach unten"
-                  :disabled="i === offer.document.blocks.length - 1"
-                  @mousedown.prevent
-                  @click="
-                    () => {
-                      activeBlock = i
-                      moveSection(1)
-                    }
-                  "
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  title="Diesen Abschnitt löschen"
-                  :aria-label="`Abschnitt ${i + 1} löschen`"
-                  @mousedown.prevent
-                  @click="askDeleteSection(i)"
-                >
-                  ×
-                </button> </span
-              ><OfferProse
-                :body="offer.document.blocks[i]!.body"
-                :nodes="offer.document.blocks[i]!.nodes"
-                :memory="sectionMemory(offer.document.blocks[i])"
-                :section-number="i + 1"
-                :editable="editable"
-                :label="`Textbaustein ${i + 1}`"
-                @update="applyBody(i, $event)"
-              />
-            </div>
+                  <button
+                    type="button"
+                    title="Abschnitt danach hinzufügen"
+                    :aria-label="`Abschnitt ${i + 1} danach hinzufügen`"
+                    :disabled="!canAdd"
+                    @mousedown.prevent
+                    @click="
+                      () => {
+                        activeBlock = i
+                        addSection()
+                      }
+                    "
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    title="Abschnitt nach oben verschieben"
+                    aria-label="Abschnitt nach oben"
+                    :disabled="i === 0"
+                    @mousedown.prevent
+                    @click="
+                      () => {
+                        activeBlock = i
+                        moveSection(-1)
+                      }
+                    "
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    title="Abschnitt nach unten verschieben"
+                    aria-label="Abschnitt nach unten"
+                    :disabled="i === offer.document.blocks.length - 1"
+                    @mousedown.prevent
+                    @click="
+                      () => {
+                        activeBlock = i
+                        moveSection(1)
+                      }
+                    "
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    title="Diesen Abschnitt löschen"
+                    :aria-label="`Abschnitt ${i + 1} löschen`"
+                    @mousedown.prevent
+                    @click="askDeleteSection(i)"
+                  >
+                    ×
+                  </button> </span
+                ><OfferProse
+                  :body="offer.document.blocks[i]!.body"
+                  :nodes="offer.document.blocks[i]!.nodes"
+                  :memory="sectionMemory(offer.document.blocks[i])"
+                  :section-number="i + 1"
+                  :editable="editable"
+                  :label="`Textbaustein ${i + 1}`"
+                  @update="applyBody(i, $event)"
+                />
+              </div>
+            </template>
           </div>
           <OfferTable
             v-if="page.positions.length"
@@ -617,7 +794,7 @@ defineExpose({
             @click="selectFooter"
             @keydown.enter.prevent="selectFooter"
             ><span class="lockup">{{ offer.document.sender.company }}</span></span
-          ><span class="right">SEITE {{ index + 1 }} VON {{ pages.length }}</span>
+          ><span class="right">SEITE {{ index + 1 }} VON {{ renderedPages.length }}</span>
         </div>
       </section>
     </div>
