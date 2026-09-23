@@ -318,13 +318,88 @@
   font-weight: 700;
   color: var(--teal);
 }
-.offer-document .sec p {
+.offer-document .sec p,
+.offer-document .sec .offer-prose-field {
   grid-column: 2;
   margin: 1px 0 0;
   color: #333c3c;
-  white-space: pre-line;
   font-size: 9.6pt;
   line-height: 1.5;
+}
+.offer-document .sec p {
+  white-space: pre-line;
+}
+.offer-document .offer-prose-field {
+  position: relative;
+  min-width: 0;
+}
+.offer-document .offer-prose {
+  min-width: 0;
+}
+.offer-document .offer-prose [data-text] {
+  display: block;
+  min-width: 1ch;
+  min-height: 1.2em;
+}
+.offer-document .offer-prose .paragraph,
+.offer-document .offer-prose .item {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.offer-document .offer-prose .spaced.paragraph {
+  padding-top: 0.55em;
+}
+.offer-document .offer-prose .spaced.item {
+  padding-top: 0.16em;
+}
+.offer-document .offer-prose .item {
+  display: grid;
+  grid-template-columns: 1.15em minmax(0, 1fr);
+  column-gap: 0.35em;
+  margin-left: calc(var(--depth, 0) * 1.35em);
+}
+.offer-document .offer-prose .item::before {
+  content: attr(data-bullet);
+  color: var(--teal);
+  font-weight: 700;
+  user-select: none;
+}
+.offer-document .offer-prose-tools {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  bottom: calc(100% + 2px);
+  display: none;
+  gap: 4px;
+}
+.offer-document .offer-prose-field:focus-within .offer-prose-tools {
+  display: flex;
+}
+.offer-document .offer-prose-tools button {
+  appearance: none;
+  font: inherit;
+  font-size: 8pt;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.offer-document .offer-prose-tools button[aria-pressed='true'] {
+  background: #e7f8f5;
+  border-color: var(--aqua);
+}
+.offer-document .offer-prose-notice {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 2px);
+  margin: 0;
+  color: #8a3b32;
+  font-size: 8pt;
 }
 .offer-document [contenteditable] {
   border-radius: 2px;
@@ -710,6 +785,10 @@
   .offer-document [contenteditable] {
     background: transparent !important;
     box-shadow: none !important;
+  }
+  .offer-document .offer-prose-tools,
+  .offer-document .offer-prose-notice {
+    display: none !important;
   }
 }
 

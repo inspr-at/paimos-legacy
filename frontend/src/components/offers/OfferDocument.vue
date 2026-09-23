@@ -7,6 +7,9 @@ import '@fontsource/manrope/latin-700.css'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import OfferCover from './OfferCover.vue'
 import OfferText from './OfferText.vue'
+import OfferProse from './OfferProse.vue'
+import { offerBlockExceedsPage, offerBlockOverflowMessage } from './offerProse'
+import type { OfferTextNode } from './types'
 import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
 import OfferFootmark from './OfferFootmark.vue'
@@ -54,8 +57,8 @@ async function paginate() {
   for (const [i] of props.offer.document.blocks.entries()) {
     const h = height(`[data-block="${i}"]`) + 17
     const headingHeight = i === 0 ? termsHeadingHeight : 0
-    if (h + (headingHeight || continuationInset) > available)
-      error = `Textbaustein ${i + 1} ist länger als eine Seite. Bitte kürzen oder auf mehrere Bausteine verteilen.`
+    if (offerBlockExceedsPage(h, available, continuationInset, headingHeight))
+      error = offerBlockOverflowMessage(i)
     if (h + headingHeight > remaining) {
       next.push({ kind: 'terms', blocks: [], positions: [], acceptance: false })
       remaining = available - (headingHeight ? 0 : continuationInset)
@@ -106,6 +109,13 @@ onMounted(async () => {
   await document.fonts.ready
   await paginate()
 })
+function applyBody(index: number, next: { body: string; nodes?: OfferTextNode[] }) {
+  const block = props.offer.document.blocks[index]
+  if (!block) return
+  block.body = next.body
+  if (next.nodes) block.nodes = next.nodes
+  else delete block.nodes
+}
 function remove(i: number) {
   props.offer.document.positions.splice(i, 1)
   emit('change')
@@ -140,7 +150,7 @@ defineExpose({ paginate })
         <div v-for="(block, i) in offer.document.blocks" :key="i" class="sec" :data-block="i">
           <span class="n">{{ i + 1 }}</span>
           <h3>{{ block.heading }}</h3>
-          <p>{{ block.body }}</p>
+          <OfferProse :body="block.body" :nodes="block.nodes" />
         </div>
         <OfferTable
           :positions="offer.document.positions"
@@ -183,11 +193,12 @@ defineExpose({ paginate })
                 tag="h3"
                 :editable="editable"
                 :label="`Überschrift Textbaustein ${i + 1}`"
-              /><OfferText
-                v-model="offer.document.blocks[i]!.body"
-                tag="p"
+              /><OfferProse
+                :body="offer.document.blocks[i]!.body"
+                :nodes="offer.document.blocks[i]!.nodes"
                 :editable="editable"
                 :label="`Textbaustein ${i + 1}`"
+                @update="applyBody(i, $event)"
               />
             </div>
           </div>

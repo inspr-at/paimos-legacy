@@ -1,8 +1,14 @@
 import { formatDecimal, formatDecimalFlex } from '@/composables/useNumberFormat'
 import { formatDateWithLocale, formatDateTimeWithLocale } from '@/composables/useDateFormat'
+export interface OfferTextNode {
+  kind: 'paragraph' | 'item'
+  text: string
+  depth?: number
+}
 export interface OfferBlock {
   heading: string
   body: string
+  nodes?: OfferTextNode[]
 }
 export interface OfferSender {
   company: string

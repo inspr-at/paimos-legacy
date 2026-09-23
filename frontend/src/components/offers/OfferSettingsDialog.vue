@@ -99,8 +99,12 @@ async function save() {
             ><textarea
               v-model="block.body"
               rows="4"
+              :readonly="!!block.nodes?.length"
               :aria-label="`Text Abschnitt ${i + 1}`"
-            /><button
+            /><p v-if="block.nodes?.length">
+              Dieser Baustein enthält eine Aufzählung. Sie wird im Angebot bearbeitet und bleibt beim
+              Speichern erhalten.
+            </p><button
               type="button"
               class="btn btn-sm"
               @click="settings.defaults.blocks.splice(i, 1)"
