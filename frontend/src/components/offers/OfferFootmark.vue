@@ -1,8 +1,25 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import OfferBrandDots from './OfferBrandDots.vue'
+import { footerLogoBox } from './offerLayout'
+import type { OfferFooterLayout } from './types'
+const props = defineProps<{ layout?: OfferFooterLayout | null }>()
+const box = computed(() => (props.layout ? footerLogoBox(props.layout.logo_width_mm) : null))
+const style = computed(() => {
+  if (!props.layout || !box.value) return undefined
+  const mark = box.value
+  return {
+    gap: `${mark.gapMm}mm`,
+    transform: `translateY(${props.layout.logo_offset_mm}mm)`,
+    '--dots-w': `${mark.dotsWidthMm}mm`,
+    '--dots-h': `${mark.dotsHeightMm}mm`,
+    '--word-w': `${mark.wordmarkWidthMm}mm`,
+    '--word-h': `${mark.wordmarkHeightMm}mm`,
+  }
+})
 </script>
 <template>
-  <div class="footmark">
+  <div class="footmark" :class="{ 'is-set': !!layout }" :style="style">
     <OfferBrandDots /><svg
       class="logotype"
       role="img"

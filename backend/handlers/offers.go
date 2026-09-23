@@ -80,8 +80,16 @@ type OfferDocument struct {
 	Sender     OfferSender   `json:"sender"`
 	Customer   OfferCustomer `json:"customer"`
 	OfferDefaults
-	Positions     []OfferPosition `json:"positions"`
-	NetTotalCents int64           `json:"net_total_cents"`
+	Positions     []OfferPosition    `json:"positions"`
+	NetTotalCents int64              `json:"net_total_cents"`
+	Footer        *OfferFooterLayout `json:"footer,omitempty"`
+}
+
+// OfferFooterLayout stores the centered footer mark. Absent means the legacy CSS lockup.
+// Width 18–96mm and offset 0–10mm follow the A4 content box (168mm) and 16mm bottom padding.
+type OfferFooterLayout struct {
+	LogoWidthMM  float64 `json:"logo_width_mm"`
+	LogoOffsetMM float64 `json:"logo_offset_mm"`
 }
 type Offer struct {
 	Deleted         bool               `json:"deleted"`
@@ -210,6 +218,9 @@ func calculateOffer(d *OfferDocument, final bool) error {
 	if err := normalizeOfferBlocks(d.Blocks); err != nil {
 		return err
 	}
+	if err := normalizeOfferFooter(d); err != nil {
+		return err
+	}
 	day, err := time.Parse("2006-01-02", d.OfferDate)
 	if err != nil {
 		return errors.New("Ungültiges Angebotsdatum")
@@ -253,6 +264,35 @@ func calculateOffer(d *OfferDocument, final bool) error {
 	}
 	return nil
 }
+
+func canonFooterMM(value, min, max float64) (float64, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, errors.New("Fußzeilenlogo außerhalb des zulässigen Bereichs")
+	}
+	rounded := math.Round(value*10) / 10
+	if rounded < min || rounded > max {
+		return 0, errors.New("Fußzeilenlogo außerhalb des zulässigen Bereichs")
+	}
+	return rounded, nil
+}
+
+func normalizeOfferFooter(d *OfferDocument) error {
+	if d.Footer == nil {
+		return nil
+	}
+	width, err := canonFooterMM(d.Footer.LogoWidthMM, 18, 96)
+	if err != nil {
+		return err
+	}
+	offset, err := canonFooterMM(d.Footer.LogoOffsetMM, 0, 10)
+	if err != nil {
+		return err
+	}
+	d.Footer.LogoWidthMM = width
+	d.Footer.LogoOffsetMM = offset
+	return nil
+}
+
 func scanOffer(row rowScanner) (Offer, error) {
 	var o Offer
 	var raw string
@@ -340,6 +380,9 @@ func CreateOffer(w http.ResponseWriter, r *http.Request) {
 	if c.BillingAddressStreet != "" {
 		d.Customer.Address = c.BillingAddressStreet + "\n" + strings.TrimSpace(c.BillingAddressZip+" "+c.BillingAddressCity)
 		d.Customer.Country = c.BillingAddressCountry
+	}
+	if body.DuplicateID == 0 {
+		d.Footer = &OfferFooterLayout{LogoWidthMM: 43.3, LogoOffsetMM: 2}
 	}
 	if body.DuplicateID != 0 {
 		source, e := scanOffer(db.DB.QueryRow(`SELECT `+offerColumns+` FROM offers WHERE id=? AND customer_id=?`, body.DuplicateID, c.ID))

@@ -13,8 +13,11 @@ import {
   offerBlockOverflowMessage,
   parseProseNodes,
   persistProse,
+  projectProse,
   proseNodes,
   reconcileProseTexts,
+  setBulletMarker,
+  setListKind,
   toggleItem,
 } from './offerProse'
 import type { OfferTextNode } from './types'
@@ -91,6 +94,35 @@ describe('offer prose text', () => {
     expect(
       proseNodes('sichtbar', [{ kind: 'html', text: '<b>x</b>' }] as unknown as OfferTextNode[]),
     ).toEqual([paragraph('sichtbar')])
+  })
+
+  it('numbers nested lists and keeps an absent marker on the old glyphs', () => {
+    const legacy = persistProse([
+      paragraph('Einleitung.'),
+      { kind: 'item', text: 'Analyse' },
+      { kind: 'item', text: 'Interviews', depth: 1 },
+    ])
+    expect(legacy.body).toBe('Einleitung.\n• Analyse\n  ◦ Interviews')
+    expect(legacy.nodes?.[0]).toEqual(paragraph('Einleitung.'))
+    const numbered = [
+      paragraph('Einleitung.'),
+      { kind: 'item' as const, text: 'Analyse', marker: 'decimal' as const },
+      { kind: 'item' as const, text: 'Interviews', depth: 1, marker: 'decimal' as const },
+      { kind: 'item' as const, text: 'Punkt', marker: 'disc' as const },
+      { kind: 'item' as const, text: 'Weiter', marker: 'decimal' as const },
+    ]
+    expect(projectProse(numbered)).toBe(
+      'Einleitung.\n1. Analyse\n  1. Interviews\n• Punkt\n1. Weiter',
+    )
+    expect(parseProseNodes([{ kind: 'item', text: 'x', marker: 'image' }])).toBeNull()
+    const squared = applyStructure(numbered, { index: 1, offset: 0 }, (nodes, index) =>
+      setBulletMarker(nodes, index, 'square'),
+    )
+    expect(squared.nodes[1]?.marker).toBe('square')
+    const cleared = applyStructure([squared.nodes[1]!], { index: 0, offset: 0 }, (nodes, index) =>
+      setListKind(nodes, index, 'none'),
+    )
+    expect(cleared.nodes[0]).toEqual(paragraph('Analyse'))
   })
 
   it('stores a list as nodes and a plain projection that is not parsed back from hyphens', () => {

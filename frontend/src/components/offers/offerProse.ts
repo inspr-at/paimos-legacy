@@ -1,4 +1,9 @@
-import type { OfferTextNode } from './types'
+import {
+  OFFER_BULLET_MARKERS,
+  type OfferBulletMarker,
+  type OfferMarker,
+  type OfferTextNode,
+} from './types'
 
 export const OFFER_PROSE_MAX_DEPTH = 5
 export const OFFER_PROSE_MAX_NODES = 100
@@ -25,17 +30,37 @@ export function bulletGlyph(depth: number): string {
   return '▪'
 }
 
+export const OFFER_BULLET_GLYPH: Record<OfferBulletMarker, string> = {
+  disc: '•',
+  circle: '◦',
+  square: '▪',
+  dash: '\u2013',
+}
+
+export type ProseListKind = 'none' | 'bullet' | 'ordered'
+export type ProseListState = {
+  kind: ProseListKind | 'mixed'
+  bullet: OfferBulletMarker | 'mixed' | null
+}
+
+export function isOfferMarker(value: unknown): value is OfferMarker {
+  return value === 'decimal' || (OFFER_BULLET_MARKERS as readonly string[]).includes(String(value))
+}
+
 function paragraph(text: string): OfferTextNode {
   return { kind: 'paragraph', text }
 }
 
-function listItem(text: string, depth: number): OfferTextNode {
-  return depth > 0 ? { kind: 'item', text, depth } : { kind: 'item', text }
+function listItem(text: string, depth: number, marker?: OfferMarker): OfferTextNode {
+  const node: OfferTextNode = { kind: 'item', text }
+  if (depth > 0) node.depth = depth
+  if (marker) node.marker = marker
+  return node
 }
 
 function cloneNodes(nodes: OfferTextNode[]): OfferTextNode[] {
   return nodes.map((node) =>
-    node.kind === 'item' ? listItem(node.text, node.depth ?? 0) : paragraph(node.text),
+    node.kind === 'item' ? listItem(node.text, node.depth ?? 0, node.marker) : paragraph(node.text),
   )
 }
 
@@ -94,7 +119,7 @@ function ceilEdge(edges: number[], offset: number): number {
 }
 
 function sameNode(node: OfferTextNode, text: string): OfferTextNode {
-  return node.kind === 'item' ? listItem(text, node.depth ?? 0) : paragraph(text)
+  return node.kind === 'item' ? listItem(text, node.depth ?? 0, node.marker) : paragraph(text)
 }
 
 function storedShape(nodes: OfferTextNode[]): OfferTextNode[] {
@@ -115,9 +140,27 @@ export function clampProse(nodes: OfferTextNode[]): OfferTextNode[] {
       const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
       const depth = Math.max(0, Math.min(node.depth ?? 0, max))
       previous = depth
-      return listItem(cleanText(node.text), depth)
+      return listItem(cleanText(node.text), depth, node.marker)
     }),
   )
+}
+
+export function proseMarkerLabels(nodes: OfferTextNode[]): string[] {
+  const counters = Array<number>(OFFER_PROSE_MAX_DEPTH + 1).fill(0)
+  return nodes.map((node) => {
+    if (node.kind !== 'item') {
+      counters.fill(0)
+      return ''
+    }
+    const depth = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
+    if (node.marker !== 'decimal') {
+      for (let i = depth; i < counters.length; i++) counters[i] = 0
+      return node.marker ? OFFER_BULLET_GLYPH[node.marker] : bulletGlyph(depth)
+    }
+    counters[depth] = (counters[depth] ?? 0) + 1
+    for (let i = depth + 1; i < counters.length; i++) counters[i] = 0
+    return `${counters[depth]}.`
+  })
 }
 
 export function parseProseNodes(value: unknown): OfferTextNode[] | null {
@@ -127,17 +170,21 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
   let previous = -1
   for (const raw of value) {
     if (!raw || typeof raw !== 'object') return null
-    const record = raw as { kind?: unknown; text?: unknown; depth?: unknown }
+    const record = raw as { kind?: unknown; text?: unknown; depth?: unknown; marker?: unknown }
     if ((record.kind !== 'paragraph' && record.kind !== 'item') || typeof record.text !== 'string')
       return null
     if (textLength(record.text) > OFFER_PROSE_MAX_TEXT) return null
     if (ILLEGAL_NODE_TEXT.test(record.text)) return null
+    const marker = record.marker
+    if (marker != null && marker !== '' && !isOfferMarker(marker)) return null
     if (record.kind === 'paragraph') {
-      if (record.depth != null && record.depth !== 0) return null
+      if ((record.depth != null && record.depth !== 0) || (marker != null && marker !== ''))
+        return null
       previous = -1
       nodes.push(paragraph(record.text))
       continue
     }
+    const itemMarker = isOfferMarker(marker) ? marker : undefined
     const depth = record.depth == null ? 0 : record.depth
     if (
       typeof depth !== 'number' ||
@@ -149,7 +196,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
     const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
     if (depth > max) return null
     previous = depth
-    nodes.push(listItem(record.text, depth))
+    nodes.push(listItem(record.text, depth, itemMarker))
   }
   return nodes
 }
@@ -160,11 +207,11 @@ export function proseNodes(body: string, nodes?: OfferTextNode[] | null): OfferT
 }
 
 export function projectProse(nodes: OfferTextNode[]): string {
+  const labels = proseMarkerLabels(nodes)
   return nodes
-    .map((node) => {
+    .map((node, index) => {
       if (node.kind !== 'item') return node.text
-      const depth = node.depth ?? 0
-      return `${'  '.repeat(depth)}${bulletGlyph(depth)} ${node.text}`
+      return `${'  '.repeat(node.depth ?? 0)}${labels[index]} ${node.text}`
     })
     .join('\n')
 }
@@ -217,6 +264,32 @@ export function rangeEnds(range: ProseRange): { start: Caret; end: Caret } {
 export function rangeCollapsed(range: ProseRange): boolean {
   const { start, end } = rangeEnds(range)
   return start.index === end.index && start.offset === end.offset
+}
+
+export function proseListState(nodes: OfferTextNode[], input: Caret | ProseRange): ProseListState {
+  const { start, end } = rangeEnds(proseRange(input))
+  const from = Math.max(0, Math.min(start.index, Math.max(0, nodes.length - 1)))
+  const to = Math.max(0, Math.min(end.index, Math.max(0, nodes.length - 1)))
+  const kinds = new Set<ProseListKind>()
+  const bullets = new Set<OfferBulletMarker | 'depth'>()
+  for (let index = from; index <= to; index++) {
+    const node = nodes[index]
+    if (!node || node.kind !== 'item') {
+      kinds.add('none')
+      continue
+    }
+    if (node.marker === 'decimal') {
+      kinds.add('ordered')
+      continue
+    }
+    kinds.add('bullet')
+    bullets.add(node.marker ?? 'depth')
+  }
+  const kind = kinds.size === 1 ? [...kinds][0]! : 'mixed'
+  if (kind !== 'bullet') return { kind, bullet: null }
+  if (bullets.size !== 1) return { kind, bullet: 'mixed' }
+  const only = [...bullets][0]!
+  return { kind, bullet: only === 'depth' ? null : only }
 }
 
 function clampCaret(nodes: OfferTextNode[], caret: Caret): Caret {
@@ -290,8 +363,9 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
   if (node.kind !== 'item') {
     const prev = next[index - 1]
     const depth = prev?.kind === 'item' ? Math.min(OFFER_PROSE_MAX_DEPTH, (prev.depth ?? 0) + 1) : 0
-    next[index] = listItem(node.text, depth)
-  } else next[index] = listItem(node.text, (node.depth ?? 0) + 1)
+    const marker = prev?.kind === 'item' ? prev.marker : undefined
+    next[index] = listItem(node.text, depth, marker)
+  } else next[index] = listItem(node.text, (node.depth ?? 0) + 1, node.marker)
   return clampProse(next)
 }
 
@@ -299,8 +373,49 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   const next = cloneNodes(nodes)
   const node = next[index]
   if (!node || node.kind !== 'item') return next
-  if ((node.depth ?? 0) > 0) next[index] = listItem(node.text, (node.depth ?? 0) - 1)
+  if ((node.depth ?? 0) > 0) next[index] = listItem(node.text, (node.depth ?? 0) - 1, node.marker)
   else next[index] = paragraph(node.text)
+  return clampProse(next)
+}
+
+function siblingDepth(nodes: OfferTextNode[], index: number): number {
+  const prev = nodes[index - 1]
+  return prev?.kind === 'item' ? (prev.depth ?? 0) : 0
+}
+
+export function setListKind(
+  nodes: OfferTextNode[],
+  index: number,
+  kind: ProseListKind,
+): OfferTextNode[] {
+  const next = cloneNodes(nodes)
+  const node = next[index]
+  if (!node) return next
+  if (kind === 'none') {
+    next[index] = paragraph(node.text)
+    return clampProse(next)
+  }
+  const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
+  if (kind === 'ordered') {
+    next[index] = listItem(node.text, depth, 'decimal')
+    return clampProse(next)
+  }
+  const marker =
+    node.kind === 'item' && node.marker && node.marker !== 'decimal' ? node.marker : undefined
+  next[index] = listItem(node.text, depth, marker)
+  return clampProse(next)
+}
+
+export function setBulletMarker(
+  nodes: OfferTextNode[],
+  index: number,
+  marker: OfferBulletMarker,
+): OfferTextNode[] {
+  const next = cloneNodes(nodes)
+  const node = next[index]
+  if (!node) return next
+  const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
+  next[index] = listItem(node.text, depth, marker)
   return clampProse(next)
 }
 
