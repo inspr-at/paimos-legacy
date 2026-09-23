@@ -31,7 +31,7 @@ func (s *Service) now() string {
 }
 
 func (s *Service) Mint(ctx context.Context, actor Actor, projectID, batchID int64) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -80,7 +80,7 @@ func (s *Service) Mint(ctx context.Context, actor Actor, projectID, batchID int6
 }
 
 func (s *Service) List(ctx context.Context, actor Actor, projectID int64) ([]ReleaseRecord, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (s *Service) List(ctx context.Context, actor Actor, projectID int64) ([]Rel
 }
 
 func (s *Service) Get(ctx context.Context, actor Actor, projectID, releaseID int64) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -135,7 +135,7 @@ func (s *Service) Get(ctx context.Context, actor Actor, projectID, releaseID int
 }
 
 func (s *Service) GetByBatch(ctx context.Context, actor Actor, projectID, batchID int64) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -174,7 +174,7 @@ type ConfigureRequest struct {
 }
 
 func (s *Service) Configure(ctx context.Context, actor Actor, projectID, releaseID int64, req ConfigureRequest) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -264,7 +264,7 @@ func (s *Service) Configure(ctx context.Context, actor Actor, projectID, release
 }
 
 func (s *Service) Confirm(ctx context.Context, actor Actor, projectID, releaseID int64, partyRef, attestation string) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -308,7 +308,7 @@ type RecordExternalRequest struct {
 }
 
 func (s *Service) RecordExternal(ctx context.Context, actor Actor, projectID, releaseID int64, req RecordExternalRequest) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -394,7 +394,7 @@ type PreviewRequest struct {
 }
 
 func (s *Service) SavePreview(ctx context.Context, actor Actor, projectID, releaseID int64, req PreviewRequest) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -439,7 +439,7 @@ type AuthorizeSendRequest struct {
 }
 
 func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, releaseID int64, req AuthorizeSendRequest) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
@@ -540,7 +540,7 @@ func (s *Service) mailSendTimeout() time.Duration {
 }
 
 func (s *Service) DrainOnce(ctx context.Context) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -630,7 +630,7 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 	sendCtx, cancel := context.WithTimeout(ctx, s.mailSendTimeout())
 	defer cancel()
 	sendErr := s.Mail.Send(sendCtx, mailer.Message{From: from, To: to, Raw: raw})
-	tx2, err := s.DB.BeginTx(ctx, nil)
+	tx2, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -697,7 +697,7 @@ type PolicyRequest struct {
 }
 
 func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int64, req PolicyRequest) (StandingPolicy, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return StandingPolicy{}, err
 	}
@@ -744,7 +744,7 @@ func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int6
 }
 
 func (s *Service) RevokePolicy(ctx context.Context, actor Actor, projectID, policyID int64) (StandingPolicy, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return StandingPolicy{}, err
 	}
@@ -763,7 +763,7 @@ func (s *Service) RevokePolicy(ctx context.Context, actor Actor, projectID, poli
 }
 
 func (s *Service) GetPolicy(ctx context.Context, actor Actor, projectID, policyID int64) (StandingPolicy, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return StandingPolicy{}, err
 	}
@@ -782,7 +782,7 @@ func (s *Service) GetPolicy(ctx context.Context, actor Actor, projectID, policyI
 }
 
 func (s *Service) ListPolicies(ctx context.Context, actor Actor, projectID int64) ([]StandingPolicy, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -818,7 +818,7 @@ func (s *Service) ListPolicies(ctx context.Context, actor Actor, projectID int64
 }
 
 func (s *Service) ApplyPolicy(ctx context.Context, actor Actor, projectID, releaseID, policyID int64) (Acceptance, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Acceptance{}, err
 	}
