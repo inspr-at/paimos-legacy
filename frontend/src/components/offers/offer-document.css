@@ -144,6 +144,30 @@
   justify-content: center;
   gap: 2.2mm;
 }
+.offer-document .ftr .footmark .lockup {
+  display: contents;
+}
+.offer-document .ftr .footmark.is-set {
+  position: relative;
+  width: 0;
+  height: 1em;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+  justify-self: center;
+  align-self: center;
+  gap: 0;
+}
+.offer-document .ftr .footmark.is-set .lockup {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  gap: var(--mark-gap, 2.2mm);
+  font-size: var(--mark-font, inherit);
+  transform: translate(-50%, calc(-50% + var(--mark-offset, 0mm)));
+}
 .offer-document .brand-dots {
   display: block;
   flex: none;

@@ -223,9 +223,36 @@ export function proseNodesStorable(nodes: OfferTextNode[]): boolean {
 }
 
 function offsetAfterStore(text: string, offset: number, structured: boolean): number {
-  const head = text.slice(0, Math.max(0, Math.min(offset, text.length)))
+  const bounded = Math.max(0, Math.min(offset, text.length))
+  const head = text.slice(0, bounded)
   const stored = structured ? normalizeLineEndings(cleanText(head)) : cleanText(head)
-  return stored.length
+  return snapCodeUnit(stored)
+}
+
+function snapCodeUnit(text: string): number {
+  const end = text.length
+  if (end === 0) return 0
+  const prev = text.charCodeAt(end - 1)
+  if (prev >= 0xd800 && prev <= 0xdbff) return end - 1
+  return end
+}
+
+/** Map a toolbar range through the same newline normalization the stored nodes use. */
+export function rangeAfterStore(
+  before: OfferTextNode[],
+  after: OfferTextNode[],
+  range: ProseRange,
+): ProseRange {
+  const structured = after.length > 1 || after[0]?.kind === 'item'
+  const mapCaret = (caret: Caret): Caret => {
+    const index = Math.max(0, Math.min(caret.index, Math.max(0, after.length - 1)))
+    const source =
+      before[Math.max(0, Math.min(caret.index, Math.max(0, before.length - 1)))]?.text ?? ''
+    const offset = offsetAfterStore(source, caret.offset, structured)
+    const length = after[index]?.text.length ?? 0
+    return { index, offset: Math.max(0, Math.min(offset, length)) }
+  }
+  return { anchor: mapCaret(range.anchor), focus: mapCaret(range.focus) }
 }
 
 /** A single paragraph is stored as plain `body` so legacy offers do not gain a nodes field. */

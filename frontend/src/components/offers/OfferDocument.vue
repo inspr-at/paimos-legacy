@@ -133,8 +133,8 @@ const footerShift = computed(() => {
   if (!footer) return undefined
   const scale = footer.logo_width_mm / OFFER_FOOTER_LOGO.defaultWidthMm
   return {
-    transform: `translateY(${footer.logo_offset_mm}mm)`,
-    fontSize: `${7.5 * scale}pt`,
+    '--mark-offset': `${footer.logo_offset_mm}mm`,
+    '--mark-font': `${7.5 * scale}pt`,
   }
 })
 defineExpose({ paginate })
@@ -235,9 +235,12 @@ defineExpose({ paginate })
           ><OfferFootmark
             v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
             :layout="offer.document.footer"
-          /><span v-else class="footmark" :style="footerShift">{{
-            offer.document.sender.company
-          }}</span
+          /><span
+            v-else
+            class="footmark"
+            :class="{ 'is-set': !!offer.document.footer }"
+            :style="footerShift"
+            ><span class="lockup">{{ offer.document.sender.company }}</span></span
           ><span class="right">SEITE {{ index + 1 }} VON {{ pages.length }}</span>
         </div>
       </section>

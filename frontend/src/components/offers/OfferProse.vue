@@ -16,6 +16,7 @@ import {
   proseMarkerLabels,
   proseNodes,
   proseNodesStorable,
+  rangeAfterStore,
   rangeEnds,
   reconcileProseTexts,
   setBulletMarker,
@@ -137,10 +138,26 @@ function claim() {
     apply: applyCommand,
   })
 }
+function editorOwnsFocus(): boolean {
+  const active = document.activeElement
+  if (!root.value || !active) return false
+  return root.value.contains(active) || isOfferChrome(active)
+}
+function releaseTarget() {
+  held = null
+  if (session?.active.value?.id === proseId) session.release(proseId)
+}
+function dropStaleTarget() {
+  if (editorOwnsFocus()) return
+  releaseTarget()
+}
 function onSelectionChange() {
   if (composing || !props.editable || !root.value) return
   if (isOfferChrome(document.activeElement)) return
-  if (!root.value.contains(document.activeElement)) return
+  if (!root.value.contains(document.activeElement)) {
+    dropStaleTarget()
+    return
+  }
   remember()
   if (session?.active.value?.id === proseId) session.touch()
 }
@@ -158,16 +175,44 @@ function onFocusIn(event: FocusEvent) {
   }
   pointerSelecting = false
   if (isOfferChrome(target)) return
-  session?.release(proseId)
+  dropStaleTarget()
 }
+function onFocusOut(event: FocusEvent) {
+  const next = event.relatedTarget
+  if (next instanceof Node && (root.value?.contains(next) || isOfferChrome(next))) return
+  queueMicrotask(dropStaleTarget)
+}
+function onDocumentPointerDown(event: PointerEvent) {
+  if (!props.editable || !root.value || session?.active.value?.id !== proseId) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (root.value.contains(target)) {
+    pointerSelecting = true
+    return
+  }
+  if (isOfferChrome(target)) return
+  pointerSelecting = false
+  window.getSelection()?.removeAllRanges()
+  releaseTarget()
+}
+watch(
+  () => props.editable,
+  (on) => {
+    if (!on) releaseTarget()
+  },
+)
 onMounted(() => {
   paint()
   document.addEventListener('selectionchange', onSelectionChange)
   document.addEventListener('focusin', onFocusIn)
+  document.addEventListener('focusout', onFocusOut)
+  document.addEventListener('pointerdown', onDocumentPointerDown)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', onSelectionChange)
   document.removeEventListener('focusin', onFocusIn)
+  document.removeEventListener('focusout', onFocusOut)
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
   session?.release(proseId)
 })
 onUpdated(() => {
@@ -226,8 +271,11 @@ function commit(edit: ProseEdit, keep?: ProseRange) {
   const stored = persistProse(edit.nodes)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
+  const previous = local.value
   local.value = nodes.map((node) => ({ ...node }))
-  const range = keep ? clampRange(local.value, keep) : { anchor: edit.caret, focus: edit.caret }
+  const range = keep
+    ? clampRange(local.value, rangeAfterStore(previous, local.value, keep))
+    : { anchor: edit.caret, focus: edit.caret }
   pendingRange = range
   selection.value = range
   held = range
@@ -468,10 +516,18 @@ function opFor(command: ProseCommand) {
   return (nodes: OfferTextNode[], index: number) => setListKind(nodes, index, command.kind)
 }
 function applyCommand(command: ProseCommand) {
-  if (!props.editable) return
+  if (!props.editable || !root.value) return
+  const active = document.activeElement
+  const inEditor = !!active && root.value.contains(active)
+  const inChrome = isOfferChrome(active)
+  if (!inEditor && !inChrome && !readRange()) {
+    dropStaleTarget()
+    return
+  }
   if (session && session.active.value?.id !== proseId) return
-  if (!isOfferChrome(document.activeElement)) remember()
+  if (!inChrome) remember()
   const range = toolbarRange()
+  if (!range) return
   const edit = applyStructure(local.value, range, opFor(command))
   if (edit.error || JSON.stringify(edit.nodes) === JSON.stringify(local.value)) {
     notice.value = edit.error ?? ''
