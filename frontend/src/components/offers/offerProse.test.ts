@@ -15,6 +15,7 @@ import {
   persistProse,
   projectProse,
   proseNodes,
+  rangeAfterStore,
   reconcileProseTexts,
   setBulletMarker,
   setListKind,
@@ -123,6 +124,32 @@ describe('offer prose text', () => {
       setListKind(nodes, index, 'none'),
     )
     expect(cleared.nodes[0]).toEqual(paragraph('Analyse'))
+  })
+
+  it('keeps a CRLF caret on the same character when the paragraph becomes a list', () => {
+    const before = [paragraph('A\r\nBC')]
+    const after = [{ kind: 'item' as const, text: 'A\nBC' }]
+    const beforeB = rangeAfterStore(before, after, {
+      anchor: { index: 0, offset: 3 },
+      focus: { index: 0, offset: 3 },
+    })
+    expect(beforeB).toEqual({
+      anchor: { index: 0, offset: 2 },
+      focus: { index: 0, offset: 2 },
+    })
+    const selectedB = rangeAfterStore(before, after, {
+      anchor: { index: 0, offset: 3 },
+      focus: { index: 0, offset: 4 },
+    })
+    expect(selectedB.focus.offset - selectedB.anchor.offset).toBe(1)
+    expect(after[0]!.text.slice(selectedB.anchor.offset, selectedB.focus.offset)).toBe('B')
+    const emoji = [paragraph('A😀\r\nBC')]
+    const storedEmoji = [{ kind: 'item' as const, text: 'A😀\nBC' }]
+    const beforeBAfterEmoji = rangeAfterStore(emoji, storedEmoji, {
+      anchor: { index: 0, offset: 5 },
+      focus: { index: 0, offset: 5 },
+    })
+    expect(storedEmoji[0]!.text[beforeBAfterEmoji.focus.offset]).toBe('B')
   })
 
   it('stores a list as nodes and a plain projection that is not parsed back from hyphens', () => {

@@ -101,9 +101,9 @@ async function save() {
         </div>
         <div v-show="tab === 'texts'" class="text-fields">
           <p>
-            Textvorlagen gelten für neue Angebote. Der Absender wird auch in einen geöffneten
-            Entwurf übernommen. Finalisierte Angebote bleiben unverändert. Die Vorschläge stammen
-            aus deiner Angebotsvorlage und sind frei editierbar.
+            Absender und Textvorlagen gelten nur für neue Angebote. Das gerade geöffnete Angebot
+            bleibt unverändert. Die Vorschläge stammen aus deiner Angebotsvorlage und sind frei
+            editierbar.
           </p>
           <label>Einleitung<textarea v-model="settings.defaults.intro" rows="3" /></label>
           <div v-for="(block, i) in settings.defaults.blocks" :key="i">

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, nextTick } from 'vue'
+import { createApp, defineComponent, h, nextTick } from 'vue'
 import OfferProse from './OfferProse.vue'
-import type { ProseCommand } from './offerProseSession'
+import {
+  provideOfferProseSession,
+  type OfferProseSession,
+  type ProseCommand,
+} from './offerProseSession'
 import type { OfferTextNode } from './types'
 
 type Update = { body: string; nodes?: OfferTextNode[] }
@@ -260,5 +264,80 @@ describe('OfferProse editor', () => {
     expect(lastUpdate(mounted.updates)?.body).toBe('Parent\nChild')
     expect(mounted.root.querySelector('span span, ul')).toBeNull()
     mounted.unmount()
+  })
+
+  it('types at the same character after formatting a CRLF paragraph', async () => {
+    const mounted = await mount({ body: 'A\r\nBC' })
+    place(mounted.root, 0, 3)
+    mounted.vm.format({ type: 'list', kind: 'bullet' })
+    await nextTick()
+    expect(lastUpdate(mounted.updates)?.nodes?.[0]?.text).toBe('A\nBC')
+    mounted.root.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: 'X',
+      }),
+    )
+    await nextTick()
+    expect(lastUpdate(mounted.updates)?.nodes?.[0]?.text).toBe('A\nXBC')
+    mounted.unmount()
+  })
+
+  it('drops the list target when a nonfocusable heading is clicked and keeps it for the title bar', async () => {
+    const updates: Update[] = []
+    let session!: OfferProseSession
+    let format!: (command: ProseCommand) => void
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const Host = defineComponent({
+      setup() {
+        session = provideOfferProseSession()
+        return () =>
+          h('div', { class: 'offer-document' }, [
+            h('div', { 'data-offer-chrome': 'true' }, [
+              h('button', { type: 'button', class: 'list-button' }, 'Listen & Punkte'),
+            ]),
+            h('h3', { class: 'plain-heading' }, 'Leistung'),
+            h(OfferProse, {
+              body: 'Alpha',
+              editable: true,
+              label: 'Textbaustein 1',
+              onUpdate: (value: Update) => updates.push(value),
+              onVnodeMounted: (vnode) => {
+                format = (vnode.component?.exposed as { format: (command: ProseCommand) => void })
+                  .format
+              },
+            }),
+          ])
+      },
+    })
+    const app = createApp(Host)
+    app.mount(el)
+    await nextTick()
+    const root = el.querySelector<HTMLElement>('.offer-prose')!
+    root.focus()
+    place(root, 0, 1)
+    document.dispatchEvent(new Event('selectionchange'))
+    await nextTick()
+    expect(session.active.value).not.toBeNull()
+    el.querySelector('.list-button')!.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true }),
+    )
+    expect(session.active.value).not.toBeNull()
+    format({ type: 'list', kind: 'bullet' })
+    await nextTick()
+    expect(lastUpdate(updates)?.nodes?.[0]).toMatchObject({ kind: 'item', text: 'Alpha' })
+    el.querySelector('h3')!.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true }),
+    )
+    expect(session.active.value).toBeNull()
+    const before = updates.length
+    format({ type: 'list', kind: 'none' })
+    await nextTick()
+    expect(updates).toHaveLength(before)
+    app.unmount()
+    el.remove()
   })
 })

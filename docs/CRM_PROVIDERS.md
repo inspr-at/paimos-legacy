@@ -281,7 +281,8 @@ tickets.
 
 From the customer's **Angebote** section, choose **Angebot erstellen**. Configure
 sender details and editable German text defaults under Integrations → CRM →
-**Angebote: Absender & Textbausteine**, or in the editor's dialog. No company,
+**Angebote: Absender & Textbausteine**, or in the editor's dialog. Saving those
+defaults does not change an offer that is already open. No company,
 UID or bank account is invented in backend defaults. Existing contacts are reused.
 The suggested terms come from the supplied v8 prototype and are operator-editable.
 
