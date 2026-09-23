@@ -164,6 +164,8 @@
   position: absolute;
   left: 50%;
   top: 50%;
+  width: max-content;
+  white-space: nowrap;
   gap: var(--mark-gap, 2.2mm);
   font-size: var(--mark-font, inherit);
   transform: translate(-50%, calc(-50% + var(--mark-offset, 0mm)));

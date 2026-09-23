@@ -184,7 +184,23 @@ describe('offer document prose', () => {
     expect(mark.style.getPropertyValue('--word-h')).toBe(`${box.wordmarkHeightMm}mm`)
     expect(footerCss).toMatch(/\.ftr \.footmark\.is-set\s*\{[^}]*height:\s*1em/)
     expect(footerCss).toMatch(/\.ftr \.footmark\.is-set \.lockup\s*\{[^}]*position:\s*absolute/)
+    expect(footerCss).toMatch(
+      /\.ftr \.footmark\.is-set \.lockup\s*\{[^}]*width:\s*max-content;[^}]*white-space:\s*nowrap/,
+    )
     expect(footerCss).toContain('translate(-50%, calc(-50% + var(--mark-offset, 0mm)))')
+    const named = offer([{ heading: 'Leistung', body: 'Kurz.' }])
+    named.document.sender.company = 'Testberatung GmbH'
+    named.document.footer = { logo_width_mm: 55, logo_offset_mm: 2 }
+    const namedEl = document.createElement('div')
+    document.body.appendChild(namedEl)
+    const namedApp = createApp(OfferDocument, { offer: named, editable: false })
+    const namedVm = namedApp.mount(namedEl) as unknown as { paginate: () => Promise<void> }
+    await namedVm.paginate()
+    await nextTick()
+    const nameLockup = namedEl.querySelector<HTMLElement>('.sheet .ftr .footmark.is-set .lockup')!
+    expect(nameLockup.textContent).toBe('Testberatung GmbH')
+    expect(nameLockup.querySelector('*')).toBeNull()
+    namedApp.unmount()
     expect(footer.querySelector('.right')?.getAttribute('style')).toBeNull()
     expect(footer.querySelector('span')?.getAttribute('style')).toBeNull()
     app.unmount()
