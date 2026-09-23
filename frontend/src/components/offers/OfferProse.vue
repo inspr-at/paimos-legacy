@@ -6,6 +6,7 @@ import {
   clipboardPlain,
   createProseHistory,
   deleteForwardProse,
+  type SectionEditorMemory,
   enterProse,
   indentItem,
   insertProseText,
@@ -40,8 +41,9 @@ const props = withDefaults(
     nodes?: OfferTextNode[] | null
     editable?: boolean
     label?: string
+    memory?: SectionEditorMemory | null
   }>(),
-  { editable: false, label: 'Text' },
+  { editable: false, label: 'Text', memory: null },
 )
 const emit = defineEmits<{ update: [value: { body: string; nodes?: OfferTextNode[] }] }>()
 const root = ref<HTMLElement>()
@@ -52,7 +54,14 @@ const selection = ref<ProseRange>({
   anchor: { index: 0, offset: 0 },
   focus: { index: 0, offset: 0 },
 })
-const history = createProseHistory()
+const fallbackHistory = createProseHistory()
+function historyStack() {
+  return props.memory?.history ?? fallbackHistory
+}
+function rememberCaret() {
+  if (!props.memory) return
+  props.memory.caret = rangeEnds(selection.value).end
+}
 const session = useOfferProseSession()
 const proseId = takeOfferProseId()
 const markerLabels = computed(() => proseMarkerLabels(local.value))
@@ -63,10 +72,19 @@ let suppressInput = false
 let composing = false
 let pointerSelecting = false
 
+let hydrated = false
 watch(
   () => [props.body, props.nodes] as const,
   () => {
     const next = proseNodes(props.body ?? '', props.nodes)
+    if (!hydrated) {
+      hydrated = true
+      local.value = next
+      keys.value = next.map(() => serial++)
+      const caret = props.memory?.caret
+      if (caret) selection.value = { anchor: caret, focus: caret }
+      return
+    }
     if (JSON.stringify(next) === JSON.stringify(local.value)) return
     local.value = next
     keys.value = next.map(() => serial++)
@@ -181,7 +199,10 @@ function onFocusIn(event: FocusEvent) {
 function onFocusOut(event: FocusEvent) {
   const next = event.relatedTarget
   if (next instanceof Node && (root.value?.contains(next) || isOfferChrome(next))) return
-  queueMicrotask(dropStaleTarget)
+  queueMicrotask(() => {
+    if (editorOwnsFocus()) return
+    dropStaleTarget()
+  })
 }
 function onDocumentPointerDown(event: PointerEvent) {
   if (!props.editable || !root.value || session?.active.value?.id !== proseId) return
@@ -210,6 +231,7 @@ onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown)
 })
 onBeforeUnmount(() => {
+  rememberCaret()
   document.removeEventListener('selectionchange', onSelectionChange)
   document.removeEventListener('focusin', onFocusIn)
   document.removeEventListener('focusout', onFocusOut)
@@ -268,7 +290,7 @@ function snapshot() {
   const caret = rangeEnds(selection.value).end
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
-function commit(edit: ProseEdit, keep?: ProseRange) {
+function commit(edit: ProseEdit, keep?: ProseRange, restoreSelection = true) {
   const stored = persistProse(edit.nodes)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
@@ -277,11 +299,12 @@ function commit(edit: ProseEdit, keep?: ProseRange) {
   const range = keep
     ? clampRange(local.value, rangeAfterStore(previous, local.value, keep))
     : { anchor: edit.caret, focus: edit.caret }
-  pendingRange = range
+  pendingRange = restoreSelection ? range : null
   selection.value = range
   held = range
   notice.value = edit.error ?? ''
   if (!edit.error) emit('update', stored)
+  rememberCaret()
   if (session?.active.value?.id === proseId) session.touch()
 }
 function apply(edit: ProseEdit) {
@@ -293,7 +316,10 @@ function apply(edit: ProseEdit) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  history.push({ nodes: local.value.map((node) => ({ ...node })), caret: currentRange().focus })
+  historyStack().push({
+    nodes: local.value.map((node) => ({ ...node })),
+    caret: currentRange().focus,
+  })
   commit(edit)
 }
 function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
@@ -305,13 +331,14 @@ function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
   held = selection.value
   notice.value = ''
   emit('update', persistProse(local.value))
+  rememberCaret()
 }
 function undo() {
-  const snap = history.undo(snapshot())
+  const snap = historyStack().undo(snapshot())
   if (snap) restoreSnap(snap)
 }
 function redo() {
-  const snap = history.redo(snapshot())
+  const snap = historyStack().redo(snapshot())
   if (snap) restoreSnap(snap)
 }
 function selectAll() {
@@ -546,8 +573,11 @@ function applyCommand(command: ProseCommand) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  history.push({ nodes: local.value.map((node) => ({ ...node })), caret: rangeEnds(range).end })
-  commit(edit, range)
+  historyStack().push({
+    nodes: local.value.map((node) => ({ ...node })),
+    caret: rangeEnds(range).end,
+  })
+  commit(edit, range, !inChrome)
 }
 defineExpose({ format: applyCommand })
 function nodeClass(node: OfferTextNode, index: number) {

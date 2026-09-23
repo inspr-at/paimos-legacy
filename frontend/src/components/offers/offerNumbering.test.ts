@@ -4,6 +4,7 @@ import {
   enterProse,
   indentItem,
   insertProseText,
+  outdentItem,
   parseProseNodes,
   persistProse,
   projectProse,
@@ -98,6 +99,39 @@ describe('offer outline numbering', () => {
     expect(indented[1]?.list_start).toBeUndefined()
     expect(indented[1]?.numbering).toBe('outline')
     expect(proseMarkerLabels(indented)).toEqual(['3', '3.1'])
+  })
+
+  it('keeps a start when indent cannot change depth and keeps a continued level', () => {
+    const started = [outline('A', 0, { list_start: 3 })]
+    expect(indentItem(started, 0)[0]).toMatchObject({ list_start: 3, numbering: 'outline' })
+    expect(indentItem(started, 0)[0]?.depth).toBeUndefined()
+    expect(proseMarkerLabels(indentItem(started, 0))).toEqual(['3'])
+    const continued = [
+      outline('A', 0, { list_start: 3 }),
+      outline('B', 1),
+      paragraph(''),
+      outline('C', 1, { list_continue: true }),
+    ]
+    expect(proseMarkerLabels(continued)[3]).toBe('3.2')
+    const held = indentItem(continued, 3)
+    expect(held[3]).toMatchObject({ depth: 1, list_continue: true, numbering: 'outline' })
+    expect(proseMarkerLabels(held)[3]).toBe('3.2')
+    const outdented = outdentItem(continued, 3)
+    expect(outdented[3]).toMatchObject({ list_continue: true, numbering: 'outline' })
+    expect(outdented[3]?.depth).toBeUndefined()
+    expect(proseMarkerLabels(outdented)[3]).toBe('4')
+    const nested = [
+      outline('A', 0, { list_start: 3 }),
+      outline('B', 1),
+      outline('C', 2),
+      paragraph(''),
+      outline('D', 2, { list_continue: true }),
+    ]
+    expect(proseMarkerLabels(nested)).toEqual(['3', '3.1', '3.1.1', '', '3.1.2'])
+    const once = outdentItem(nested, 4)
+    expect(once[4]).toMatchObject({ depth: 1, list_continue: true, numbering: 'outline' })
+    expect(proseMarkerLabels(once)[4]).toBe('3.2')
+    expect(parseProseNodes(once)).toEqual(once)
   })
 
   it('round-trips outline metadata and rejects a start stored with continue', () => {

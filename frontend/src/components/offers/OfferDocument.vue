@@ -8,7 +8,12 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import OfferCover from './OfferCover.vue'
 import OfferText from './OfferText.vue'
 import OfferProse from './OfferProse.vue'
-import { offerBlockExceedsPage, offerBlockOverflowMessage } from './offerProse'
+import {
+  createProseHistory,
+  offerBlockExceedsPage,
+  offerBlockOverflowMessage,
+  type SectionEditorMemory,
+} from './offerProse'
 import type { OfferTextNode } from './types'
 import { date, type Offer } from './types'
 import { OFFER_FOOTER_LOGO } from './offerLayout'
@@ -129,6 +134,25 @@ function move(i: number, direction: number) {
   emit('change')
 }
 const OFFER_MAX_BLOCKS = 20
+const sectionIds = new WeakMap<object, number>()
+const sectionMemories = new WeakMap<object, SectionEditorMemory>()
+let nextSectionId = 1
+function sectionKey(block: object | undefined): number {
+  if (!block) return nextSectionId++
+  const known = sectionIds.get(block)
+  if (known != null) return known
+  const id = nextSectionId++
+  sectionIds.set(block, id)
+  return id
+}
+function sectionMemory(block: object | undefined): SectionEditorMemory | null {
+  if (!block) return null
+  const known = sectionMemories.get(block)
+  if (known) return known
+  const memory = { history: createProseHistory(), caret: null }
+  sectionMemories.set(block, memory)
+  return memory
+}
 const sheetEl = ref<HTMLElement>()
 const activeBlock = ref<number | null>(null)
 const activeField = ref<'heading' | 'body'>('heading')
@@ -222,7 +246,12 @@ defineExpose({ paginate })
           <span>{{ offer.document.blocks.length ? 'II.' : 'I.' }} LEISTUNGSAUFSTELLUNG</span>
           <OfferBrandDots />
         </h2>
-        <div v-for="(block, i) in offer.document.blocks" :key="i" class="sec" :data-block="i">
+        <div
+          v-for="(block, i) in offer.document.blocks"
+          :key="sectionKey(block)"
+          class="sec"
+          :data-block="i"
+        >
           <span class="n">{{ i + 1 }}</span>
           <h3>{{ block.heading }}</h3>
           <OfferProse :body="block.body" :nodes="block.nodes" />
@@ -295,7 +324,12 @@ defineExpose({ paginate })
             <OfferBrandDots />
           </h2>
           <div v-if="page.blocks.length" class="sections">
-            <div v-for="i in page.blocks" :key="i" class="sec" :data-section="i">
+            <div
+              v-for="i in page.blocks"
+              :key="sectionKey(offer.document.blocks[i])"
+              class="sec"
+              :data-section="i"
+            >
               <span class="n">{{ i + 1 }}</span
               ><OfferText
                 v-model="offer.document.blocks[i]!.heading"
@@ -305,6 +339,7 @@ defineExpose({ paginate })
               /><OfferProse
                 :body="offer.document.blocks[i]!.body"
                 :nodes="offer.document.blocks[i]!.nodes"
+                :memory="sectionMemory(offer.document.blocks[i])"
                 :editable="editable"
                 :label="`Textbaustein ${i + 1}`"
                 @update="applyBody(i, $event)"

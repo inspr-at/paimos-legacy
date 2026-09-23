@@ -63,6 +63,11 @@ const menuButton = ref<HTMLButtonElement>()
 const menuPopover = ref<HTMLElement>()
 const layoutPopover = ref<HTMLElement>()
 const widthField = ref<HTMLInputElement>()
+const offsetField = ref<HTMLInputElement>()
+const startField = ref<HTMLInputElement>()
+const widthDraft = ref<string | null>(null)
+const offsetDraft = ref<string | null>(null)
+const startDraft = ref<string | null>(null)
 const listOpen = ref(false)
 const menuOpen = ref(false)
 const layoutOpen = ref(false)
@@ -144,6 +149,7 @@ function prime(event: MouseEvent) {
   event.preventDefault()
 }
 function run(command: ProseCommand) {
+  if (!(command.type === 'numbering' && command.mode === 'start')) startDraft.value = null
   session?.active.value?.apply(command)
 }
 function toggleList(event: MouseEvent) {
@@ -182,27 +188,67 @@ function stepZoom(direction: number) {
       : ([...zoomSteps].reverse().find((level) => level < current) ?? 50)
   emit('update:zoomMode', String(next))
 }
-function parseMm(value: string): number {
-  return Number(value.trim().replace(',', '.'))
+function completeMm(raw: string): number | null {
+  const text = raw.trim().replace(',', '.')
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : null
 }
-function commitLayout(widthRaw: string, offsetRaw: string) {
-  const width = parseMm(widthRaw)
-  const offset = parseMm(offsetRaw)
-  if (!Number.isFinite(width) || !Number.isFinite(offset)) return
+function commitLayout(width: number, offset: number) {
   const next = explicitFooter(props.footer, { logo_width_mm: width, logo_offset_mm: offset })
   if (!next) return
   emit('footer', next)
 }
 function onWidth(event: Event) {
-  commitLayout((event.target as HTMLInputElement).value, String(shownOffset.value))
+  const raw = (event.target as HTMLInputElement).value
+  widthDraft.value = raw
+  const width = completeMm(raw)
+  if (width == null) return
+  commitLayout(width, shownOffset.value)
 }
 function onOffset(event: Event) {
-  commitLayout(String(shownWidth.value), (event.target as HTMLInputElement).value)
+  const raw = (event.target as HTMLInputElement).value
+  offsetDraft.value = raw
+  const offset = completeMm(raw)
+  if (offset == null) return
+  commitLayout(shownWidth.value, offset)
+}
+function finishWidth() {
+  const raw = widthDraft.value
+  widthDraft.value = null
+  if (raw == null) return
+  const width = completeMm(raw)
+  if (width == null) return
+  commitLayout(width, shownOffset.value)
+}
+function finishOffset() {
+  const raw = offsetDraft.value
+  offsetDraft.value = null
+  if (raw == null) return
+  const offset = completeMm(raw)
+  if (offset == null) return
+  commitLayout(shownWidth.value, offset)
+}
+function completeStart(raw: string): number | null {
+  if (!/^\d+$/.test(raw.trim())) return null
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1 || value > 9999) return null
+  return value
+}
+function applyStart(raw: string) {
+  const value = completeStart(raw)
+  if (value == null) return
+  run({ type: 'numbering', mode: 'start', start: value })
 }
 function onListStart(event: Event) {
-  const raw = Number((event.target as HTMLInputElement).value)
-  if (!Number.isInteger(raw) || raw < 1 || raw > 9999) return
-  run({ type: 'numbering', mode: 'start', start: raw })
+  const raw = (event.target as HTMLInputElement).value
+  startDraft.value = raw
+  applyStart(raw)
+}
+function finishListStart() {
+  const raw = startDraft.value
+  startDraft.value = null
+  if (raw != null) applyStart(raw)
 }
 function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const key = event.key
@@ -230,6 +276,9 @@ function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
 function onDocPointer(event: PointerEvent) {
   const target = event.target
   if (!(target instanceof Node) || root.value?.contains(target)) return
+  finishListStart()
+  finishWidth()
+  finishOffset()
   listOpen.value = false
   menuOpen.value = false
   layoutOpen.value = false
@@ -237,12 +286,15 @@ function onDocPointer(event: PointerEvent) {
 function onDocKey(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   if (layoutOpen.value) {
+    finishWidth()
+    finishOffset()
     layoutOpen.value = false
     menuButton.value?.focus()
     event.preventDefault()
     return
   }
   if (listOpen.value) {
+    finishListStart()
     listOpen.value = false
     listButton.value?.focus()
     event.preventDefault()
@@ -398,14 +450,17 @@ defineExpose({ root })
           <label class="start-row">
             Beginnen bei
             <input
+              ref="startField"
               type="number"
               inputmode="numeric"
               min="1"
               max="9999"
               step="1"
-              :value="typeof listState.start === 'number' ? listState.start : 1"
+              :value="startDraft ?? (typeof listState.start === 'number' ? listState.start : 1)"
               aria-label="Nummerierung beginnen bei"
-              @change="onListStart"
+              @input="onListStart"
+              @blur="finishListStart"
+              @keydown.enter.prevent="finishListStart"
             />
           </label>
           <p class="hint">3, 3.1, 3.1.1. Fortsetzen gilt auch nach einem Absatz.</p>
@@ -504,14 +559,13 @@ defineExpose({ root })
             <span class="mm">
               <input
                 ref="widthField"
-                type="number"
+                type="text"
                 inputmode="decimal"
-                step="0.1"
-                :min="OFFER_FOOTER_LOGO.minWidthMm"
-                :max="OFFER_FOOTER_LOGO.maxWidthMm"
-                :value="shownWidth"
+                :value="widthDraft ?? shownWidth"
                 aria-label="Breite des Fußzeilenlogos in Millimetern"
                 @input="onWidth"
+                @blur="finishWidth"
+                @keydown.enter.prevent="finishWidth"
               />
               mm
             </span>
@@ -520,14 +574,14 @@ defineExpose({ root })
             Versatz
             <span class="mm">
               <input
-                type="number"
+                ref="offsetField"
+                type="text"
                 inputmode="decimal"
-                step="0.1"
-                :min="OFFER_FOOTER_LOGO.minOffsetMm"
-                :max="OFFER_FOOTER_LOGO.maxOffsetMm"
-                :value="shownOffset"
+                :value="offsetDraft ?? shownOffset"
                 aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
                 @input="onOffset"
+                @blur="finishOffset"
+                @keydown.enter.prevent="finishOffset"
               />
               mm
             </span>

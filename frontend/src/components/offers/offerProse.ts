@@ -515,6 +515,30 @@ export function toggleItem(nodes: OfferTextNode[], index: number): OfferTextNode
   return clampProse(next)
 }
 
+function previousItemDepth(nodes: OfferTextNode[], index: number): number {
+  let previous = -1
+  for (let i = 0; i < index; i++) {
+    const node = nodes[i]
+    previous = node?.kind === 'item' ? (node.depth ?? 0) : -1
+  }
+  return previous
+}
+
+/** Depth the list structure allows, ignoring a continuation that is only holding its current level. */
+function structuralDepth(nodes: OfferTextNode[], index: number, requested: number): number {
+  const previous = previousItemDepth(nodes, index)
+  const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
+  return Math.max(0, Math.min(requested, max))
+}
+
+/** A real level change keeps outline style and continuation, and drops a level-specific start. */
+function movedAnchor(node: OfferTextNode): ItemAnchor | undefined {
+  const anchor: ItemAnchor = {}
+  if (node.numbering === 'outline') anchor.numbering = 'outline'
+  if (node.list_continue) anchor.list_continue = true
+  return anchor.numbering || anchor.list_continue ? anchor : undefined
+}
+
 export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode[] {
   const next = cloneNodes(nodes)
   const node = next[index]
@@ -526,8 +550,12 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
     const anchor: ItemAnchor | undefined =
       prev?.kind === 'item' && prev.numbering === 'outline' ? { numbering: 'outline' } : undefined
     next[index] = listItem(node.text, depth, marker, anchor)
-  } else
-    next[index] = listItem(node.text, (node.depth ?? 0) + 1, node.marker, anchorOf(node, false))
+  } else {
+    const current = node.depth ?? 0
+    const nextDepth = structuralDepth(next, index, current + 1)
+    if (nextDepth <= current) return next
+    next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
+  }
   return clampProse(next)
 }
 
@@ -535,9 +563,16 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   const next = cloneNodes(nodes)
   const node = next[index]
   if (!node || node.kind !== 'item') return next
-  if ((node.depth ?? 0) > 0)
-    next[index] = listItem(node.text, (node.depth ?? 0) - 1, node.marker, anchorOf(node, false))
-  else next[index] = paragraph(node.text)
+  const current = node.depth ?? 0
+  if (current <= 0) {
+    next[index] = paragraph(node.text)
+    return clampProse(next)
+  }
+  const stepped = current - 1
+  const structural = structuralDepth(next, index, stepped)
+  const nextDepth = node.list_continue && structural < stepped ? stepped : structural
+  if (nextDepth === current) return next
+  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
   return clampProse(next)
 }
 
@@ -880,7 +915,16 @@ export function clipboardPlain(plain: string, html = ''): string {
   return lines.join('\n')
 }
 
-export function createProseHistory(limit = 100) {
+export type ProseHistory = {
+  push(current: ProseSnapshot): void
+  undo(current: ProseSnapshot): ProseSnapshot | null
+  redo(current: ProseSnapshot): ProseSnapshot | null
+}
+
+/** Editor memory stays with the block object. It is not part of the saved document. */
+export type SectionEditorMemory = { history: ProseHistory; caret: Caret | null }
+
+export function createProseHistory(limit = 100): ProseHistory {
   const undoStack: ProseSnapshot[] = []
   const redoStack: ProseSnapshot[] = []
   const copy = (snap: ProseSnapshot): ProseSnapshot => ({
