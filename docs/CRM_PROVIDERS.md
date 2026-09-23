@@ -311,7 +311,9 @@ paragraphs and nested bullet or numbered items (depth 0–5). An item may set
 an item keeps the depth glyph (•, ◦, ▪). Decimal numbers without further fields restart after a
 paragraph or a non-numbered item at the same depth; nested numbers count on
 their own level. `numbering: "outline"` renders multilevel decimals such as
-3, 3.1, 3.1.1. `list_start` is a positive start value and `list_continue`
+3, 3.1, 3.1.1. `section_bound: true` prefixes that outline with the
+1-based section index, so section 2 renders 2.1 and 2.1.1. The prefix is
+not stored in the item text. `list_start` is a positive start value and `list_continue`
 joins the preceding matching list even across a paragraph. Those fields are
 not stored on a node created by splitting a line. Without `nodes`, `body` stays
 literal plain text, including characters that look like Markdown. The editor,

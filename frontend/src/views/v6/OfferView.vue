@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { Trash2, Undo2 } from 'lucide-vue-next'
 import { ensureUTC } from '@/composables/useDateFormat'
 import { OFFER_CHROME_KEY } from '@/composables/useOfferChrome'
 import { publicURL } from '@/publicPath'
@@ -16,6 +15,7 @@ import {
   receiptTime,
   validOfferEmail,
   type OfferFooterLayout,
+  type OfferSelection,
 } from '@/components/offers/types'
 import { api, errMsg, ApiError } from '@/api/client'
 import { crmEnabled, instanceHostname, loadInstance } from '@/api/instance'
@@ -75,6 +75,7 @@ const loading = ref(true),
   finalizing = ref(false)
 const renderer = ref<InstanceType<typeof OfferDocument>>()
 const finalizeDialog = ref<HTMLDialogElement>()
+const selection = ref<OfferSelection>({ kind: 'none' })
 watch(loading, async () => {
   await nextTick()
   if (toolbarElement()) resizeObserver?.observe(toolbarElement()!)
@@ -142,6 +143,8 @@ async function load() {
     conflict.value = false
     saveFailed.value = false
     document.title = `${offer.value.offer_no} · Angebot`
+    await nextTick()
+    renderer.value?.resetHistory()
   } catch (e) {
     error.value = errMsg(e)
   } finally {
@@ -259,6 +262,8 @@ async function finalize() {
     offer.value = result
     dirty.value = false
     finalizeOpen.value = false
+    await nextTick()
+    renderer.value?.resetHistory()
   } catch (e) {
     error.value = errMsg(e)
   } finally {
@@ -319,6 +324,8 @@ const toolbarActions = computed(() =>
     copied: copied.value,
     collapsed: collapsed.value,
     linkAvailable: !!publicUrl.value || auth.isAdmin,
+    deleted: !!offer.value?.deleted,
+    deleting: deleting.value,
   }),
 )
 function onToolbarAction(id: OfferToolbarActionId) {
@@ -328,6 +335,10 @@ function onToolbarAction(id: OfferToolbarActionId) {
   else if (id === 'duplicate') void duplicate()
   else if (id === 'finalize') finalizeOpen.value = true
   else if (id === 'chrome') collapsed.value = !collapsed.value
+  else if (id === 'delete') {
+    if (offer.value?.deleted) void setDeleted()
+    else deleteOpen.value = true
+  } else if (id === 'layout') renderer.value?.selectFooter()
 }
 function onFooter(value: OfferFooterLayout) {
   if (!editable.value || !offer.value) return
@@ -404,10 +415,25 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :show-print="!!offer"
         :actions="toolbarActions"
         :footer="offer?.document.footer ?? null"
+        :can-undo="!!renderer?.canUndo"
+        :can-redo="!!renderer?.canRedo"
+        :selection="selection"
         @save="save(true)"
         @print="printOffer"
         @action="onToolbarAction"
         @footer="onFooter"
+        @undo="renderer?.undo()"
+        @redo="renderer?.redo()"
+        @insert-section="renderer?.addSection()"
+        @insert-position="addPosition()"
+        @select-footer="renderer?.selectFooter()"
+        @section-add="renderer?.addSection()"
+        @section-up="renderer?.moveSection(-1)"
+        @section-down="renderer?.moveSection(1)"
+        @section-delete="renderer?.askDeleteSection()"
+        @position-up="selection.kind === 'position' && renderer?.move(selection.index, -1)"
+        @position-down="selection.kind === 'position' && renderer?.move(selection.index, 1)"
+        @position-delete="selection.kind === 'position' && renderer?.remove(selection.index)"
       />
       <p v-if="loading" class="offer-notice">Angebot wird geladen …</p>
       <p v-if="error || overflow" role="alert" class="offer-notice offer-error">
@@ -440,35 +466,22 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           Serverstand laden und lokale Änderungen verwerfen
         </button>
       </div>
-      <div v-if="auth.isAdmin && offer" class="offer-visibility">
-        <button
-          class="btn btn-sm"
-          :disabled="deleting || saving"
-          @click="offer.deleted ? setDeleted() : (deleteOpen = true)"
-        >
-          <component :is="offer.deleted ? Undo2 : Trash2" :size="14" />{{
-            offer.deleted
-              ? 'Wiederherstellen'
-              : offer.status === 'draft'
-                ? 'Löschen'
-                : 'Archivieren'
+      <dialog v-if="deleteOpen" open class="finalize-dialog" aria-label="Angebot ausblenden">
+        <h2>{{ offer?.offer_no }}</h2>
+        <p>
+          {{ offer?.offer_no }} aus den Übersichten ausblenden? Inhalte, Nachweise und Kundenlinks
+          bleiben erhalten.
+          {{
+            offer?.status === 'draft'
+              ? 'Das Angebot wird als gelöscht markiert.'
+              : 'Das Angebot wird archiviert.'
           }}
+        </p>
+        <button class="btn" type="button" :disabled="deleting" @click="setDeleted">
+          {{ offer?.status === 'draft' ? 'Als gelöscht markieren' : 'Archivieren' }}
         </button>
-        <span v-if="offer.deleted"
-          >{{ offer.status === 'draft' ? 'Als gelöscht markiert' : 'Archiviert' }} · aus den
-          Übersichten ausgeblendet</span
-        >
-        <div v-if="deleteOpen" role="alert">
-          <span
-            >Angebot aus den Übersichten ausblenden? Inhalte, Nachweise und Kundenlinks bleiben
-            erhalten.</span
-          >
-          <button class="btn btn-sm" :disabled="deleting" @click="setDeleted">
-            {{ offer.status === 'draft' ? 'Als gelöscht markieren' : 'Archivieren' }}
-          </button>
-          <button class="btn btn-sm" @click="deleteOpen = false">Abbrechen</button>
-        </div>
-      </div>
+        <button class="btn" type="button" @click="deleteOpen = false">Abbrechen</button>
+      </dialog>
       <OfferConfirmationStatus
         v-if="offer?.status === 'accepted'"
         :offer-id="offer.id"
@@ -486,6 +499,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :qr-preview="offer.status === 'draft'"
         :editable="editable"
         @overflow="overflow = $event"
+        @select="selection = $event"
       />
       <OfferSettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
       <dialog
@@ -496,10 +510,11 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
       >
         <h2>Angebot finalisieren</h2>
         <p>
-          Absender, Kundenanschrift, Texte und Preise werden festgeschrieben. Danach kannst du das
-          Angebot per Kundenlink, QR-Code oder PDF weitergeben. Der QR-Code erscheint dann auch im
-          Dokument und in der PDF. Wer den Kundenlink besitzt, kann das Angebot ansehen und bis zum
-          Ablaufdatum annehmen. Eine E-Mail wird dabei nicht verschickt.
+          Absender, Kundenanschrift, Texte und Preise werden festgeschrieben. Es wird keine E-Mail
+          gesendet. Danach kannst du das Angebot per Kundenlink, QR-Code oder PDF weitergeben. Der
+          QR-Code erscheint dann auch im Dokument und in der PDF. Wer den Kundenlink besitzt, kann
+          das Angebot ansehen und bis zum Ablaufdatum annehmen. Eine E-Mail wird dabei nicht
+          verschickt.
         </p>
         <p>
           Kundenkontakt:

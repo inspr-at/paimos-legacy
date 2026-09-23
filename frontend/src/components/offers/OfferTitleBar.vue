@@ -16,14 +16,16 @@ import {
   MoreHorizontal,
   Plus,
   Printer,
+  Redo2,
+  Undo2,
   Save,
   Scaling,
+  Trash2,
   Settings2,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import type { OfferBulletMarker, OfferFooterLayout } from './types'
-import type { ProseListKind } from './offerProse'
-import { OFFER_BULLET_GLYPH } from './offerProse'
+import type { OfferBulletMarker, OfferFooterLayout, OfferSelection } from './types'
+import { OFFER_BULLET_GLYPH, type LevelLimit, type ProseListKind } from './offerProse'
 import { explicitFooter, OFFER_FOOTER_LOGO } from './offerLayout'
 import { useOfferProseSession, type ProseCommand } from './offerProseSession'
 import type { OfferToolbarAction, OfferToolbarActionId } from './offerToolbarActions'
@@ -47,6 +49,9 @@ const props = defineProps<{
   showPrint: boolean
   actions: OfferToolbarAction[]
   footer: OfferFooterLayout | null
+  canUndo?: boolean
+  canRedo?: boolean
+  selection?: OfferSelection | null
 }>()
 const emit = defineEmits<{
   save: []
@@ -54,6 +59,18 @@ const emit = defineEmits<{
   print: []
   action: [id: OfferToolbarActionId]
   footer: [value: OfferFooterLayout]
+  undo: []
+  redo: []
+  'insert-section': []
+  'insert-position': []
+  'select-footer': []
+  'section-add': []
+  'section-up': []
+  'section-down': []
+  'section-delete': []
+  'position-up': []
+  'position-down': []
+  'position-delete': []
 }>()
 
 const root = ref<HTMLElement>()
@@ -61,11 +78,20 @@ const listButton = ref<HTMLButtonElement>()
 const listPopover = ref<HTMLElement>()
 const menuButton = ref<HTMLButtonElement>()
 const menuPopover = ref<HTMLElement>()
+const gearButton = ref<HTMLButtonElement>()
+const gearPopover = ref<HTMLElement>()
 const layoutPopover = ref<HTMLElement>()
 const widthField = ref<HTMLInputElement>()
+const offsetField = ref<HTMLInputElement>()
+const startField = ref<HTMLInputElement>()
+const widthDraft = ref<string | null>(null)
+const offsetDraft = ref<string | null>(null)
+const startDraft = ref<string | null>(null)
 const listOpen = ref(false)
 const menuOpen = ref(false)
 const layoutOpen = ref(false)
+const gearOpen = ref(false)
+const insertOpen = ref(false)
 const session = useOfferProseSession()
 const zoomSteps = [50, 75, 100, 125, 150, 175, 200]
 const listKinds: { id: ProseListKind; label: string }[] = [
@@ -87,6 +113,7 @@ const icons: Record<OfferToolbarActionId, Component> = {
   finalize: FileCheck2,
   layout: Scaling,
   chrome: ChevronDown,
+  delete: Trash2,
 }
 
 const listEnabled = computed(() => !!session?.active.value)
@@ -98,9 +125,54 @@ const listState = computed(() => {
     outline: false as const,
     continued: false as const,
     start: null,
+    sectionBound: false as const,
+    indent: false,
+    outdent: false,
+    indentLimit: null,
+    outdentLimit: null,
   }
   return { ...state, revision }
 })
+const canIndent = computed(() => listState.value.indent === true)
+const canOutdent = computed(() => listState.value.outdent === true)
+function limitTip(limit: LevelLimit | null | undefined, direction: 'deeper' | 'higher'): string {
+  switch (limit) {
+    case 'max-depth':
+      return 'Maximale Ebene ist erreicht.'
+    case 'no-previous':
+      return 'Kein vorheriger Listeneintrag.'
+    case 'boundary':
+      return direction === 'deeper'
+        ? 'Nicht tiefer als der vorherige Eintrag.'
+        : 'Diese Ebene kann nicht höher.'
+    case 'not-list':
+      return 'Nur Listeneinträge können eine Ebene höher.'
+    case 'mixed':
+      return direction === 'deeper'
+        ? 'Die Auswahl kann nicht tiefer.'
+        : 'Die Auswahl kann nicht höher.'
+    default:
+      return direction === 'deeper'
+        ? 'Einrücken ist für diese Auswahl nicht möglich.'
+        : 'Ausrücken ist für diese Auswahl nicht möglich.'
+  }
+}
+const deeperTip = computed(() =>
+  canIndent.value ? 'Eine Listenebene tiefer' : limitTip(listState.value.indentLimit, 'deeper'),
+)
+const higherTip = computed(() =>
+  canOutdent.value ? 'Eine Listenebene höher' : limitTip(listState.value.outdentLimit, 'higher'),
+)
+const deeperName = computed(() =>
+  canIndent.value ? 'Eine Listenebene tiefer' : `Eine Listenebene tiefer. ${deeperTip.value}`,
+)
+const higherName = computed(() =>
+  canOutdent.value ? 'Eine Listenebene höher' : `Eine Listenebene höher. ${higherTip.value}`,
+)
+const indentName = computed(() => (canIndent.value ? 'Einrücken' : `Einrücken. ${deeperTip.value}`))
+const outdentName = computed(() =>
+  canOutdent.value ? 'Ausrücken' : `Ausrücken. ${higherTip.value}`,
+)
 const shownWidth = computed(() => props.footer?.logo_width_mm ?? OFFER_FOOTER_LOGO.defaultWidthMm)
 const shownOffset = computed(() => props.footer?.logo_offset_mm ?? OFFER_FOOTER_LOGO.legacyOffsetMm)
 
@@ -113,11 +185,12 @@ watch(
     if (!on) layoutOpen.value = false
   },
 )
-watch([listOpen, menuOpen, layoutOpen], async () => {
+watch([listOpen, menuOpen, layoutOpen, gearOpen], async () => {
   await nextTick()
   if (listOpen.value) place(listButton.value, listPopover.value, 'start')
   if (menuOpen.value) place(menuButton.value, menuPopover.value, 'end')
   if (layoutOpen.value) place(menuButton.value, layoutPopover.value, 'end')
+  if (gearOpen.value) place(gearButton.value, gearPopover.value, 'start')
 })
 
 function place(
@@ -143,13 +216,42 @@ function prime(event: MouseEvent) {
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
   event.preventDefault()
 }
+function openTemplates() {
+  finishWidth()
+  finishOffset()
+  gearOpen.value = false
+  emit('action', 'settings')
+}
+function toggleGear() {
+  listOpen.value = false
+  menuOpen.value = false
+  layoutOpen.value = false
+  insertOpen.value = false
+  if (gearOpen.value) {
+    finishWidth()
+    finishOffset()
+    gearOpen.value = false
+    return
+  }
+  gearOpen.value = true
+  void nextTick(() => gearPopover.value?.querySelector<HTMLInputElement>('input')?.focus())
+}
+function chooseInsert(kind: 'section' | 'position') {
+  insertOpen.value = false
+  if (kind === 'section') emit('insert-section')
+  else emit('insert-position')
+}
 function run(command: ProseCommand) {
+  if (command.type === 'indent' && !canIndent.value) return
+  if (command.type === 'outdent' && !canOutdent.value) return
+  if (!(command.type === 'numbering' && command.mode === 'start')) startDraft.value = null
   session?.active.value?.apply(command)
 }
 function toggleList(event: MouseEvent) {
   if (!listEnabled.value) return
   menuOpen.value = false
   layoutOpen.value = false
+  gearOpen.value = false
   listOpen.value = !listOpen.value
   if (listOpen.value && event.detail === 0)
     void nextTick(() => listPopover.value?.querySelector('button')?.focus())
@@ -157,6 +259,7 @@ function toggleList(event: MouseEvent) {
 function toggleMenu(event: MouseEvent) {
   listOpen.value = false
   layoutOpen.value = false
+  gearOpen.value = false
   menuOpen.value = !menuOpen.value
   if (menuOpen.value && event.detail === 0)
     void nextTick(() =>
@@ -182,27 +285,67 @@ function stepZoom(direction: number) {
       : ([...zoomSteps].reverse().find((level) => level < current) ?? 50)
   emit('update:zoomMode', String(next))
 }
-function parseMm(value: string): number {
-  return Number(value.trim().replace(',', '.'))
+function completeMm(raw: string): number | null {
+  const text = raw.trim().replace(',', '.')
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : null
 }
-function commitLayout(widthRaw: string, offsetRaw: string) {
-  const width = parseMm(widthRaw)
-  const offset = parseMm(offsetRaw)
-  if (!Number.isFinite(width) || !Number.isFinite(offset)) return
+function commitLayout(width: number, offset: number) {
   const next = explicitFooter(props.footer, { logo_width_mm: width, logo_offset_mm: offset })
   if (!next) return
   emit('footer', next)
 }
 function onWidth(event: Event) {
-  commitLayout((event.target as HTMLInputElement).value, String(shownOffset.value))
+  const raw = (event.target as HTMLInputElement).value
+  widthDraft.value = raw
+  const width = completeMm(raw)
+  if (width == null) return
+  commitLayout(width, shownOffset.value)
 }
 function onOffset(event: Event) {
-  commitLayout(String(shownWidth.value), (event.target as HTMLInputElement).value)
+  const raw = (event.target as HTMLInputElement).value
+  offsetDraft.value = raw
+  const offset = completeMm(raw)
+  if (offset == null) return
+  commitLayout(shownWidth.value, offset)
+}
+function finishWidth() {
+  const raw = widthDraft.value
+  widthDraft.value = null
+  if (raw == null) return
+  const width = completeMm(raw)
+  if (width == null) return
+  commitLayout(width, shownOffset.value)
+}
+function finishOffset() {
+  const raw = offsetDraft.value
+  offsetDraft.value = null
+  if (raw == null) return
+  const offset = completeMm(raw)
+  if (offset == null) return
+  commitLayout(shownWidth.value, offset)
+}
+function completeStart(raw: string): number | null {
+  if (!/^\d+$/.test(raw.trim())) return null
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1 || value > 9999) return null
+  return value
+}
+function applyStart(raw: string) {
+  const value = completeStart(raw)
+  if (value == null) return
+  run({ type: 'numbering', mode: 'start', start: value })
 }
 function onListStart(event: Event) {
-  const raw = Number((event.target as HTMLInputElement).value)
-  if (!Number.isInteger(raw) || raw < 1 || raw > 9999) return
-  run({ type: 'numbering', mode: 'start', start: raw })
+  const raw = (event.target as HTMLInputElement).value
+  startDraft.value = raw
+  applyStart(raw)
+}
+function finishListStart() {
+  const raw = startDraft.value
+  startDraft.value = null
+  if (raw != null) applyStart(raw)
 }
 function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const key = event.key
@@ -230,19 +373,35 @@ function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
 function onDocPointer(event: PointerEvent) {
   const target = event.target
   if (!(target instanceof Node) || root.value?.contains(target)) return
+  finishListStart()
+  finishWidth()
+  finishOffset()
+  gearOpen.value = false
+  insertOpen.value = false
   listOpen.value = false
   menuOpen.value = false
   layoutOpen.value = false
 }
 function onDocKey(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
+  if (gearOpen.value) {
+    finishWidth()
+    finishOffset()
+    gearOpen.value = false
+    gearButton.value?.focus()
+    event.preventDefault()
+    return
+  }
   if (layoutOpen.value) {
+    finishWidth()
+    finishOffset()
     layoutOpen.value = false
     menuButton.value?.focus()
     event.preventDefault()
     return
   }
   if (listOpen.value) {
+    finishListStart()
     listOpen.value = false
     listButton.value?.focus()
     event.preventDefault()
@@ -262,6 +421,7 @@ function reposition() {
   if (listOpen.value) place(listButton.value, listPopover.value, 'start')
   if (menuOpen.value) place(menuButton.value, menuPopover.value, 'end')
   if (layoutOpen.value) place(menuButton.value, layoutPopover.value, 'end')
+  if (gearOpen.value) place(gearButton.value, gearPopover.value, 'start')
 }
 onMounted(() => {
   window.addEventListener('pointerdown', onDocPointer)
@@ -313,6 +473,113 @@ defineExpose({ root })
       >
     </div>
     <div class="offer-actions">
+      <button
+        type="button"
+        class="tool-button icon-only"
+        aria-label="Rückgängig"
+        title="Rückgängig"
+        :disabled="!canUndo"
+        @click="emit('undo')"
+      >
+        <Undo2 :size="16" />
+      </button>
+      <button
+        type="button"
+        class="tool-button icon-only"
+        aria-label="Wiederholen"
+        title="Wiederholen"
+        :disabled="!canRedo"
+        @click="emit('redo')"
+      >
+        <Redo2 :size="16" />
+      </button>
+      <button
+        v-if="editable"
+        type="button"
+        class="tool-button"
+        aria-label="Einfügen"
+        @click="insertOpen = !insertOpen"
+      >
+        <Plus :size="16" /><span>Einfügen</span>
+      </button>
+      <div v-if="insertOpen" class="chrome-popover gear-popover" data-offer-chrome role="menu">
+        <button type="button" @click="chooseInsert('section')">
+          {{
+            selection?.kind === 'heading' || selection?.kind === 'text'
+              ? `Abschnitt nach Abschnitt ${selection.index + 1}`
+              : 'Abschnitt am Ende'
+          }}
+        </button>
+        <button type="button" @click="chooseInsert('position')">Leistungsposition</button>
+      </div>
+      <button
+        ref="gearButton"
+        v-if="editable"
+        type="button"
+        class="tool-button icon-only"
+        aria-haspopup="dialog"
+        :aria-expanded="gearOpen"
+        aria-label="Einstellungen"
+        title="Einstellungen"
+        @click="toggleGear"
+      >
+        <Settings2 :size="16" />
+      </button>
+      <div
+        v-if="gearOpen"
+        ref="gearPopover"
+        class="chrome-popover gear-popover offer-settings"
+        data-offer-chrome
+        role="dialog"
+        aria-labelledby="this-offer-heading"
+      >
+        <section class="this-offer" aria-labelledby="this-offer-heading">
+          <h2 id="this-offer-heading" class="panel-heading">Dieses Angebot</h2>
+          <p class="hint">Breite und Versatz gelten nur für dieses Angebot.</p>
+          <label>
+            Breite
+            <span class="mm">
+              <input
+                type="text"
+                inputmode="decimal"
+                :value="widthDraft ?? shownWidth"
+                aria-label="Breite des Fußzeilenlogos in Millimetern"
+                @input="onWidth"
+                @blur="finishWidth"
+                @keydown.enter.prevent="finishWidth"
+              />
+              mm
+            </span>
+          </label>
+          <label>
+            Versatz
+            <span class="mm">
+              <input
+                type="text"
+                inputmode="decimal"
+                :value="offsetDraft ?? shownOffset"
+                aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
+                @input="onOffset"
+                @blur="finishOffset"
+                @keydown.enter.prevent="finishOffset"
+              />
+              mm
+            </span>
+          </label>
+          <p class="hint">
+            Negativ nach oben, positiv nach unten. Nummer, Linie und Seitenzahl bleiben.
+          </p>
+        </section>
+        <div class="gear-future" role="group" aria-label="Vorlagen für neue Angebote">
+          <button type="button" class="gear-templates" @click="openTemplates">
+            Vorlagen für neue Angebote
+            <small
+              >Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt
+              unverändert.</small
+            >
+          </button>
+        </div>
+      </div>
       <div class="list-anchor">
         <button
           ref="listButton"
@@ -352,8 +619,13 @@ defineExpose({ root })
               {{ item.label }}
             </button>
           </div>
-          <p class="popover-label">Aufzählungszeichen</p>
-          <div class="bullets" role="radiogroup" aria-label="Aufzählungszeichen">
+          <p v-if="listState.kind !== 'ordered'" class="popover-label">Aufzählungszeichen</p>
+          <div
+            v-if="listState.kind !== 'ordered'"
+            class="bullets"
+            role="radiogroup"
+            aria-label="Aufzählungszeichen"
+          >
             <button
               v-for="item in bullets"
               :key="item.id"
@@ -369,14 +641,44 @@ defineExpose({ root })
             </button>
           </div>
           <div class="indent-row">
-            <button type="button" aria-label="Einrücken" @click="run({ type: 'indent' })">
-              Einrücken
+            <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+              <button
+                type="button"
+                :disabled="!canIndent"
+                :aria-label="indentName"
+                @click="run({ type: 'indent' })"
+              >
+                Einrücken
+              </button>
+            </span>
+            <span class="level-tip" :data-tip="higherTip" :title="higherTip">
+              <button
+                type="button"
+                :disabled="!canOutdent"
+                :aria-label="outdentName"
+                @click="run({ type: 'outdent' })"
+              >
+                Ausrücken
+              </button>
+            </span>
+          </div>
+          <div v-if="listState.kind !== 'bullet'" class="indent-row">
+            <button
+              type="button"
+              :aria-pressed="listState.sectionBound === true"
+              @click="run({ type: 'numbering', mode: 'section' })"
+            >
+              Abschnittsnummer
             </button>
-            <button type="button" aria-label="Ausrücken" @click="run({ type: 'outdent' })">
-              Ausrücken
+            <button
+              type="button"
+              :aria-pressed="listState.sectionBound === false"
+              @click="run({ type: 'numbering', mode: 'independent' })"
+            >
+              Unabhängig
             </button>
           </div>
-          <p class="popover-label">Nummerierung</p>
+          <p v-if="listState.kind !== 'bullet'" class="popover-label">Nummerierung</p>
           <div class="indent-row">
             <button
               type="button"
@@ -398,14 +700,17 @@ defineExpose({ root })
           <label class="start-row">
             Beginnen bei
             <input
+              ref="startField"
               type="number"
               inputmode="numeric"
               min="1"
               max="9999"
               step="1"
-              :value="typeof listState.start === 'number' ? listState.start : 1"
+              :value="startDraft ?? (typeof listState.start === 'number' ? listState.start : 1)"
               aria-label="Nummerierung beginnen bei"
-              @change="onListStart"
+              @input="onListStart"
+              @blur="finishListStart"
+              @keydown.enter.prevent="finishListStart"
             />
           </label>
           <p class="hint">3, 3.1, 3.1.1. Fortsetzen gilt auch nach einem Absatz.</p>
@@ -504,14 +809,13 @@ defineExpose({ root })
             <span class="mm">
               <input
                 ref="widthField"
-                type="number"
+                type="text"
                 inputmode="decimal"
-                step="0.1"
-                :min="OFFER_FOOTER_LOGO.minWidthMm"
-                :max="OFFER_FOOTER_LOGO.maxWidthMm"
-                :value="shownWidth"
+                :value="widthDraft ?? shownWidth"
                 aria-label="Breite des Fußzeilenlogos in Millimetern"
                 @input="onWidth"
+                @blur="finishWidth"
+                @keydown.enter.prevent="finishWidth"
               />
               mm
             </span>
@@ -520,14 +824,14 @@ defineExpose({ root })
             Versatz
             <span class="mm">
               <input
-                type="number"
+                ref="offsetField"
+                type="text"
                 inputmode="decimal"
-                step="0.1"
-                :min="OFFER_FOOTER_LOGO.minOffsetMm"
-                :max="OFFER_FOOTER_LOGO.maxOffsetMm"
-                :value="shownOffset"
+                :value="offsetDraft ?? shownOffset"
                 aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
                 @input="onOffset"
+                @blur="finishOffset"
+                @keydown.enter.prevent="finishOffset"
               />
               mm
             </span>
@@ -538,15 +842,111 @@ defineExpose({ root })
         </div>
       </div>
     </div>
+    <div v-if="editable" class="context-row" role="toolbar" aria-label="Werkzeuge für die Auswahl">
+      <template v-if="selection?.kind === 'heading'">
+        <span>Abschnitt {{ selection.index + 1 }}</span>
+        <button type="button" :disabled="selection.count >= 20" @click="emit('section-add')">
+          Danach
+        </button>
+        <button type="button" :disabled="selection.index === 0" @click="emit('section-up')">
+          Nach oben
+        </button>
+        <button
+          type="button"
+          :disabled="selection.index >= selection.count - 1"
+          @click="emit('section-down')"
+        >
+          Nach unten
+        </button>
+        <button type="button" @click="emit('section-delete')">Löschen</button>
+      </template>
+      <template v-else-if="selection?.kind === 'text'">
+        <span>Text in Abschnitt {{ selection.index + 1 }}</span>
+        <span class="level-tip" :data-tip="higherTip" :title="higherTip">
+          <button
+            type="button"
+            :disabled="!canOutdent"
+            :aria-label="higherName"
+            @mousedown="prime"
+            @click="run({ type: 'outdent' })"
+          >
+            Ebene höher
+          </button>
+        </span>
+        <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+          <button
+            type="button"
+            :disabled="!canIndent"
+            :aria-label="deeperName"
+            @mousedown="prime"
+            @click="run({ type: 'indent' })"
+          >
+            Ebene tiefer
+          </button>
+        </span>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'none' })">
+          Text
+        </button>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'bullet' })">
+          Aufzählung
+        </button>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'ordered' })">
+          Nummerierung
+        </button>
+      </template>
+      <template v-else-if="selection?.kind === 'position'">
+        <span>Position {{ selection.index + 1 }}</span>
+        <button type="button" :disabled="selection.index === 0" @click="emit('position-up')">
+          Nach oben
+        </button>
+        <button
+          type="button"
+          :disabled="selection.index >= selection.count - 1"
+          @click="emit('position-down')"
+        >
+          Nach unten
+        </button>
+        <button type="button" @click="emit('position-delete')">Löschen</button>
+      </template>
+      <template v-else-if="selection?.kind === 'footer'">
+        <span>Fußzeilenlogo</span>
+        <label
+          >Breite
+          <input
+            type="text"
+            inputmode="decimal"
+            :value="widthDraft ?? shownWidth"
+            aria-label="Breite des Fußzeilenlogos in Millimetern"
+            @input="onWidth"
+            @blur="finishWidth"
+          />
+          mm</label
+        >
+        <label
+          >Versatz
+          <input
+            type="text"
+            inputmode="decimal"
+            :value="offsetDraft ?? shownOffset"
+            aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
+            @input="onOffset"
+            @blur="finishOffset"
+          />
+          mm</label
+        >
+        <span>− oben · + unten</span>
+      </template>
+      <template v-else><span>Element auswählen</span></template>
+    </div>
   </header>
 </template>
 <style scoped>
 .offer-tools {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  gap: 0;
+  align-items: stretch;
   flex-wrap: wrap;
-  padding: 6px 12px;
+  padding: 0;
   background: var(--h-surface, #fffefa);
   color: var(--h-text, #203c3d);
   border-bottom: 1px solid var(--h-line, #d8e2df);
@@ -560,6 +960,100 @@ defineExpose({ root })
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 24vw;
+}
+.global-row,
+.offer-actions,
+.save-state {
+  min-height: 42px;
+  padding: 6px 12px;
+}
+.context-row {
+  flex: 1 0 100%;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--h-line, #d8e2df);
+  font-size: 12px;
+}
+.context-row button,
+.gear-popover button {
+  min-height: 28px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.context-row button:focus-visible,
+.gear-popover button:focus-visible {
+  outline: 1px solid var(--h-mint, #0e6f6c);
+  outline-offset: 2px;
+}
+.context-row button:disabled,
+.indent-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.level-tip {
+  position: relative;
+  display: inline-flex;
+}
+.level-tip:hover::after,
+.level-tip:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 70;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: max-content;
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--h-text, #203c3d);
+  color: var(--h-surface, #fffefa);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 8px 24px #10232714;
+}
+.panel-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--h-text, #203c3d);
+}
+.this-offer {
+  display: grid;
+  gap: 8px;
+}
+.gear-future {
+  border-top: 1px solid var(--h-line, #d8e2df);
+  padding-top: 8px;
+}
+.gear-templates {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+}
+.gear-templates small {
+  color: var(--h-muted, #596e70);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.gear-popover {
+  position: absolute;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
 }
 .tool-button {
   display: inline-flex;
@@ -723,6 +1217,13 @@ select:focus-visible,
 .bullets button {
   font-size: 16px;
 }
+.indent-row .level-tip {
+  display: flex;
+  flex: 1;
+}
+.indent-row .level-tip button {
+  width: 100%;
+}
 .indent-row button {
   font-size: 12px;
 }
@@ -790,11 +1291,15 @@ select:focus-visible,
   line-height: 1.35;
   white-space: normal;
 }
-.layout-popover label {
+.layout-popover label,
+.offer-settings label {
   display: grid;
   gap: 4px;
   margin-bottom: 8px;
   font-size: 12px;
+}
+.offer-settings {
+  width: min(292px, calc(100vw - 16px));
 }
 .mm {
   display: flex;

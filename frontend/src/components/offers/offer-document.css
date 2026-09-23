@@ -416,6 +416,62 @@
 .offer-document .offer-prose .item[data-numbering='outline'] {
   grid-template-columns: max-content minmax(0, 1fr);
 }
+.offer-document .sec {
+  position: relative;
+}
+.offer-document .sec-actions {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+.offer-document .sec:hover .sec-actions,
+.offer-document .sec:focus-within .sec-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.offer-document .sec-actions button {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--rule, #d8e2df);
+  border-radius: 4px;
+  background: var(--paper, #fffefa);
+  color: var(--ink, #203c3d);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.offer-document .sec-actions button:focus-visible {
+  outline: 1px solid #0e6f6c;
+  outline-offset: 1px;
+}
+.offer-document .sec-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.offer-document .section-delete {
+  border: 1px solid var(--rule, #d8e2df);
+  border-radius: 8px;
+  background: var(--paper, #fffefa);
+  color: var(--ink, #203c3d);
+  padding: 16px;
+}
+.offer-document .section-delete button {
+  min-height: 28px;
+  margin-right: 8px;
+}
+@media (hover: none) {
+  .offer-document .sec-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
 .offer-document .section-tools {
   position: sticky;
   top: 46px;
@@ -839,7 +895,9 @@
     page-break-after: auto;
   }
   .offer-document .rowtools,
-  .offer-document .section-tools {
+  .offer-document .section-tools,
+  .offer-document .sec-actions,
+  .offer-document .section-delete {
     display: none !important;
   }
   .offer-document [contenteditable] {

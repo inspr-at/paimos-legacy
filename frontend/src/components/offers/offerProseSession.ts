@@ -7,7 +7,11 @@ export type ProseCommand =
   | { type: 'marker'; marker: OfferBulletMarker }
   | { type: 'indent' }
   | { type: 'outdent' }
-  | { type: 'numbering'; mode: 'restart' | 'continue' | 'start'; start?: number }
+  | {
+      type: 'numbering'
+      mode: 'restart' | 'continue' | 'start' | 'section' | 'independent'
+      start?: number
+    }
 
 export type ProseTarget = {
   id: number

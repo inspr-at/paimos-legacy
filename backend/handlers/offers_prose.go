@@ -26,6 +26,7 @@ type OfferTextNode struct {
 	Numbering    string `json:"numbering,omitempty"`
 	ListStart    int    `json:"list_start,omitempty"`
 	ListContinue bool   `json:"list_continue,omitempty"`
+	SectionBound bool   `json:"section_bound,omitempty"`
 }
 
 func offerBullet(depth int) string {
@@ -77,7 +78,10 @@ func validOfferNumbering(node OfferTextNode) bool {
 		return false
 	}
 	if node.Kind != "item" || node.Marker != "decimal" {
-		return node.Numbering == "" && node.ListStart == 0 && !node.ListContinue
+		return node.Numbering == "" && node.ListStart == 0 && !node.ListContinue && !node.SectionBound
+	}
+	if node.SectionBound && node.Numbering != "outline" {
+		return false
 	}
 	return !(node.ListStart > 0 && node.ListContinue)
 }
@@ -97,7 +101,7 @@ func offerItemGlyph(node OfferTextNode) string {
 	}
 }
 
-func projectOfferNodes(nodes []OfferTextNode) string {
+func projectOfferNodes(nodes []OfferTextNode, sectionNumber int) string {
 	plain := make([]int, offerProseMaxDepth+1)
 	outline := make([]int, offerProseMaxDepth+1)
 	snaps := make([][]int, len(nodes))
@@ -141,7 +145,8 @@ func projectOfferNodes(nodes []OfferTextNode) string {
 			for j := i - 1; j >= 0; j-- {
 				earlier := nodes[j]
 				sameMode := (earlier.Numbering == "outline") == (node.Numbering == "outline")
-				if earlier.Kind == "item" && earlier.Marker == "decimal" && earlier.Depth == depth && sameMode {
+				sameRoot := earlier.SectionBound == node.SectionBound
+				if earlier.Kind == "item" && earlier.Marker == "decimal" && earlier.Depth == depth && sameMode && sameRoot {
 					previous = j
 					break
 				}
@@ -161,13 +166,16 @@ func projectOfferNodes(nodes []OfferTextNode) string {
 		snaps[i] = append([]int(nil), levels...)
 		if node.Numbering == "outline" {
 			copy(outline, levels)
-			parts := make([]string, depth+1)
+			parts := make([]string, 0, depth+2)
+			if node.SectionBound && sectionNumber > 0 {
+				parts = append(parts, strconv.Itoa(sectionNumber))
+			}
 			for c := 0; c <= depth; c++ {
 				n := levels[c]
 				if n <= 0 {
 					n = 1
 				}
-				parts[c] = strconv.Itoa(n)
+				parts = append(parts, strconv.Itoa(n))
 			}
 			lines[i] = strings.Repeat("  ", node.Depth) + strings.Join(parts, ".") + " " + node.Text
 			continue
@@ -189,6 +197,9 @@ func canonOfferNode(node OfferTextNode, depth int) OfferTextNode {
 	if node.Marker == "decimal" {
 		if node.Numbering == "outline" {
 			out.Numbering = "outline"
+			if node.SectionBound {
+				out.SectionBound = true
+			}
 		}
 		if node.ListStart > 0 {
 			out.ListStart = node.ListStart
@@ -202,6 +213,10 @@ func canonOfferNode(node OfferTextNode, depth int) OfferTextNode {
 // normalizeOfferProse accepts either legacy body text or an explicit node list.
 // A single paragraph is stored only as body. Invalid structure is rejected.
 func normalizeOfferProse(body string, nodes []OfferTextNode) (string, []OfferTextNode, error) {
+	return normalizeOfferProseInSection(body, nodes, 0)
+}
+
+func normalizeOfferProseInSection(body string, nodes []OfferTextNode, sectionNumber int) (string, []OfferTextNode, error) {
 	if len(nodes) == 0 {
 		return body, nil, nil
 	}
@@ -238,12 +253,12 @@ func normalizeOfferProse(body string, nodes []OfferTextNode) (string, []OfferTex
 	if len(canon) == 1 && canon[0].Kind == "paragraph" {
 		return canon[0].Text, nil, nil
 	}
-	return projectOfferNodes(canon), canon, nil
+	return projectOfferNodes(canon, sectionNumber), canon, nil
 }
 
 func normalizeOfferBlocks(blocks []OfferBlock) error {
 	for i := range blocks {
-		body, nodes, err := normalizeOfferProse(blocks[i].Body, blocks[i].Nodes)
+		body, nodes, err := normalizeOfferProseInSection(blocks[i].Body, blocks[i].Nodes, i+1)
 		if err != nil {
 			return err
 		}

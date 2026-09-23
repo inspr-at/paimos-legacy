@@ -38,14 +38,38 @@ export const OFFER_BULLET_GLYPH: Record<OfferBulletMarker, string> = {
 }
 
 export type ProseListKind = 'none' | 'bullet' | 'ordered'
-export type NumberingCommand = 'restart' | 'continue' | 'start' | 'follow'
+export type NumberingCommand =
+  | 'restart'
+  | 'continue'
+  | 'start'
+  | 'follow'
+  | 'section'
+  | 'independent'
+  | 'bound'
+  | 'unbound'
+export type NumberingMode = 'restart' | 'continue' | 'start' | 'section' | 'independent'
 export const OFFER_LIST_START_MAX = 9999
+/** Why indent or outdent would leave the current selection unchanged. */
+export type LevelLimit = 'max-depth' | 'no-previous' | 'boundary' | 'not-list' | 'mixed'
 export type ProseListState = {
   kind: ProseListKind | 'mixed'
   bullet: OfferBulletMarker | 'mixed' | null
   outline: boolean | 'mixed'
   continued: boolean | 'mixed'
   start: number | 'mixed' | null
+  sectionBound: boolean | 'mixed'
+  indent: boolean
+  outdent: boolean
+  indentLimit: LevelLimit | null
+  outdentLimit: LevelLimit | null
+}
+
+/** First selected item keeps the command. Later items follow, except ownership which stays per item. */
+export function numberingCommandForIndex(mode: NumberingMode, position: number): NumberingCommand {
+  if (position <= 0) return mode
+  if (mode === 'section') return 'bound'
+  if (mode === 'independent') return 'unbound'
+  return 'follow'
 }
 
 export function isOfferMarker(value: unknown): value is OfferMarker {
@@ -60,12 +84,14 @@ type ItemAnchor = {
   numbering?: 'outline'
   list_start?: number
   list_continue?: true
+  section_bound?: true
 }
 
 function anchorOf(node: OfferTextNode, keepAnchor: boolean): ItemAnchor | undefined {
   if (node.kind !== 'item') return undefined
   const anchor: ItemAnchor = {}
   if (node.numbering === 'outline') anchor.numbering = 'outline'
+  if (node.section_bound) anchor.section_bound = true
   if (keepAnchor && node.list_start && node.list_start > 0) anchor.list_start = node.list_start
   if (keepAnchor && node.list_continue) anchor.list_continue = true
   return anchor.numbering || anchor.list_start || anchor.list_continue ? anchor : undefined
@@ -81,6 +107,7 @@ function listItem(
   if (depth > 0) node.depth = depth
   if (marker) node.marker = marker
   if (marker === 'decimal' && anchor?.numbering === 'outline') node.numbering = 'outline'
+  if (marker === 'decimal' && anchor?.section_bound) node.section_bound = true
   if (marker === 'decimal' && anchor?.list_start && anchor.list_start > 0)
     node.list_start = anchor.list_start
   else if (marker === 'decimal' && anchor?.list_continue) node.list_continue = true
@@ -184,7 +211,7 @@ function zeroFrom(values: number[], depth: number) {
 }
 
 /** One label per node. Plain decimals stay `1.`; outline decimals are `3`, `3.1`, `3.1.1`. */
-export function proseMarkerLabels(nodes: OfferTextNode[]): string[] {
+export function proseMarkerLabels(nodes: OfferTextNode[], sectionNumber = 0): string[] {
   const plain = Array<number>(OFFER_PROSE_MAX_DEPTH + 1).fill(0)
   const outline = Array<number>(OFFER_PROSE_MAX_DEPTH + 1).fill(0)
   const snaps: number[][] = []
@@ -213,7 +240,8 @@ export function proseMarkerLabels(nodes: OfferTextNode[]): string[] {
           earlier?.kind === 'item' &&
           earlier.marker === 'decimal' &&
           (earlier.depth ?? 0) === depth &&
-          (earlier.numbering === 'outline') === (node.numbering === 'outline')
+          (earlier.numbering === 'outline') === (node.numbering === 'outline') &&
+          (earlier.section_bound === true) === (node.section_bound === true)
         ) {
           previous = j
           break
@@ -230,6 +258,7 @@ export function proseMarkerLabels(nodes: OfferTextNode[]): string[] {
       outline.splice(0, outline.length, ...levels)
       const parts: number[] = []
       for (let i = 0; i <= depth; i++) parts.push((levels[i] ?? 0) > 0 ? levels[i]! : 1)
+      if (node.section_bound && sectionNumber > 0) parts.unshift(sectionNumber)
       return parts.join('.')
     }
     plain.splice(0, plain.length, ...levels)
@@ -252,6 +281,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
       numbering?: unknown
       list_start?: unknown
       list_continue?: unknown
+      section_bound?: unknown
     }
     if ((record.kind !== 'paragraph' && record.kind !== 'item') || typeof record.text !== 'string')
       return null
@@ -262,8 +292,10 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
     const numbering = record.numbering
     const listStart = record.list_start
     const listContinue = record.list_continue
+    const sectionBound = record.section_bound
     if (
       (numbering != null && numbering !== 'outline') ||
+      (sectionBound != null && sectionBound !== true && sectionBound !== false) ||
       (listStart != null &&
         (typeof listStart !== 'number' ||
           !Number.isInteger(listStart) ||
@@ -278,7 +310,8 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
         (marker != null && marker !== '') ||
         numbering != null ||
         listStart != null ||
-        listContinue === true
+        listContinue === true ||
+        sectionBound === true
       )
         return null
       previous = -1
@@ -288,9 +321,10 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
     const itemMarker = isOfferMarker(marker) ? marker : undefined
     if (
       itemMarker !== 'decimal' &&
-      (numbering != null || listStart != null || listContinue === true)
+      (numbering != null || listStart != null || listContinue === true || sectionBound === true)
     )
       return null
+    if (sectionBound === true && numbering !== 'outline') return null
     if (listStart != null && listContinue === true) return null
     const depth = record.depth == null ? 0 : record.depth
     if (
@@ -308,6 +342,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
         numbering: numbering === 'outline' ? 'outline' : undefined,
         list_start: typeof listStart === 'number' ? listStart : undefined,
         list_continue: listContinue === true ? true : undefined,
+        section_bound: sectionBound === true ? true : undefined,
       }),
     )
   }
@@ -319,8 +354,8 @@ export function proseNodes(body: string, nodes?: OfferTextNode[] | null): OfferT
   return parseProseNodes(nodes) ?? [paragraph(body ?? '')]
 }
 
-export function projectProse(nodes: OfferTextNode[]): string {
-  const labels = proseMarkerLabels(nodes)
+export function projectProse(nodes: OfferTextNode[], sectionNumber = 0): string {
+  const labels = proseMarkerLabels(nodes, sectionNumber)
   return nodes
     .map((node, index) => {
       if (node.kind !== 'item') return node.text
@@ -369,11 +404,14 @@ export function rangeAfterStore(
 }
 
 /** A single paragraph is stored as plain `body` so legacy offers do not gain a nodes field. */
-export function persistProse(nodes: OfferTextNode[]): { body: string; nodes?: OfferTextNode[] } {
+export function persistProse(
+  nodes: OfferTextNode[],
+  sectionNumber = 0,
+): { body: string; nodes?: OfferTextNode[] } {
   const clean = clampProse(nodes)
   const usable = clean.length > 0 ? clean : [paragraph('')]
   if (usable.length === 1 && usable[0]!.kind === 'paragraph') return { body: usable[0]!.text }
-  return { body: projectProse(usable), nodes: usable }
+  return { body: projectProse(usable, sectionNumber), nodes: usable }
 }
 
 export function offerBlockExceedsPage(
@@ -428,27 +466,39 @@ export function proseListState(nodes: OfferTextNode[], input: Caret | ProseRange
   const outlines = new Set<boolean>()
   const continues = new Set<boolean>()
   const starts = new Set<number | null>()
+  const bounds = new Set<boolean>()
   for (let index = from; index <= to; index++) {
     const node = nodes[index]
     if (!node || node.marker !== 'decimal') continue
     outlines.add(node.numbering === 'outline')
     continues.add(node.list_continue === true)
     starts.add(node.list_start && node.list_start > 0 ? node.list_start : null)
+    bounds.add(node.section_bound === true)
   }
   const kind = kinds.size === 1 ? [...kinds][0]! : 'mixed'
-  const outline = outlines.size === 1 ? [...outlines][0]! : outlines.size > 1 ? 'mixed' : false
-  const continued = continues.size === 1 ? [...continues][0]! : continues.size > 1 ? 'mixed' : false
-  const startValue = starts.size === 1 ? [...starts][0]! : starts.size > 1 ? 'mixed' : null
-  if (kind !== 'bullet') return { kind, bullet: null, outline, continued, start: startValue }
-  if (bullets.size !== 1) return { kind, bullet: 'mixed', outline, continued, start: startValue }
-  const only = [...bullets][0]!
-  return {
-    kind,
-    bullet: only === 'depth' ? null : only,
+  const outline: ProseListState['outline'] =
+    outlines.size === 1 ? [...outlines][0]! : outlines.size > 1 ? 'mixed' : false
+  const continued: ProseListState['continued'] =
+    continues.size === 1 ? [...continues][0]! : continues.size > 1 ? 'mixed' : false
+  const startValue: ProseListState['start'] =
+    starts.size === 1 ? [...starts][0]! : starts.size > 1 ? 'mixed' : null
+  const sectionBound: ProseListState['sectionBound'] =
+    bounds.size === 1 ? [...bounds][0]! : bounds.size > 1 ? 'mixed' : false
+  const level = proseLevelMoves(nodes, input)
+  const shared = {
     outline,
     continued,
     start: startValue,
+    sectionBound,
+    indent: level.indent,
+    outdent: level.outdent,
+    indentLimit: level.indentLimit,
+    outdentLimit: level.outdentLimit,
   }
+  if (kind !== 'bullet') return { kind, bullet: null, ...shared }
+  if (bullets.size !== 1) return { kind, bullet: 'mixed', ...shared }
+  const only = [...bullets][0]!
+  return { kind, bullet: only === 'depth' ? null : only, ...shared }
 }
 
 function clampCaret(nodes: OfferTextNode[], caret: Caret): Caret {
@@ -515,6 +565,31 @@ export function toggleItem(nodes: OfferTextNode[], index: number): OfferTextNode
   return clampProse(next)
 }
 
+function previousItemDepth(nodes: OfferTextNode[], index: number): number {
+  let previous = -1
+  for (let i = 0; i < index; i++) {
+    const node = nodes[i]
+    previous = node?.kind === 'item' ? (node.depth ?? 0) : -1
+  }
+  return previous
+}
+
+/** Depth the list structure allows, ignoring a continuation that is only holding its current level. */
+function structuralDepth(nodes: OfferTextNode[], index: number, requested: number): number {
+  const previous = previousItemDepth(nodes, index)
+  const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
+  return Math.max(0, Math.min(requested, max))
+}
+
+/** A real level change keeps outline style and continuation, and drops a level-specific start. */
+function movedAnchor(node: OfferTextNode): ItemAnchor | undefined {
+  const anchor: ItemAnchor = {}
+  if (node.numbering === 'outline') anchor.numbering = 'outline'
+  if (node.section_bound) anchor.section_bound = true
+  if (node.list_continue) anchor.list_continue = true
+  return anchor.numbering || anchor.list_continue ? anchor : undefined
+}
+
 export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode[] {
   const next = cloneNodes(nodes)
   const node = next[index]
@@ -526,8 +601,12 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
     const anchor: ItemAnchor | undefined =
       prev?.kind === 'item' && prev.numbering === 'outline' ? { numbering: 'outline' } : undefined
     next[index] = listItem(node.text, depth, marker, anchor)
-  } else
-    next[index] = listItem(node.text, (node.depth ?? 0) + 1, node.marker, anchorOf(node, false))
+  } else {
+    const current = node.depth ?? 0
+    const nextDepth = structuralDepth(next, index, current + 1)
+    if (nextDepth <= current) return next
+    next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
+  }
   return clampProse(next)
 }
 
@@ -535,10 +614,91 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   const next = cloneNodes(nodes)
   const node = next[index]
   if (!node || node.kind !== 'item') return next
-  if ((node.depth ?? 0) > 0)
-    next[index] = listItem(node.text, (node.depth ?? 0) - 1, node.marker, anchorOf(node, false))
-  else next[index] = paragraph(node.text)
+  const current = node.depth ?? 0
+  if (current <= 0) {
+    next[index] = paragraph(node.text)
+    return clampProse(next)
+  }
+  const stepped = current - 1
+  const structural = structuralDepth(next, index, stepped)
+  const nextDepth = node.list_continue && structural < stepped ? stepped : structural
+  if (nextDepth === current) return next
+  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
   return clampProse(next)
+}
+
+function structureMoves(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+  op: (nodes: OfferTextNode[], index: number) => OfferTextNode[],
+): boolean {
+  const edit = applyStructure(nodes, input, op)
+  return !edit.error && JSON.stringify(edit.nodes) !== JSON.stringify(nodes)
+}
+
+function indentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null {
+  const node = nodes[index]
+  if (!node) return 'boundary'
+  if (node.kind !== 'item') return null
+  const current = node.depth ?? 0
+  if (structuralDepth(nodes, index, current + 1) > current) return null
+  if (current >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
+  const previous = previousItemDepth(nodes, index)
+  if (previous < 0) return 'no-previous'
+  const max = Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
+  if (current >= max && max >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
+  return 'boundary'
+}
+
+function outdentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null {
+  const node = nodes[index]
+  if (!node || node.kind !== 'item') return 'not-list'
+  const current = node.depth ?? 0
+  if (current <= 0) return null
+  const stepped = current - 1
+  const structural = structuralDepth(nodes, index, stepped)
+  const nextDepth = node.list_continue && structural < stepped ? stepped : structural
+  if (nextDepth === current) return 'boundary'
+  return null
+}
+
+function aggregateLimit(reasons: Array<LevelLimit | null>): LevelLimit | null {
+  if (reasons.some((reason) => reason == null)) return 'boundary'
+  const limits = reasons.filter((reason): reason is LevelLimit => reason != null)
+  if (limits.length === 0) return 'boundary'
+  const unique = new Set(limits)
+  if (unique.size === 1) return [...unique][0]!
+  return 'mixed'
+}
+
+/** Same structural result as the indent and outdent commands, including a mixed selection. */
+export function proseLevelMoves(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+): Pick<ProseListState, 'indent' | 'outdent' | 'indentLimit' | 'outdentLimit'> {
+  const { start, end } = rangeEnds(proseRange(input))
+  const last = Math.max(0, nodes.length - 1)
+  const from = Math.max(0, Math.min(start.index, last))
+  const to = Math.max(0, Math.min(end.index, last))
+  const indent = structureMoves(nodes, input, indentItem)
+  const outdent = structureMoves(nodes, input, outdentItem)
+  const indentReasons: Array<LevelLimit | null> = []
+  const outdentReasons: Array<LevelLimit | null> = []
+  if (nodes.length === 0) {
+    indentReasons.push('boundary')
+    outdentReasons.push('not-list')
+  } else {
+    for (let index = from; index <= to; index++) {
+      indentReasons.push(indentLimitAt(nodes, index))
+      outdentReasons.push(outdentLimitAt(nodes, index))
+    }
+  }
+  return {
+    indent,
+    outdent,
+    indentLimit: indent ? null : aggregateLimit(indentReasons),
+    outdentLimit: outdent ? null : aggregateLimit(outdentReasons),
+  }
 }
 
 function siblingDepth(nodes: OfferTextNode[], index: number): number {
@@ -587,7 +747,10 @@ export function setBulletMarker(
   return clampProse(next)
 }
 
-/** Restart, continue, or a positive start. Follow keeps the outline style and drops anchors. */
+/**
+ * Restart, continue, or a positive start. Follow keeps the outline style and drops anchors.
+ * Section and independent ownership keep each item's own start or continuation.
+ */
 export function setDecimalControl(
   nodes: OfferTextNode[],
   index: number,
@@ -599,6 +762,23 @@ export function setDecimalControl(
   if (!node) return next
   const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
   const anchor: ItemAnchor = { numbering: 'outline' }
+  if (
+    command === 'section' ||
+    command === 'bound' ||
+    (node.section_bound && command !== 'independent' && command !== 'unbound')
+  )
+    anchor.section_bound = true
+  if (
+    (command === 'section' ||
+      command === 'independent' ||
+      command === 'bound' ||
+      command === 'unbound') &&
+    node.kind === 'item' &&
+    node.marker === 'decimal'
+  ) {
+    if (node.list_start && node.list_start > 0) anchor.list_start = node.list_start
+    else if (node.list_continue) anchor.list_continue = true
+  }
   if (command === 'continue') anchor.list_continue = true
   else if (command === 'restart') anchor.list_start = 1
   else if (command === 'start') {
@@ -880,7 +1060,22 @@ export function clipboardPlain(plain: string, html = ''): string {
   return lines.join('\n')
 }
 
-export function createProseHistory(limit = 100) {
+export type ProseHistory = {
+  push(current: ProseSnapshot): boolean
+  undo(current: ProseSnapshot): ProseSnapshot | null
+  redo(current: ProseSnapshot): ProseSnapshot | null
+}
+
+/** Editor memory stays with the block object. It is not part of the saved document. */
+export type SectionEditorMemory = {
+  history: ProseHistory
+  caret: Caret | null
+  record?: () => void
+  requestUndo?: () => void
+  requestRedo?: () => void
+}
+
+export function createProseHistory(limit = 100): ProseHistory {
   const undoStack: ProseSnapshot[] = []
   const redoStack: ProseSnapshot[] = []
   const copy = (snap: ProseSnapshot): ProseSnapshot => ({
@@ -891,10 +1086,11 @@ export function createProseHistory(limit = 100) {
     push(current: ProseSnapshot) {
       const next = copy(current)
       const prev = undoStack[undoStack.length - 1]
-      if (prev && JSON.stringify(prev) === JSON.stringify(next)) return
+      if (prev && JSON.stringify(prev) === JSON.stringify(next)) return false
       undoStack.push(next)
       if (undoStack.length > limit) undoStack.shift()
       redoStack.length = 0
+      return true
     },
     undo(current: ProseSnapshot): ProseSnapshot | null {
       const item = undoStack.pop()

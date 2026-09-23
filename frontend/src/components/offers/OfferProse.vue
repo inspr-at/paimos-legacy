@@ -6,10 +6,12 @@ import {
   clipboardPlain,
   createProseHistory,
   deleteForwardProse,
+  type SectionEditorMemory,
   enterProse,
   indentItem,
   insertProseText,
   insertSoftBreak,
+  numberingCommandForIndex,
   outdentItem,
   persistProse,
   proseListState,
@@ -40,8 +42,10 @@ const props = withDefaults(
     nodes?: OfferTextNode[] | null
     editable?: boolean
     label?: string
+    memory?: SectionEditorMemory | null
+    sectionNumber?: number
   }>(),
-  { editable: false, label: 'Text' },
+  { editable: false, label: 'Text', memory: null, sectionNumber: 0 },
 )
 const emit = defineEmits<{ update: [value: { body: string; nodes?: OfferTextNode[] }] }>()
 const root = ref<HTMLElement>()
@@ -52,10 +56,17 @@ const selection = ref<ProseRange>({
   anchor: { index: 0, offset: 0 },
   focus: { index: 0, offset: 0 },
 })
-const history = createProseHistory()
+const fallbackHistory = createProseHistory()
+function historyStack() {
+  return props.memory?.history ?? fallbackHistory
+}
+function rememberCaret() {
+  if (!props.memory) return
+  props.memory.caret = rangeEnds(selection.value).end
+}
 const session = useOfferProseSession()
 const proseId = takeOfferProseId()
-const markerLabels = computed(() => proseMarkerLabels(local.value))
+const markerLabels = computed(() => proseMarkerLabels(local.value, props.sectionNumber || 0))
 let serial = 1
 let pendingRange: ProseRange | null = null
 let held: ProseRange | null = null
@@ -63,10 +74,19 @@ let suppressInput = false
 let composing = false
 let pointerSelecting = false
 
+let hydrated = false
 watch(
   () => [props.body, props.nodes] as const,
   () => {
     const next = proseNodes(props.body ?? '', props.nodes)
+    if (!hydrated) {
+      hydrated = true
+      local.value = next
+      keys.value = next.map(() => serial++)
+      const caret = props.memory?.caret
+      if (caret) selection.value = { anchor: caret, focus: caret }
+      return
+    }
     if (JSON.stringify(next) === JSON.stringify(local.value)) return
     local.value = next
     keys.value = next.map(() => serial++)
@@ -181,7 +201,10 @@ function onFocusIn(event: FocusEvent) {
 function onFocusOut(event: FocusEvent) {
   const next = event.relatedTarget
   if (next instanceof Node && (root.value?.contains(next) || isOfferChrome(next))) return
-  queueMicrotask(dropStaleTarget)
+  queueMicrotask(() => {
+    if (editorOwnsFocus()) return
+    dropStaleTarget()
+  })
 }
 function onDocumentPointerDown(event: PointerEvent) {
   if (!props.editable || !root.value || session?.active.value?.id !== proseId) return
@@ -210,6 +233,7 @@ onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown)
 })
 onBeforeUnmount(() => {
+  rememberCaret()
   document.removeEventListener('selectionchange', onSelectionChange)
   document.removeEventListener('focusin', onFocusIn)
   document.removeEventListener('focusout', onFocusOut)
@@ -268,8 +292,8 @@ function snapshot() {
   const caret = rangeEnds(selection.value).end
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
-function commit(edit: ProseEdit, keep?: ProseRange) {
-  const stored = persistProse(edit.nodes)
+function commit(edit: ProseEdit, keep?: ProseRange, restoreSelection = true) {
+  const stored = persistProse(edit.nodes, props.sectionNumber || 0)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
   const previous = local.value
@@ -277,11 +301,12 @@ function commit(edit: ProseEdit, keep?: ProseRange) {
   const range = keep
     ? clampRange(local.value, rangeAfterStore(previous, local.value, keep))
     : { anchor: edit.caret, focus: edit.caret }
-  pendingRange = range
+  pendingRange = restoreSelection ? range : null
   selection.value = range
   held = range
   notice.value = edit.error ?? ''
   if (!edit.error) emit('update', stored)
+  rememberCaret()
   if (session?.active.value?.id === proseId) session.touch()
 }
 function apply(edit: ProseEdit) {
@@ -293,7 +318,13 @@ function apply(edit: ProseEdit) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  history.push({ nodes: local.value.map((node) => ({ ...node })), caret: currentRange().focus })
+  if (
+    historyStack().push({
+      nodes: local.value.map((node) => ({ ...node })),
+      caret: currentRange().focus,
+    })
+  )
+    props.memory?.record?.()
   commit(edit)
 }
 function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
@@ -304,15 +335,30 @@ function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
   selection.value = { anchor: caret, focus: caret }
   held = selection.value
   notice.value = ''
-  emit('update', persistProse(local.value))
+  emit('update', persistProse(local.value, props.sectionNumber || 0))
+  rememberCaret()
 }
 function undo() {
-  const snap = history.undo(snapshot())
+  const snap = historyStack().undo(snapshot())
   if (snap) restoreSnap(snap)
 }
 function redo() {
-  const snap = history.redo(snapshot())
+  const snap = historyStack().redo(snapshot())
   if (snap) restoreSnap(snap)
+}
+function dispatchUndo() {
+  if (props.memory) {
+    props.memory.requestUndo?.()
+    return
+  }
+  undo()
+}
+function dispatchRedo() {
+  if (props.memory) {
+    props.memory.requestRedo?.()
+    return
+  }
+  redo()
 }
 function selectAll() {
   const texts = [...(root.value?.querySelectorAll<HTMLElement>('[data-text]') ?? [])]
@@ -339,19 +385,11 @@ function onKey(event: KeyboardEvent) {
     selectAll()
     return
   }
-  if ((event.metaKey || event.ctrlKey) && key === 'z') {
+  if ((event.metaKey || event.ctrlKey) && (key === 'z' || key === 'y')) {
     event.preventDefault()
-    suppressInput = true
-    queueMicrotask(() => {
-      suppressInput = false
-    })
-    if (event.shiftKey) redo()
-    else undo()
-    return
-  }
-  if ((event.metaKey || event.ctrlKey) && key === 'y') {
-    event.preventDefault()
-    redo()
+    holdNativeInput()
+    if (key === 'y' || event.shiftKey) dispatchRedo()
+    else dispatchUndo()
     return
   }
   if (event.key === 'Enter') {
@@ -411,13 +449,13 @@ function onBeforeInput(event: InputEvent) {
   if (type === 'historyUndo') {
     event.preventDefault()
     holdNativeInput()
-    undo()
+    dispatchUndo()
     return
   }
   if (type === 'historyRedo') {
     event.preventDefault()
     holdNativeInput()
-    redo()
+    dispatchRedo()
     return
   }
   if (type === 'insertText') {
@@ -515,10 +553,10 @@ function opFor(command: ProseCommand) {
   if (command.type === 'marker')
     return (nodes: OfferTextNode[], index: number) => setBulletMarker(nodes, index, command.marker)
   if (command.type === 'numbering') {
-    let first = true
+    let position = 0
     return (nodes: OfferTextNode[], index: number) => {
-      const mode = first ? command.mode : 'follow'
-      first = false
+      const mode = numberingCommandForIndex(command.mode, position)
+      position += 1
       return setDecimalControl(nodes, index, mode, command.start)
     }
   }
@@ -546,8 +584,14 @@ function applyCommand(command: ProseCommand) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  history.push({ nodes: local.value.map((node) => ({ ...node })), caret: rangeEnds(range).end })
-  commit(edit, range)
+  if (
+    historyStack().push({
+      nodes: local.value.map((node) => ({ ...node })),
+      caret: rangeEnds(range).end,
+    })
+  )
+    props.memory?.record?.()
+  commit(edit, range, !inChrome)
 }
 defineExpose({ format: applyCommand })
 function nodeClass(node: OfferTextNode, index: number) {

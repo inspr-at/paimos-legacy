@@ -241,11 +241,11 @@ describe('offer document prose', () => {
     await nextTick()
     expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins'])
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Überschrift Textbaustein 2')
-    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt hinzufügen"]')?.click()
+    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt 1 danach hinzufügen"]')?.click()
     await nextTick()
     await nextTick()
-    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins', ''])
-    expect(sample.document.blocks[2]).toEqual({ heading: '', body: '' })
+    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', '', 'Eins'])
+    expect(sample.document.blocks[1]).toEqual({ heading: '', body: '' })
     app.unmount()
     const locked = document.createElement('div')
     document.body.appendChild(locked)
@@ -253,5 +253,179 @@ describe('offer document prose', () => {
     lockedApp.mount(locked)
     expect(locked.querySelector('.section-tools')).toBeNull()
     lockedApp.unmount()
+  })
+
+  it('undoes only the section that was edited after a move or insert', async () => {
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const el = this as HTMLElement
+      if (el.classList.contains('page-content')) return rect(1000)
+      return rect(40)
+    }
+    installFonts()
+    const sample = reactive(
+      offer([
+        { heading: 'Eins', body: 'Alpha' },
+        { heading: 'Zwei', body: 'Beta' },
+      ]),
+    )
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferDocument, { offer: sample, editable: true })
+    const vm = app.mount(el) as unknown as { paginate: () => Promise<void> }
+    await vm.paginate()
+    await nextTick()
+    const place = (root: HTMLElement, offset: number) => {
+      root.focus()
+      const text = root.querySelector('[data-text]')?.firstChild
+      if (!text) throw new Error('missing section text')
+      const range = document.createRange()
+      range.setStart(text, offset)
+      range.setEnd(text, offset)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    }
+    const type = (root: HTMLElement, data: string) => {
+      root.dispatchEvent(
+        new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data,
+        }),
+      )
+    }
+    const undo = (root: HTMLElement) => {
+      root.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+    const bodies = () => sample.document.blocks.map((block) => block.body)
+    const first = el.querySelector<HTMLElement>('[aria-label="Textbaustein 1"]')!
+    const second = el.querySelector<HTMLElement>('[aria-label="Textbaustein 2"]')!
+    place(first, 5)
+    type(first, 'Y')
+    place(second, 4)
+    type(second, 'X')
+    await nextTick()
+    expect(bodies()).toEqual(['AlphaY', 'BetaX'])
+    el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+    await nextTick()
+    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')?.click()
+    await nextTick()
+    const moved = el.querySelector<HTMLElement>('[aria-label="Textbaustein 2"]')!
+    expect(moved.textContent).toContain('AlphaY')
+    undo(moved)
+    await nextTick()
+    expect(bodies()).toEqual(['AlphaY', 'BetaX'])
+    undo(el.querySelector<HTMLElement>('[aria-label="Textbaustein 2"]')!)
+    await nextTick()
+    expect(bodies()).toEqual(['AlphaY', 'Beta'])
+    undo(el.querySelector<HTMLElement>('[aria-label="Textbaustein 1"]')!)
+    await nextTick()
+    expect(bodies()).toEqual(['Alpha', 'Beta'])
+    el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+    await nextTick()
+    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt 1 danach hinzufügen"]')?.click()
+    await nextTick()
+    await nextTick()
+    expect(bodies()).toEqual(['Alpha', '', 'Beta'])
+    undo(el.querySelector<HTMLElement>('[aria-label="Textbaustein 1"]')!)
+    await nextTick()
+    expect(bodies()).toEqual(['Alpha', 'Beta'])
+    app.unmount()
+  })
+
+  it('keeps a section undo stack when the section changes page', async () => {
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const node = this as HTMLElement
+      if (node.classList.contains('page-content')) return rect(260)
+      if (node.classList.contains('offer-cover')) return rect(40)
+      if (node.dataset.sectionHeading != null) return rect(24)
+      if (node.hasAttribute('data-page-inset')) return rect(16)
+      if (node.classList.contains('offer-acceptance')) return rect(20)
+      if (node.dataset.block != null) {
+        if (sample.document.blocks.length >= 3 && node.dataset.block === '1') return rect(400)
+        return rect(150)
+      }
+      if (node.dataset.position != null) return rect(20)
+      if (node.tagName === 'THEAD') return rect(16)
+      return rect(8)
+    }
+    installFonts()
+    const sample = reactive(
+      offer([
+        { heading: 'Eins', body: 'Alpha' },
+        { heading: 'Zwei', body: 'Beta' },
+      ]),
+    )
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferDocument, { offer: sample, editable: true })
+    const vm = app.mount(el) as unknown as { paginate: () => Promise<void> }
+    await vm.paginate()
+    await nextTick()
+    const place = (root: HTMLElement, offset: number) => {
+      root.focus()
+      const text = root.querySelector('[data-text]')?.firstChild
+      if (!text) throw new Error('missing section text')
+      const range = document.createRange()
+      range.setStart(text, offset)
+      range.setEnd(text, offset)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+    }
+    const type = (root: HTMLElement, data: string) => {
+      root.dispatchEvent(
+        new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data,
+        }),
+      )
+    }
+    const undo = (root: HTMLElement) => {
+      root.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+    const bodies = () => sample.document.blocks.map((block) => block.body)
+    const pageOf = (text: string) =>
+      [...el.querySelectorAll('.sheet .page')].findIndex((page) => page.textContent?.includes(text))
+    place(el.querySelector<HTMLElement>('[aria-label="Textbaustein 1"]')!, 5)
+    type(el.querySelector<HTMLElement>('[aria-label="Textbaustein 1"]')!, 'Y')
+    await nextTick()
+    expect(bodies()).toEqual(['AlphaY', 'Beta'])
+    expect(pageOf('AlphaY')).not.toBe(pageOf('Beta'))
+    el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+    await nextTick()
+    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')?.click()
+    await vm.paginate()
+    await nextTick()
+    expect(bodies()).toEqual(['Beta', 'AlphaY'])
+    expect(pageOf('AlphaY')).not.toBe(pageOf('Beta'))
+    const moved = [...el.querySelectorAll('.sheet .page')]
+      .find((page) => page.textContent?.includes('AlphaY'))
+      ?.querySelector<HTMLElement>('.offer-prose')
+    place(moved!, 6)
+    type(moved!, 'Z')
+    await nextTick()
+    expect(bodies()).toEqual(['Beta', 'AlphaYZ'])
+    undo(moved!)
+    await nextTick()
+    expect(bodies()).toEqual(['Beta', 'AlphaY'])
+    app.unmount()
   })
 })
