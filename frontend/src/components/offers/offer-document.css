@@ -147,6 +147,11 @@
 .offer-document .ftr .footmark .lockup {
   display: contents;
 }
+.offer-document .ftr .footmark:focus-visible,
+.offer-document .ftr .footmark .lockup:focus-visible {
+  outline: 1px solid #0e6f6c;
+  outline-offset: 2px;
+}
 .offer-document .ftr .footmark.is-set {
   position: relative;
   width: 0;

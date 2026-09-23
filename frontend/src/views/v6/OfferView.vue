@@ -75,7 +75,9 @@ const loading = ref(true),
   finalizing = ref(false)
 const renderer = ref<InstanceType<typeof OfferDocument>>()
 const finalizeDialog = ref<HTMLDialogElement>()
+const deleteDialog = ref<HTMLDialogElement>()
 const selection = ref<OfferSelection>({ kind: 'none' })
+let deleteTrigger: HTMLElement | null = null
 watch(loading, async () => {
   await nextTick()
   if (toolbarElement()) resizeObserver?.observe(toolbarElement()!)
@@ -220,6 +222,17 @@ async function save(force = false): Promise<boolean> {
 }
 const deleteOpen = ref(false),
   deleting = ref(false)
+watch(deleteOpen, async (open) => {
+  await nextTick()
+  if (open) deleteDialog.value?.showModal()
+  else {
+    deleteDialog.value?.close()
+    const trigger = deleteTrigger
+    deleteTrigger = null
+    if (trigger?.isConnected) trigger.focus()
+    else document.querySelector<HTMLElement>('[aria-label="Weitere Aktionen"]')?.focus()
+  }
+})
 async function setDeleted() {
   if (!offer.value || deleting.value || !(await save())) return
   deleting.value = true
@@ -337,7 +350,10 @@ function onToolbarAction(id: OfferToolbarActionId) {
   else if (id === 'chrome') collapsed.value = !collapsed.value
   else if (id === 'delete') {
     if (offer.value?.deleted) void setDeleted()
-    else deleteOpen.value = true
+    else {
+      deleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      deleteOpen.value = true
+    }
   } else if (id === 'layout') renderer.value?.selectFooter()
 }
 function onFooter(value: OfferFooterLayout) {
@@ -466,7 +482,12 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           Serverstand laden und lokale Änderungen verwerfen
         </button>
       </div>
-      <dialog v-if="deleteOpen" open class="finalize-dialog" aria-label="Angebot ausblenden">
+      <dialog
+        ref="deleteDialog"
+        class="finalize-dialog"
+        aria-label="Angebot ausblenden"
+        @cancel.prevent="deleteOpen = false"
+      >
         <h2>{{ offer?.offer_no }}</h2>
         <p>
           {{ offer?.offer_no }} aus den Übersichten ausblenden? Inhalte, Nachweise und Kundenlinks

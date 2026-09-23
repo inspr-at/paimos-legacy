@@ -522,10 +522,33 @@ function confirmDeleteSection() {
   emit('change')
   if (activeBlock.value != null) focusSection(activeBlock.value, 'heading')
 }
-function selectFooter() {
+function activatedFooter(source?: Event | HTMLElement | null): HTMLElement | null {
+  if (!sheetEl.value) return null
+  const node =
+    source instanceof Event
+      ? source.currentTarget instanceof Element
+        ? source.currentTarget
+        : source.target instanceof Element
+          ? source.target
+          : null
+      : source instanceof Element
+        ? source
+        : null
+  if (!(node instanceof Element) || !sheetEl.value.contains(node)) return null
+  return node.closest<HTMLElement>('[aria-label="Fußzeilenlogo auswählen"]')
+}
+function selectFooter(source?: Event | HTMLElement | null) {
   if (!props.editable) return
   activeKind.value = 'footer'
-  sheetEl.value?.querySelector<HTMLElement>('.ftr .footmark')?.focus()
+  const mark =
+    activatedFooter(source) ??
+    sheetEl.value?.querySelector<HTMLElement>('.ftr [aria-label="Fußzeilenlogo auswählen"]')
+  mark?.focus({ preventScroll: true })
+}
+function onFooterKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  selectFooter(event)
 }
 function onPositionFocus(event: FocusEvent) {
   const target = event.target
@@ -779,21 +802,31 @@ defineExpose({
             v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
             :layout="offer.document.footer"
             :tabindex="editable ? 0 : undefined"
-            role="button"
-            aria-label="Fußzeilenlogo auswählen"
-            @click="selectFooter"
-            @keydown.enter.prevent="selectFooter"
+            :role="editable ? 'button' : undefined"
+            :aria-label="editable ? 'Fußzeilenlogo auswählen' : undefined"
+            @click="editable && selectFooter($event)"
+            @keydown="onFooterKey"
           /><span
             v-else
             class="footmark"
             :class="{ 'is-set': !!offer.document.footer, 'is-selected': activeKind === 'footer' }"
             :style="footerShift"
-            :tabindex="editable ? 0 : undefined"
-            :role="editable ? 'button' : undefined"
-            aria-label="Fußzeilenlogo auswählen"
-            @click="selectFooter"
-            @keydown.enter.prevent="selectFooter"
-            ><span class="lockup">{{ offer.document.sender.company }}</span></span
+            :tabindex="editable && !offer.document.footer ? 0 : undefined"
+            :role="editable && !offer.document.footer ? 'button' : undefined"
+            :aria-label="editable && !offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined"
+            @click="editable && !offer.document.footer && selectFooter($event)"
+            @keydown="!offer.document.footer && onFooterKey($event)"
+            ><span
+              class="lockup"
+              :tabindex="editable && offer.document.footer ? 0 : undefined"
+              :role="editable && offer.document.footer ? 'button' : undefined"
+              :aria-label="
+                editable && offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined
+              "
+              @click="editable && offer.document.footer && selectFooter($event)"
+              @keydown="offer.document.footer && onFooterKey($event)"
+              >{{ offer.document.sender.company }}</span
+            ></span
           ><span class="right">SEITE {{ index + 1 }} VON {{ renderedPages.length }}</span>
         </div>
       </section>

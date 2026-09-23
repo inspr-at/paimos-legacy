@@ -183,4 +183,78 @@ describe('offer settings stay off the open draft', () => {
     expect(el.textContent).toContain('nur für neue Angebote')
     app.unmount()
   })
+
+  it('opens the offer delete dialog as a modal and cancel does not delete', async () => {
+    const offer = draft()
+    api.get.mockImplementation((path: string) => {
+      if (path === '/offers/41') return Promise.resolve(structuredClone(offer))
+      if (path === '/integrations/crm/offers') return Promise.resolve(centralSettings())
+      return Promise.reject(new Error(path))
+    })
+    api.put.mockResolvedValue({ deleted: true })
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function showModal() {
+        this.open = true
+      }
+    }
+    if (!HTMLDialogElement.prototype.close) {
+      HTMLDialogElement.prototype.close = function close() {
+        this.open = false
+      }
+    }
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferView)
+    app.mount(el)
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    const dialog = el.querySelector<HTMLDialogElement>('[aria-label="Angebot ausblenden"]')!
+    expect(dialog.open).toBe(false)
+    const more = el.querySelector<HTMLButtonElement>('[aria-label="Weitere Aktionen"]')!
+    more.focus()
+    more.click()
+    await nextTick()
+    const remove = [...el.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Angebot als gelöscht markieren'),
+    )!
+    remove.click()
+    await nextTick()
+    await nextTick()
+    expect(showModal).toHaveBeenCalled()
+    expect(dialog.open).toBe(true)
+    expect(dialog.textContent).toContain('A260923-41')
+    expect(dialog.textContent).toContain('aus den Übersichten ausblenden')
+    const deletedCalls = () =>
+      api.put.mock.calls.filter((call) => String(call[0]).includes('/deleted'))
+    expect(deletedCalls()).toEqual([])
+    dialog.dispatchEvent(new Event('cancel', { bubbles: true, cancelable: true }))
+    await nextTick()
+    await nextTick()
+    expect(dialog.open).toBe(false)
+    expect(deletedCalls()).toEqual([])
+    expect(document.activeElement).toBe(more)
+    more.click()
+    await nextTick()
+    ;[...el.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('Angebot als gelöscht markieren'))!
+      .click()
+    await nextTick()
+    await nextTick()
+    ;[...dialog.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Abbrechen')!
+      .click()
+    await nextTick()
+    await nextTick()
+    expect(dialog.open).toBe(false)
+    expect(deletedCalls()).toEqual([])
+    expect(document.activeElement).toBe(more)
+    showModal.mockRestore()
+    app.unmount()
+  })
 })

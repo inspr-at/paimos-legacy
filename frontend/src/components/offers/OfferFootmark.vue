@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useAttrs } from 'vue'
 import OfferBrandDots from './OfferBrandDots.vue'
 import { footerLogoBox } from './offerLayout'
 import type { OfferFooterLayout } from './types'
+defineOptions({ inheritAttrs: false })
 const props = defineProps<{ layout?: OfferFooterLayout | null }>()
+const attrs = useAttrs()
 const box = computed(() => (props.layout ? footerLogoBox(props.layout.logo_width_mm) : null))
 const style = computed(() => {
   if (!props.layout || !box.value) return undefined
@@ -19,8 +21,8 @@ const style = computed(() => {
 })
 </script>
 <template>
-  <div class="footmark" :class="{ 'is-set': !!layout }" :style="style">
-    <span class="lockup"
+  <div class="footmark" :class="{ 'is-set': !!layout }" :style="style" v-bind="layout ? {} : attrs">
+    <span class="lockup" v-bind="layout ? attrs : {}"
       ><OfferBrandDots /><svg
         class="logotype"
         role="img"

@@ -200,12 +200,50 @@ describe('offer document prose', () => {
     const nameLockup = namedEl.querySelector<HTMLElement>('.sheet .ftr .footmark.is-set .lockup')!
     expect(nameLockup.textContent).toBe('Testberatung GmbH')
     expect(nameLockup.querySelector('*')).toBeNull()
+    expect(nameLockup.getAttribute('role')).toBeNull()
+    expect(namedEl.querySelector('[role="button"]')).toBeNull()
     namedApp.unmount()
     expect(footer.querySelector('.right')?.getAttribute('style')).toBeNull()
     expect(footer.querySelector('span')?.getAttribute('style')).toBeNull()
     sample.document.footer.logo_offset_mm = -6
     await nextTick()
     expect(mark.style.getPropertyValue('--mark-offset')).toBe('-6mm')
+    const editableEl = document.createElement('div')
+    document.body.appendChild(editableEl)
+    const editableApp = createApp(OfferDocument, { offer: sample, editable: true })
+    const editableVm = editableApp.mount(editableEl) as unknown as {
+      paginate: () => Promise<void>
+      selectFooter: () => void
+    }
+    await editableVm.paginate()
+    await nextTick()
+    const editableFooter = editableEl.querySelector<HTMLElement>('.sheet .ftr')!
+    const editableMark = editableFooter.querySelector<HTMLElement>('.footmark')!
+    const hit = editableFooter.querySelector<HTMLElement>('.footmark .lockup')!
+    expect(editableMark.getAttribute('role')).toBeNull()
+    expect(hit.getAttribute('role')).toBe('button')
+    expect(hit.getAttribute('aria-label')).toBe('Fußzeilenlogo auswählen')
+    expect(hit.getAttribute('tabindex')).toBe('0')
+    hit.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(hit)
+    const pages = [...editableEl.querySelectorAll<HTMLElement>('.sheet .page')]
+    const hits = [
+      ...editableEl.querySelectorAll<HTMLElement>('.sheet [aria-label="Fußzeilenlogo auswählen"]'),
+    ]
+    expect(pages.length).toBeGreaterThan(1)
+    expect(hits).toHaveLength(pages.length)
+    hits[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(hits[1])
+    expect(document.activeElement?.closest('.page')?.getAttribute('aria-label')).toBe('Seite 2')
+    hits[1]!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    )
+    expect(document.activeElement).toBe(hits[1])
+    editableVm.selectFooter()
+    expect(document.activeElement).toBe(hits[0])
+    editableApp.unmount()
     expect(footerCss).toMatch(/data-numbering='outline'/)
     expect(footerCss).toMatch(/\.section-tools/)
     app.unmount()
