@@ -134,6 +134,23 @@ describe('offer outline numbering', () => {
     expect(parseProseNodes(once)).toEqual(once)
   })
 
+  it('uses the section number as the outline prefix without writing it into the text', () => {
+    const bound = (text: string, depth = 0, start?: number): OfferTextNode => ({
+      ...outline(text, depth, start ? { list_start: start } : {}),
+      section_bound: true,
+    })
+    const sameLevel = [bound('A'), bound('B')]
+    expect(proseMarkerLabels(sameLevel, 2)).toEqual(['2.1', '2.2'])
+    expect(sameLevel[0]?.text).toBe('A')
+    const nested = [bound('A'), bound('Kind', 1), bound('B')]
+    expect(proseMarkerLabels(nested, 2)).toEqual(['2.1', '2.1.1', '2.2'])
+    expect(proseMarkerLabels(nested, 3)).toEqual(['3.1', '3.1.1', '3.2'])
+    expect(proseMarkerLabels([bound('A', 0, 5)], 2)).toEqual(['2.5'])
+    expect(proseMarkerLabels(sameLevel)).toEqual(['1', '2'])
+    expect(projectProse(sameLevel, 2)).toBe('2.1 A\n2.2 B')
+    expect(parseProseNodes(sameLevel)).toEqual(sameLevel)
+  })
+
   it('round-trips outline metadata and rejects a start stored with continue', () => {
     const stored = persistProse([outline('A', 0, { list_start: 3 })])
     expect(stored.nodes?.[0]).toMatchObject({ numbering: 'outline', list_start: 3 })

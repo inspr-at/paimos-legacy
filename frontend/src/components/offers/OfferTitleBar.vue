@@ -16,12 +16,15 @@ import {
   MoreHorizontal,
   Plus,
   Printer,
+  Redo2,
+  Undo2,
   Save,
   Scaling,
+  Trash2,
   Settings2,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import type { OfferBulletMarker, OfferFooterLayout } from './types'
+import type { OfferBulletMarker, OfferFooterLayout, OfferSelection } from './types'
 import type { ProseListKind } from './offerProse'
 import { OFFER_BULLET_GLYPH } from './offerProse'
 import { explicitFooter, OFFER_FOOTER_LOGO } from './offerLayout'
@@ -47,6 +50,9 @@ const props = defineProps<{
   showPrint: boolean
   actions: OfferToolbarAction[]
   footer: OfferFooterLayout | null
+  canUndo?: boolean
+  canRedo?: boolean
+  selection?: OfferSelection | null
 }>()
 const emit = defineEmits<{
   save: []
@@ -54,6 +60,18 @@ const emit = defineEmits<{
   print: []
   action: [id: OfferToolbarActionId]
   footer: [value: OfferFooterLayout]
+  undo: []
+  redo: []
+  'insert-section': []
+  'insert-position': []
+  'select-footer': []
+  'section-add': []
+  'section-up': []
+  'section-down': []
+  'section-delete': []
+  'position-up': []
+  'position-down': []
+  'position-delete': []
 }>()
 
 const root = ref<HTMLElement>()
@@ -71,6 +89,8 @@ const startDraft = ref<string | null>(null)
 const listOpen = ref(false)
 const menuOpen = ref(false)
 const layoutOpen = ref(false)
+const gearOpen = ref(false)
+const insertOpen = ref(false)
 const session = useOfferProseSession()
 const zoomSteps = [50, 75, 100, 125, 150, 175, 200]
 const listKinds: { id: ProseListKind; label: string }[] = [
@@ -92,6 +112,7 @@ const icons: Record<OfferToolbarActionId, Component> = {
   finalize: FileCheck2,
   layout: Scaling,
   chrome: ChevronDown,
+  delete: Trash2,
 }
 
 const listEnabled = computed(() => !!session?.active.value)
@@ -103,6 +124,7 @@ const listState = computed(() => {
     outline: false as const,
     continued: false as const,
     start: null,
+    sectionBound: false as const,
   }
   return { ...state, revision }
 })
@@ -147,6 +169,23 @@ function prime(event: MouseEvent) {
   const target = event.target
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
   event.preventDefault()
+}
+function openThisOffer() {
+  gearOpen.value = false
+  emit('select-footer')
+}
+function openTemplates() {
+  gearOpen.value = false
+  emit('action', 'settings')
+}
+function openLogo() {
+  gearOpen.value = false
+  layoutOpen.value = true
+}
+function chooseInsert(kind: 'section' | 'position') {
+  insertOpen.value = false
+  if (kind === 'section') emit('insert-section')
+  else emit('insert-position')
 }
 function run(command: ProseCommand) {
   if (!(command.type === 'numbering' && command.mode === 'start')) startDraft.value = null
@@ -279,6 +318,8 @@ function onDocPointer(event: PointerEvent) {
   finishListStart()
   finishWidth()
   finishOffset()
+  gearOpen.value = false
+  insertOpen.value = false
   listOpen.value = false
   menuOpen.value = false
   layoutOpen.value = false
@@ -365,6 +406,69 @@ defineExpose({ root })
       >
     </div>
     <div class="offer-actions">
+      <button
+        type="button"
+        class="tool-button icon-only"
+        aria-label="Rückgängig"
+        title="Rückgängig"
+        :disabled="!canUndo"
+        @click="emit('undo')"
+      >
+        <Undo2 :size="16" />
+      </button>
+      <button
+        type="button"
+        class="tool-button icon-only"
+        aria-label="Wiederholen"
+        title="Wiederholen"
+        :disabled="!canRedo"
+        @click="emit('redo')"
+      >
+        <Redo2 :size="16" />
+      </button>
+      <button
+        v-if="editable"
+        type="button"
+        class="tool-button"
+        aria-label="Einfügen"
+        @click="insertOpen = !insertOpen"
+      >
+        <Plus :size="16" /><span>Einfügen</span>
+      </button>
+      <div v-if="insertOpen" class="chrome-popover gear-popover" data-offer-chrome role="menu">
+        <button type="button" @click="chooseInsert('section')">
+          {{
+            selection?.kind === 'heading' || selection?.kind === 'text'
+              ? `Abschnitt nach Abschnitt ${selection.index + 1}`
+              : 'Abschnitt am Ende'
+          }}
+        </button>
+        <button type="button" @click="chooseInsert('position')">Leistungsposition</button>
+      </div>
+      <button
+        v-if="editable"
+        type="button"
+        class="tool-button icon-only"
+        aria-label="Einstellungen"
+        title="Einstellungen"
+        @click="gearOpen = !gearOpen"
+      >
+        <Settings2 :size="16" />
+      </button>
+      <div v-if="gearOpen" class="chrome-popover gear-popover" data-offer-chrome role="menu">
+        <button type="button" @click="openThisOffer">Dieses Angebot</button>
+        <p class="hint">Fußzeilenlogo und Listen gelten nur für dieses Angebot.</p>
+        <button type="button" @click="openTemplates">
+          Vorlagen für neue Angebote
+          <small
+            >Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt
+            unverändert.</small
+          >
+        </button>
+        <button type="button" @click="openLogo">
+          Fußzeilenlogo
+        </button>
+      </div>
       <div class="list-anchor">
         <button
           ref="listButton"
@@ -404,8 +508,13 @@ defineExpose({ root })
               {{ item.label }}
             </button>
           </div>
-          <p class="popover-label">Aufzählungszeichen</p>
-          <div class="bullets" role="radiogroup" aria-label="Aufzählungszeichen">
+          <p v-if="listState.kind !== 'ordered'" class="popover-label">Aufzählungszeichen</p>
+          <div
+            v-if="listState.kind !== 'ordered'"
+            class="bullets"
+            role="radiogroup"
+            aria-label="Aufzählungszeichen"
+          >
             <button
               v-for="item in bullets"
               :key="item.id"
@@ -428,7 +537,23 @@ defineExpose({ root })
               Ausrücken
             </button>
           </div>
-          <p class="popover-label">Nummerierung</p>
+          <div v-if="listState.kind !== 'bullet'" class="indent-row">
+            <button
+              type="button"
+              :aria-pressed="listState.sectionBound === true"
+              @click="run({ type: 'numbering', mode: 'section' })"
+            >
+              Abschnittsnummer
+            </button>
+            <button
+              type="button"
+              :aria-pressed="listState.sectionBound === false"
+              @click="run({ type: 'numbering', mode: 'independent' })"
+            >
+              Unabhängig
+            </button>
+          </div>
+          <p v-if="listState.kind !== 'bullet'" class="popover-label">Nummerierung</p>
           <div class="indent-row">
             <button
               type="button"
@@ -592,15 +717,107 @@ defineExpose({ root })
         </div>
       </div>
     </div>
+    <div v-if="editable" class="context-row" role="toolbar" aria-label="Werkzeuge für die Auswahl">
+      <template v-if="selection?.kind === 'heading'">
+        <span>Abschnitt {{ selection.index + 1 }}</span>
+        <button type="button" :disabled="selection.count >= 20" @click="emit('section-add')">
+          Danach
+        </button>
+        <button type="button" :disabled="selection.index === 0" @click="emit('section-up')">
+          Nach oben
+        </button>
+        <button
+          type="button"
+          :disabled="selection.index >= selection.count - 1"
+          @click="emit('section-down')"
+        >
+          Nach unten
+        </button>
+        <button type="button" @click="emit('section-delete')">Löschen</button>
+      </template>
+      <template v-else-if="selection?.kind === 'text'">
+        <span>Text in Abschnitt {{ selection.index + 1 }}</span>
+        <button
+          type="button"
+          title="Eine Listenebene höher"
+          aria-label="Eine Listenebene höher"
+          @mousedown="prime"
+          @click="run({ type: 'outdent' })"
+        >
+          Ebene höher
+        </button>
+        <button
+          type="button"
+          title="Eine Listenebene tiefer"
+          aria-label="Eine Listenebene tiefer"
+          @mousedown="prime"
+          @click="run({ type: 'indent' })"
+        >
+          Ebene tiefer
+        </button>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'none' })">
+          Text
+        </button>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'bullet' })">
+          Aufzählung
+        </button>
+        <button type="button" @mousedown="prime" @click="run({ type: 'list', kind: 'ordered' })">
+          Nummerierung
+        </button>
+      </template>
+      <template v-else-if="selection?.kind === 'position'">
+        <span>Position {{ selection.index + 1 }}</span>
+        <button type="button" :disabled="selection.index === 0" @click="emit('position-up')">
+          Nach oben
+        </button>
+        <button
+          type="button"
+          :disabled="selection.index >= selection.count - 1"
+          @click="emit('position-down')"
+        >
+          Nach unten
+        </button>
+        <button type="button" @click="emit('position-delete')">Löschen</button>
+      </template>
+      <template v-else-if="selection?.kind === 'footer'">
+        <span>Fußzeilenlogo</span>
+        <label
+          >Breite
+          <input
+            type="text"
+            inputmode="decimal"
+            :value="widthDraft ?? shownWidth"
+            aria-label="Breite des Fußzeilenlogos in Millimetern"
+            @input="onWidth"
+            @blur="finishWidth"
+          />
+          mm</label
+        >
+        <label
+          >Versatz
+          <input
+            type="text"
+            inputmode="decimal"
+            :value="offsetDraft ?? shownOffset"
+            aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
+            @input="onOffset"
+            @blur="finishOffset"
+          />
+          mm</label
+        >
+        <span>− oben · + unten</span>
+      </template>
+      <template v-else><span>Element auswählen</span></template>
+    </div>
   </header>
 </template>
 <style scoped>
 .offer-tools {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  gap: 0;
+  align-items: stretch;
   flex-wrap: wrap;
-  padding: 6px 12px;
+  padding: 0;
   background: var(--h-surface, #fffefa);
   color: var(--h-text, #203c3d);
   border-bottom: 1px solid var(--h-line, #d8e2df);
@@ -614,6 +831,50 @@ defineExpose({ root })
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 24vw;
+}
+.global-row,
+.offer-actions,
+.save-state {
+  min-height: 42px;
+  padding: 6px 12px;
+}
+.context-row {
+  flex: 1 0 100%;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--h-line, #d8e2df);
+  font-size: 12px;
+}
+.context-row button,
+.gear-popover button {
+  min-height: 28px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.context-row button:focus-visible,
+.gear-popover button:focus-visible {
+  outline: 1px solid var(--h-mint, #0e6f6c);
+  outline-offset: 2px;
+}
+.context-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.gear-popover {
+  position: absolute;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
 }
 .tool-button {
   display: inline-flex;

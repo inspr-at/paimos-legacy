@@ -6,6 +6,7 @@ export type OfferToolbarActionId =
   | 'finalize'
   | 'layout'
   | 'chrome'
+  | 'delete'
 
 export type OfferToolbarAction = {
   id: OfferToolbarActionId
@@ -25,6 +26,8 @@ export function offerToolbarActions(input: {
   copied: boolean
   collapsed: boolean
   linkAvailable: boolean
+  deleted?: boolean
+  deleting?: boolean
 }): OfferToolbarAction[] {
   if (!input.hasOffer) return []
   const actions: OfferToolbarAction[] = []
@@ -37,23 +40,6 @@ export function offerToolbarActions(input: {
       disabled: false,
     })
   }
-  if (input.editable) {
-    actions.push(
-      {
-        id: 'settings',
-        label: 'Absender und Textbausteine',
-        detail:
-          'Speichert Absender und Textvorlagen für neue Angebote. Das geöffnete Angebot bleibt unverändert.',
-        disabled: false,
-      },
-      {
-        id: 'position',
-        label: 'Position hinzufügen',
-        detail: 'Fügt eine Zeile in der Leistungsaufstellung hinzu.',
-        disabled: false,
-      },
-    )
-  }
   if (input.isAdmin && !input.printMode) {
     actions.push({
       id: 'duplicate',
@@ -63,21 +49,27 @@ export function offerToolbarActions(input: {
     })
   }
   if (input.editable) {
-    actions.push(
-      {
-        id: 'finalize',
-        label: 'Finalisieren',
-        detail: 'Schreibt das Angebot fest und erzeugt Kundenlink und QR-Code.',
-        disabled: input.saving || input.overflow,
-      },
-      {
-        id: 'layout',
-        label: 'Fußzeilenlogo',
-        detail:
-          'Breite und Versatz der Mitte in Millimetern. Negativ hebt, positiv senkt. Nummer, Linie und Seitenzahl bleiben stehen.',
-        disabled: false,
-      },
-    )
+    actions.push({
+      id: 'finalize',
+      label: 'Finalisieren',
+      detail:
+        'Schreibt das Angebot fest und erzeugt den Kundenlink. Es wird keine E-Mail gesendet.',
+      disabled: input.saving || input.overflow,
+    })
+  }
+  if (input.isAdmin && !input.printMode) {
+    actions.push({
+      id: 'delete',
+      label: input.deleted
+        ? 'Angebot wiederherstellen'
+        : input.status === 'draft'
+          ? 'Angebot als gelöscht markieren'
+          : 'Angebot archivieren',
+      detail: input.deleted
+        ? 'Blendet das Angebot wieder in den Übersichten ein.'
+        : 'Blendet das Angebot aus den Übersichten aus. Inhalte, Nachweise und Kundenlinks bleiben.',
+      disabled: !!input.deleting,
+    })
   }
   if (!input.printMode) {
     actions.push({

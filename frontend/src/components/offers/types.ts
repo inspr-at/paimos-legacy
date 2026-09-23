@@ -14,11 +14,20 @@ export interface OfferTextNode {
   list_start?: number
   /** Continue the preceding matching numbering, including across a paragraph. */
   list_continue?: boolean
+  /** Prefix the outline with the owning section number. The digits are not stored in the text. */
+  section_bound?: boolean
 }
 export interface OfferFooterLayout {
   logo_width_mm: number
   logo_offset_mm: number
 }
+export type OfferSelection =
+  | { kind: 'none' }
+  | { kind: 'heading'; index: number; count: number; heading: string }
+  | { kind: 'text'; index: number; count: number }
+  | { kind: 'position'; index: number; count: number }
+  | { kind: 'footer' }
+
 export interface OfferBlock {
   heading: string
   body: string

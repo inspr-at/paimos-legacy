@@ -157,3 +157,19 @@ func TestOutlineNumberingAndSignedFooterOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestSectionBoundOutlineUsesSectionIndex(t *testing.T) {
+	nodes := []OfferTextNode{
+		{Kind: "item", Text: "A", Marker: "decimal", Numbering: "outline", SectionBound: true},
+		{Kind: "item", Text: "Kind", Depth: 1, Marker: "decimal", Numbering: "outline", SectionBound: true},
+		{Kind: "item", Text: "B", Marker: "decimal", Numbering: "outline", SectionBound: true},
+	}
+	body, stored, err := normalizeOfferProseInSection("ignored", nodes, 2)
+	if err != nil || body != "2.1 A\n  2.1.1 Kind\n2.2 B" || !stored[0].SectionBound || stored[0].Text != "A" {
+		t.Fatalf("section bound = %q %#v %v", body, stored, err)
+	}
+	body, _, err = normalizeOfferProseInSection("ignored", nodes, 3)
+	if err != nil || body != "3.1 A\n  3.1.1 Kind\n3.2 B" {
+		t.Fatalf("moved section = %q %v", body, err)
+	}
+}

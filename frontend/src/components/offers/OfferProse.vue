@@ -42,8 +42,9 @@ const props = withDefaults(
     editable?: boolean
     label?: string
     memory?: SectionEditorMemory | null
+    sectionNumber?: number
   }>(),
-  { editable: false, label: 'Text', memory: null },
+  { editable: false, label: 'Text', memory: null, sectionNumber: 0 },
 )
 const emit = defineEmits<{ update: [value: { body: string; nodes?: OfferTextNode[] }] }>()
 const root = ref<HTMLElement>()
@@ -64,7 +65,7 @@ function rememberCaret() {
 }
 const session = useOfferProseSession()
 const proseId = takeOfferProseId()
-const markerLabels = computed(() => proseMarkerLabels(local.value))
+const markerLabels = computed(() => proseMarkerLabels(local.value, props.sectionNumber || 0))
 let serial = 1
 let pendingRange: ProseRange | null = null
 let held: ProseRange | null = null
@@ -291,7 +292,7 @@ function snapshot() {
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
 function commit(edit: ProseEdit, keep?: ProseRange, restoreSelection = true) {
-  const stored = persistProse(edit.nodes)
+  const stored = persistProse(edit.nodes, props.sectionNumber || 0)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
   const previous = local.value
@@ -316,10 +317,13 @@ function apply(edit: ProseEdit) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  historyStack().push({
-    nodes: local.value.map((node) => ({ ...node })),
-    caret: currentRange().focus,
-  })
+  if (
+    historyStack().push({
+      nodes: local.value.map((node) => ({ ...node })),
+      caret: currentRange().focus,
+    })
+  )
+    props.memory?.record?.()
   commit(edit)
 }
 function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
@@ -330,7 +334,7 @@ function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
   selection.value = { anchor: caret, focus: caret }
   held = selection.value
   notice.value = ''
-  emit('update', persistProse(local.value))
+  emit('update', persistProse(local.value, props.sectionNumber || 0))
   rememberCaret()
 }
 function undo() {
@@ -372,6 +376,11 @@ function onKey(event: KeyboardEvent) {
     queueMicrotask(() => {
       suppressInput = false
     })
+    if (props.memory?.requestUndo) {
+      if (event.shiftKey) props.memory.requestRedo?.()
+      else props.memory.requestUndo()
+      return
+    }
     if (event.shiftKey) redo()
     else undo()
     return
@@ -544,7 +553,13 @@ function opFor(command: ProseCommand) {
   if (command.type === 'numbering') {
     let first = true
     return (nodes: OfferTextNode[], index: number) => {
-      const mode = first ? command.mode : 'follow'
+      const mode = first
+        ? command.mode
+        : command.mode === 'section'
+          ? 'bound'
+          : command.mode === 'independent'
+            ? 'unbound'
+            : 'follow'
       first = false
       return setDecimalControl(nodes, index, mode, command.start)
     }
@@ -573,10 +588,13 @@ function applyCommand(command: ProseCommand) {
     notice.value = 'Dieser Absatz ist zu lang.'
     return
   }
-  historyStack().push({
-    nodes: local.value.map((node) => ({ ...node })),
-    caret: rangeEnds(range).end,
-  })
+  if (
+    historyStack().push({
+      nodes: local.value.map((node) => ({ ...node })),
+      caret: rangeEnds(range).end,
+    })
+  )
+    props.memory?.record?.()
   commit(edit, range, !inChrome)
 }
 defineExpose({ format: applyCommand })

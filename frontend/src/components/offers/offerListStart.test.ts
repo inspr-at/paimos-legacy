@@ -159,7 +159,7 @@ describe('offer list start and signed offset', () => {
 
   it('keeps a leading minus until the offset is a real number', async () => {
     const mounted = await mount()
-    click(mounted.el.querySelector('[aria-label="Weitere Aktionen"]')!)
+    click(mounted.el.querySelector('[aria-label="Einstellungen"]')!)
     await nextTick()
     const layout = [...mounted.el.querySelectorAll('button')].find((button) =>
       button.textContent?.includes('Fußzeilenlogo'),

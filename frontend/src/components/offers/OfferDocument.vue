@@ -12,9 +12,11 @@ import {
   createProseHistory,
   offerBlockExceedsPage,
   offerBlockOverflowMessage,
+  persistProse,
+  proseNodes,
   type SectionEditorMemory,
 } from './offerProse'
-import type { OfferTextNode } from './types'
+import type { OfferBlock, OfferPosition, OfferSelection, OfferTextNode } from './types'
 import { date, type Offer } from './types'
 import { OFFER_FOOTER_LOGO } from './offerLayout'
 import OfferTable from './OfferTable.vue'
@@ -28,7 +30,11 @@ const props = defineProps<{
   publicUrl?: string
   qrPreview?: boolean
 }>()
-const emit = defineEmits<{ overflow: [message: string]; change: [] }>()
+const emit = defineEmits<{
+  overflow: [message: string]
+  change: []
+  select: [value: OfferSelection]
+}>()
 type Page = {
   kind: 'cover' | 'terms' | 'positions'
   heading?: 'terms' | 'positions'
@@ -123,14 +129,20 @@ function applyBody(index: number, next: { body: string; nodes?: OfferTextNode[] 
   else delete block.nodes
 }
 function remove(i: number) {
-  props.offer.document.positions.splice(i, 1)
+  withPositions(() => {
+    props.offer.document.positions.splice(i, 1)
+  })
+  if (activePosition.value === i) activePosition.value = null
   emit('change')
 }
 function move(i: number, direction: number) {
   const j = i + direction
   if (j < 0 || j >= props.offer.document.positions.length) return
-  const p = props.offer.document.positions.splice(i, 1)[0]!
-  props.offer.document.positions.splice(j, 0, p)
+  withPositions(() => {
+    const p = props.offer.document.positions.splice(i, 1)[0]!
+    props.offer.document.positions.splice(j, 0, p)
+  })
+  activePosition.value = j
   emit('change')
 }
 const OFFER_MAX_BLOCKS = 20
@@ -145,12 +157,115 @@ function sectionKey(block: object | undefined): number {
   sectionIds.set(block, id)
   return id
 }
+type DocUndo =
+  | { type: 'prose'; block: OfferBlock }
+  | { type: 'blocks'; before: OfferBlock[]; after: OfferBlock[] }
+  | { type: 'positions'; before: OfferPosition[]; after: OfferPosition[] }
+const undoStack: DocUndo[] = []
+const redoStack: DocUndo[] = []
+const canUndo = ref(false)
+const canRedo = ref(false)
+const activeKind = ref<OfferSelection['kind']>('none')
+const activePosition = ref<number | null>(null)
+const deleteAsk = ref<number | null>(null)
+function markHistory() {
+  canUndo.value = undoStack.length > 0
+  canRedo.value = redoStack.length > 0
+}
+function recordProse(block: OfferBlock) {
+  undoStack.push({ type: 'prose', block })
+  redoStack.length = 0
+  markHistory()
+}
+function applyProseUndo(
+  block: OfferBlock,
+  nodes: OfferTextNode[],
+  caret: { index: number; offset: number },
+) {
+  const index = props.offer.document.blocks.indexOf(block)
+  const stored = persistProse(nodes, index >= 0 ? index + 1 : 0)
+  block.body = stored.body
+  if (stored.nodes) block.nodes = stored.nodes
+  else delete block.nodes
+  const memory = sectionMemories.get(block)
+  if (memory) memory.caret = caret
+  if (index >= 0) {
+    activeBlock.value = index
+    activeKind.value = 'text'
+    activeField.value = 'body'
+    focusSection(index, 'body')
+  }
+}
+function undoDocument() {
+  const entry = undoStack.pop()
+  if (!entry) return
+  redoStack.push(entry)
+  if (entry.type === 'prose') {
+    const memory = sectionMemories.get(entry.block)
+    const current = proseNodes(entry.block.body, entry.block.nodes)
+    const prev = memory?.history.undo({
+      nodes: current,
+      caret: memory.caret ?? { index: 0, offset: 0 },
+    })
+    if (prev) applyProseUndo(entry.block, prev.nodes, prev.caret)
+  } else if (entry.type === 'blocks') {
+    props.offer.document.blocks.splice(0, props.offer.document.blocks.length, ...entry.before)
+  } else {
+    props.offer.document.positions.splice(0, props.offer.document.positions.length, ...entry.before)
+  }
+  markHistory()
+  emit('change')
+}
+function redoDocument() {
+  const entry = redoStack.pop()
+  if (!entry) return
+  undoStack.push(entry)
+  if (entry.type === 'prose') {
+    const memory = sectionMemories.get(entry.block)
+    const current = proseNodes(entry.block.body, entry.block.nodes)
+    const next = memory?.history.redo({
+      nodes: current,
+      caret: memory.caret ?? { index: 0, offset: 0 },
+    })
+    if (next) applyProseUndo(entry.block, next.nodes, next.caret)
+  } else if (entry.type === 'blocks') {
+    props.offer.document.blocks.splice(0, props.offer.document.blocks.length, ...entry.after)
+  } else {
+    props.offer.document.positions.splice(0, props.offer.document.positions.length, ...entry.after)
+  }
+  markHistory()
+  emit('change')
+}
+function withBlocks(mutate: () => void) {
+  const before = props.offer.document.blocks.slice()
+  mutate()
+  const after = props.offer.document.blocks.slice()
+  if (before.length === after.length && before.every((block, index) => block === after[index]))
+    return
+  undoStack.push({ type: 'blocks', before, after })
+  redoStack.length = 0
+  markHistory()
+}
+function withPositions(mutate: () => void) {
+  const before = props.offer.document.positions.slice()
+  mutate()
+  const after = props.offer.document.positions.slice()
+  if (before.length === after.length && before.every((row, index) => row === after[index])) return
+  undoStack.push({ type: 'positions', before, after })
+  redoStack.length = 0
+  markHistory()
+}
 function sectionMemory(block: object | undefined): SectionEditorMemory | null {
   if (!block) return null
-  const known = sectionMemories.get(block)
-  if (known) return known
-  const memory = { history: createProseHistory(), caret: null }
-  sectionMemories.set(block, memory)
+  let memory = sectionMemories.get(block)
+  if (!memory) {
+    memory = { history: createProseHistory(), caret: null }
+    sectionMemories.set(block, memory)
+  }
+  const owned = block as OfferBlock
+  memory.record = () => recordProse(owned)
+  memory.requestUndo = () => undoDocument()
+  memory.requestRedo = () => redoDocument()
   return memory
 }
 const sheetEl = ref<HTMLElement>()
@@ -176,6 +291,7 @@ function onSheetFocusIn(event: FocusEvent) {
   if (!Number.isInteger(index)) return
   activeBlock.value = index
   activeField.value = target.closest('.offer-prose') ? 'body' : 'heading'
+  activeKind.value = activeField.value === 'body' ? 'text' : 'heading'
 }
 function focusSection(index: number, field: 'heading' | 'body') {
   const tryFocus = (left: number) => {
@@ -198,8 +314,11 @@ function addSection() {
   const blocks = props.offer.document.blocks
   const at =
     activeBlock.value == null ? blocks.length : Math.min(blocks.length, activeBlock.value + 1)
-  blocks.splice(at, 0, { heading: '', body: '' })
+  withBlocks(() => {
+    blocks.splice(at, 0, { heading: '', body: '' })
+  })
   activeBlock.value = at
+  activeKind.value = 'heading'
   activeField.value = 'heading'
   emit('change')
   focusSection(at, 'heading')
@@ -210,13 +329,82 @@ function moveSection(direction: -1 | 1) {
   const blocks = props.offer.document.blocks
   const next = index + direction
   if (next < 0 || next >= blocks.length) return
-  const [block] = blocks.splice(index, 1)
-  if (!block) return
-  blocks.splice(next, 0, block)
+  withBlocks(() => {
+    const [block] = blocks.splice(index, 1)
+    if (block) blocks.splice(next, 0, block)
+  })
   activeBlock.value = next
   emit('change')
   focusSection(next, activeField.value)
 }
+function askDeleteSection(index = activeBlock.value) {
+  if (index == null || !props.offer.document.blocks[index]) return
+  deleteAsk.value = index
+}
+function confirmDeleteSection() {
+  const index = deleteAsk.value
+  if (index == null) return
+  const blocks = props.offer.document.blocks
+  withBlocks(() => {
+    blocks.splice(index, 1)
+  })
+  deleteAsk.value = null
+  activeBlock.value = blocks.length ? Math.min(index, blocks.length - 1) : null
+  activeKind.value = activeBlock.value == null ? 'none' : 'heading'
+  emit('change')
+  if (activeBlock.value != null) focusSection(activeBlock.value, 'heading')
+}
+function selectFooter() {
+  if (!props.editable) return
+  activeKind.value = 'footer'
+  sheetEl.value?.querySelector<HTMLElement>('.ftr .footmark')?.focus()
+}
+function onPositionFocus(event: FocusEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const row = target.closest('[data-position]')
+  if (!row) return
+  const index = Number(row.getAttribute('data-position'))
+  if (!Number.isInteger(index)) return
+  activeKind.value = 'position'
+  activePosition.value = index
+}
+function currentSelection(): OfferSelection {
+  const blocks = props.offer.document.blocks
+  if (activeKind.value === 'footer') return { kind: 'footer' }
+  if (activeKind.value === 'position' && activePosition.value != null)
+    return {
+      kind: 'position',
+      index: activePosition.value,
+      count: props.offer.document.positions.length,
+    }
+  if (
+    (activeKind.value === 'heading' || activeKind.value === 'text') &&
+    activeBlock.value != null &&
+    blocks[activeBlock.value]
+  ) {
+    return activeKind.value === 'heading'
+      ? {
+          kind: 'heading',
+          index: activeBlock.value,
+          count: blocks.length,
+          heading: blocks[activeBlock.value]!.heading,
+        }
+      : { kind: 'text', index: activeBlock.value, count: blocks.length }
+  }
+  return { kind: 'none' }
+}
+watch(
+  () => [
+    activeKind.value,
+    activeBlock.value,
+    activePosition.value,
+    props.offer.document.blocks.length,
+    props.offer.document.positions.length,
+    activeBlock.value == null ? '' : props.offer.document.blocks[activeBlock.value]?.heading,
+  ],
+  () => emit('select', currentSelection()),
+)
 const footerShift = computed(() => {
   const footer = props.offer.document.footer
   if (!footer) return undefined
@@ -226,7 +414,19 @@ const footerShift = computed(() => {
     '--mark-font': `${7.5 * scale}pt`,
   }
 })
-defineExpose({ paginate })
+defineExpose({
+  paginate,
+  undo: undoDocument,
+  redo: redoDocument,
+  canUndo,
+  canRedo,
+  addSection,
+  moveSection,
+  askDeleteSection,
+  selectFooter,
+  move,
+  remove,
+})
 </script>
 <template>
   <div class="offer-document" :data-print-blocked="printBlocked || undefined">
@@ -254,7 +454,7 @@ defineExpose({ paginate })
         >
           <span class="n">{{ i + 1 }}</span>
           <h3>{{ block.heading }}</h3>
-          <OfferProse :body="block.body" :nodes="block.nodes" />
+          <OfferProse :body="block.body" :nodes="block.nodes" :section-number="i + 1" />
         </div>
         <OfferTable
           :positions="offer.document.positions"
@@ -273,35 +473,6 @@ defineExpose({ paginate })
       :style="{ '--offer-zoom': zoom ?? 1 }"
       @focusin="onSheetFocusIn"
     >
-      <div v-if="editable" class="section-tools" data-offer-chrome>
-        <button
-          type="button"
-          :disabled="!canAdd"
-          aria-label="Abschnitt hinzufügen"
-          @mousedown.prevent
-          @click="addSection"
-        >
-          Abschnitt hinzufügen
-        </button>
-        <button
-          type="button"
-          :disabled="!canUp"
-          aria-label="Abschnitt nach oben"
-          @mousedown.prevent
-          @click="moveSection(-1)"
-        >
-          Nach oben
-        </button>
-        <button
-          type="button"
-          :disabled="!canDown"
-          aria-label="Abschnitt nach unten"
-          @mousedown.prevent
-          @click="moveSection(1)"
-        >
-          Nach unten
-        </button>
-      </div>
       <section
         v-for="(page, index) in pages"
         :key="index"
@@ -336,10 +507,70 @@ defineExpose({ paginate })
                 tag="h3"
                 :editable="editable"
                 :label="`Überschrift Textbaustein ${i + 1}`"
-              /><OfferProse
+              /><span
+                v-if="editable"
+                class="sec-actions"
+                :aria-label="`Aktionen für Abschnitt ${i + 1}`"
+              >
+                <button
+                  type="button"
+                  title="Abschnitt danach hinzufügen"
+                  :aria-label="`Abschnitt ${i + 1} danach hinzufügen`"
+                  :disabled="!canAdd"
+                  @mousedown.prevent
+                  @click="
+                    () => {
+                      activeBlock = i
+                      addSection()
+                    }
+                  "
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  title="Abschnitt nach oben verschieben"
+                  aria-label="Abschnitt nach oben"
+                  :disabled="i === 0"
+                  @mousedown.prevent
+                  @click="
+                    () => {
+                      activeBlock = i
+                      moveSection(-1)
+                    }
+                  "
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  title="Abschnitt nach unten verschieben"
+                  aria-label="Abschnitt nach unten"
+                  :disabled="i === offer.document.blocks.length - 1"
+                  @mousedown.prevent
+                  @click="
+                    () => {
+                      activeBlock = i
+                      moveSection(1)
+                    }
+                  "
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  title="Diesen Abschnitt löschen"
+                  :aria-label="`Abschnitt ${i + 1} löschen`"
+                  @mousedown.prevent
+                  @click="askDeleteSection(i)"
+                >
+                  ×
+                </button> </span
+              ><OfferProse
                 :body="offer.document.blocks[i]!.body"
                 :nodes="offer.document.blocks[i]!.nodes"
                 :memory="sectionMemory(offer.document.blocks[i])"
+                :section-number="i + 1"
                 :editable="editable"
                 :label="`Textbaustein ${i + 1}`"
                 @update="applyBody(i, $event)"
@@ -348,6 +579,7 @@ defineExpose({ paginate })
           </div>
           <OfferTable
             v-if="page.positions.length"
+            @focusin="onPositionFocus"
             :positions="offer.document.positions"
             :indices="page.positions"
             :editable="editable"
@@ -369,16 +601,40 @@ defineExpose({ paginate })
           ><OfferFootmark
             v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
             :layout="offer.document.footer"
+            :tabindex="editable ? 0 : undefined"
+            role="button"
+            aria-label="Fußzeilenlogo auswählen"
+            @click="selectFooter"
+            @keydown.enter.prevent="selectFooter"
           /><span
             v-else
             class="footmark"
-            :class="{ 'is-set': !!offer.document.footer }"
+            :class="{ 'is-set': !!offer.document.footer, 'is-selected': activeKind === 'footer' }"
             :style="footerShift"
+            :tabindex="editable ? 0 : undefined"
+            :role="editable ? 'button' : undefined"
+            aria-label="Fußzeilenlogo auswählen"
+            @click="selectFooter"
+            @keydown.enter.prevent="selectFooter"
             ><span class="lockup">{{ offer.document.sender.company }}</span></span
           ><span class="right">SEITE {{ index + 1 }} VON {{ pages.length }}</span>
         </div>
       </section>
     </div>
+    <dialog
+      v-if="deleteAsk != null"
+      open
+      class="section-delete"
+      :aria-label="`Abschnitt ${deleteAsk + 1} löschen`"
+    >
+      <p>
+        Abschnitt {{ deleteAsk + 1 }}
+        <strong>{{ offer.document.blocks[deleteAsk]?.heading || 'ohne Überschrift' }}</strong>
+        löschen? Der Text dieses Abschnitts wird entfernt. Rückgängig stellt ihn wieder her.
+      </p>
+      <button type="button" @click="confirmDeleteSection">Löschen</button>
+      <button type="button" @click="deleteAsk = null">Abbrechen</button>
+    </dialog>
   </div>
 </template>
 <style src="./offer-document.css"></style>
