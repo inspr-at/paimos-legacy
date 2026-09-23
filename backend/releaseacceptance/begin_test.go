@@ -78,12 +78,16 @@ func TestBeginTxStopsWhenContextEndsDuringBackoff(t *testing.T) {
 		calls++
 		return nil, errBusyFixture
 	}
+	waits := 0
 	wait := func(_ context.Context, _ time.Duration) error {
+		waits++
 		cancel()
 		return context.Canceled
 	}
 	_, err := beginTxWith(ctx, begin, wait)
-	if !errors.Is(err, errBusyFixture) || calls != 1 {
-		t.Fatalf("err=%v calls=%d", err, calls)
+	// One begin, one interrupted backoff, no second begin: without the retry
+	// loop waits stays 0, and without the context check calls reaches 2.
+	if !errors.Is(err, errBusyFixture) || calls != 1 || waits != 1 {
+		t.Fatalf("err=%v calls=%d waits=%d", err, calls, waits)
 	}
 }
