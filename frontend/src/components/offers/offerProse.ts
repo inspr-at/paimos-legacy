@@ -39,27 +39,85 @@ function cloneNodes(nodes: OfferTextNode[]): OfferTextNode[] {
   )
 }
 
+/** Tab and newline stay. Carriage return stays only in an untouched legacy paragraph. */
+const ILLEGAL_NODE_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F]/
+
 function cleanText(text: string): string {
   return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+}
+
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+type GraphemeSegment = { index: number; segment: string }
+type GraphemeSegmenter = { segment(input: string): Iterable<GraphemeSegment> }
+
+const graphemeSegmenter = (() => {
+  const intl = Intl as typeof Intl & {
+    Segmenter?: new (locales?: string, options?: { granularity: 'grapheme' }) => GraphemeSegmenter
+  }
+  if (typeof intl.Segmenter !== 'function') return null
+  return new intl.Segmenter(undefined, { granularity: 'grapheme' })
+})()
+
+function graphemeEdges(text: string): number[] {
+  const edges = [0]
+  if (graphemeSegmenter) {
+    for (const part of graphemeSegmenter.segment(text)) {
+      const end = part.index + part.segment.length
+      if (end > (edges[edges.length - 1] ?? 0)) edges.push(end)
+    }
+  } else {
+    for (let index = 0; index < text.length; ) {
+      const code = text.codePointAt(index) ?? 0
+      index += code > 0xffff ? 2 : 1
+      edges.push(index)
+    }
+  }
+  if (edges[edges.length - 1] !== text.length) edges.push(text.length)
+  return edges
+}
+
+function floorEdge(edges: number[], offset: number): number {
+  let edge = 0
+  for (const candidate of edges) {
+    if (candidate > offset) break
+    edge = candidate
+  }
+  return edge
+}
+
+function ceilEdge(edges: number[], offset: number): number {
+  for (const candidate of edges) if (candidate >= offset) return candidate
+  return edges[edges.length - 1] ?? offset
 }
 
 function sameNode(node: OfferTextNode, text: string): OfferTextNode {
   return node.kind === 'item' ? listItem(text, node.depth ?? 0) : paragraph(text)
 }
 
+function storedShape(nodes: OfferTextNode[]): OfferTextNode[] {
+  const structured = nodes.length > 1 || nodes[0]?.kind === 'item'
+  if (!structured) return nodes
+  return nodes.map((node) => sameNode(node, normalizeLineEndings(node.text)))
+}
+
 /** A paragraph resets nesting. An item can be at most one level deeper than the previous item. */
 export function clampProse(nodes: OfferTextNode[]): OfferTextNode[] {
   let previous = -1
-  return nodes.map((node) => {
-    if (node.kind !== 'item') {
-      previous = -1
-      return paragraph(cleanText(node.text))
-    }
-    const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
-    const depth = Math.max(0, Math.min(node.depth ?? 0, max))
-    previous = depth
-    return listItem(cleanText(node.text), depth)
-  })
+  return storedShape(
+    nodes.map((node) => {
+      if (node.kind !== 'item') {
+        previous = -1
+        return paragraph(cleanText(node.text))
+      }
+      const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
+      const depth = Math.max(0, Math.min(node.depth ?? 0, max))
+      previous = depth
+      return listItem(cleanText(node.text), depth)
+    }),
+  )
 }
 
 export function parseProseNodes(value: unknown): OfferTextNode[] | null {
@@ -73,7 +131,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
     if ((record.kind !== 'paragraph' && record.kind !== 'item') || typeof record.text !== 'string')
       return null
     if (textLength(record.text) > OFFER_PROSE_MAX_TEXT) return null
-    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(record.text)) return null
+    if (ILLEGAL_NODE_TEXT.test(record.text)) return null
     if (record.kind === 'paragraph') {
       if (record.depth != null && record.depth !== 0) return null
       previous = -1
@@ -109,6 +167,18 @@ export function projectProse(nodes: OfferTextNode[]): string {
       return `${'  '.repeat(depth)}${bulletGlyph(depth)} ${node.text}`
     })
     .join('\n')
+}
+
+/** True when the value can be saved: a legacy body, or nodes the editor and server both accept. */
+export function proseNodesStorable(nodes: OfferTextNode[]): boolean {
+  const stored = persistProse(nodes)
+  return !stored.nodes || parseProseNodes(stored.nodes) !== null
+}
+
+function offsetAfterStore(text: string, offset: number, structured: boolean): number {
+  const head = text.slice(0, Math.max(0, Math.min(offset, text.length)))
+  const stored = structured ? normalizeLineEndings(cleanText(head)) : cleanText(head)
+  return stored.length
 }
 
 /** A single paragraph is stored as plain `body` so legacy offers do not gain a nodes field. */
@@ -168,18 +238,28 @@ export function deleteProseRange(nodes: OfferTextNode[], input: Caret | ProseRan
     return { nodes: cloneNodes(nodes), caret: from }
   if (from.index === to.index) {
     const node = nodes[from.index]!
-    const text = node.text.slice(0, from.offset) + node.text.slice(to.offset)
-    if (textLength(text) > OFFER_PROSE_MAX_TEXT)
-      return refuse(nodes, from, 'Dieser Absatz ist zu lang.')
+    const edges = graphemeEdges(node.text)
+    const cut = floorEdge(edges, from.offset)
+    const keep = ceilEdge(edges, to.offset)
+    // Shrinking never creates a longer node. A legacy body may already be past the cap.
+    if (cut === keep) return { nodes: cloneNodes(nodes), caret: { index: from.index, offset: cut } }
+    const text = node.text.slice(0, cut) + node.text.slice(keep)
     const next = cloneNodes(nodes)
     next[from.index] = sameNode(node, text)
-    return { nodes: clampProse(next), caret: from }
+    return { nodes: clampProse(next), caret: { index: from.index, offset: cut } }
   }
   const left = nodes[from.index]!
   const right = nodes[to.index]!
-  const text = left.text.slice(0, from.offset) + right.text.slice(to.offset)
-  if (textLength(text) > OFFER_PROSE_MAX_TEXT)
-    return refuse(nodes, from, 'Dieser Absatz ist zu lang. Nichts wurde gelöscht.')
+  const cut = floorEdge(graphemeEdges(left.text), from.offset)
+  const keep = ceilEdge(graphemeEdges(right.text), to.offset)
+  const text = left.text.slice(0, cut) + right.text.slice(keep)
+  if (textLength(text) > OFFER_PROSE_MAX_TEXT) {
+    return refuse(
+      nodes,
+      { index: from.index, offset: cut },
+      'Dieser Absatz ist zu lang. Nichts wurde gelöscht.',
+    )
+  }
   const next = clampProse([
     ...nodes.slice(0, from.index),
     sameNode(left, text),
@@ -187,7 +267,7 @@ export function deleteProseRange(nodes: OfferTextNode[], input: Caret | ProseRan
   ])
   return {
     nodes: next.length > 0 ? next : [paragraph('')],
-    caret: { index: from.index, offset: from.offset },
+    caret: { index: from.index, offset: cut },
   }
 }
 
@@ -236,6 +316,25 @@ export function editProseRange(
   return next
 }
 
+/** Toolbar and Tab. Refuses a list the editor or server would reject, without changing the text. */
+export function applyStructure(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+  op: (nodes: OfferTextNode[], index: number) => OfferTextNode[],
+): ProseEdit {
+  const range = proseRange(input)
+  const next = editProseRange(nodes, range, op)
+  const end = rangeEnds(range).end
+  const structured = next.length > 1 || next[0]?.kind === 'item'
+  const before = nodes[end.index]?.text ?? ''
+  const caret = clampCaret(next, {
+    index: end.index,
+    offset: offsetAfterStore(before, end.offset, structured),
+  })
+  if (!proseNodesStorable(next)) return refuse(nodes, caret, 'Dieser Absatz ist zu lang.')
+  return { nodes: next, caret }
+}
+
 export function enterProse(nodes: OfferTextNode[], input: Caret | ProseRange): ProseEdit {
   const cleared = deleteProseRange(nodes, input)
   if (cleared.error) return refuse(nodes, cleared.caret, cleared.error)
@@ -254,7 +353,7 @@ export function enterProse(nodes: OfferTextNode[], input: Caret | ProseRange): P
   const left = current.text.slice(0, caret.offset)
   const right = current.text.slice(caret.offset)
   const split = (text: string) => sameNode(current, text)
-  return {
+  const edit: ProseEdit = {
     nodes: clampProse([
       ...cleared.nodes.slice(0, caret.index),
       split(left),
@@ -263,6 +362,8 @@ export function enterProse(nodes: OfferTextNode[], input: Caret | ProseRange): P
     ]),
     caret: { index: caret.index + 1, offset: 0 },
   }
+  if (!proseNodesStorable(edit.nodes)) return refuse(nodes, caret, 'Dieser Absatz ist zu lang.')
+  return edit
 }
 
 /** Keeps the same paragraph or item and inserts one newline. */
@@ -341,6 +442,7 @@ export function insertProseText(
   raw: string,
 ): ProseEdit {
   const caretBefore = clampCaret(nodes, rangeEnds(proseRange(input)).start)
+  const originalLength = textLength(nodes[caretBefore.index]?.text ?? '')
   const cleared = deleteProseRange(nodes, input)
   if (cleared.error) return refuse(nodes, caretBefore, cleared.error)
   const caret = cleared.caret
@@ -360,11 +462,15 @@ export function insertProseText(
     const text = `${index === 0 ? head : ''}${part}${index === parts.length - 1 ? tail : ''}`
     return sameNode(current, text)
   })
-  if (created.some((node) => textLength(node.text) > OFFER_PROSE_MAX_TEXT)) {
+  const limit = Math.max(OFFER_PROSE_MAX_TEXT, originalLength)
+  const overLimit =
+    created.length === 1
+      ? textLength(created[0]!.text) > limit
+      : created.some((node) => textLength(node.text) > OFFER_PROSE_MAX_TEXT)
+  if (overLimit)
     return refuse(nodes, caretBefore, 'Dieser Absatz ist zu lang. Nichts wurde eingefügt.')
-  }
   const lastPart = parts[parts.length - 1] ?? ''
-  return {
+  const edit: ProseEdit = {
     nodes: clampProse([
       ...cleared.nodes.slice(0, caret.index),
       ...created,
@@ -375,6 +481,30 @@ export function insertProseText(
       offset: (parts.length === 1 ? head + lastPart : lastPart).length,
     },
   }
+  if (!proseNodesStorable(edit.nodes))
+    return refuse(nodes, caretBefore, 'Dieser Absatz ist zu lang. Nichts wurde eingefügt.')
+  return edit
+}
+
+/** Adopts browser-visible text after composition or a spelling replacement. Markup is ignored. */
+export function reconcileProseTexts(
+  nodes: OfferTextNode[],
+  texts: string[],
+  caret: Caret,
+): ProseEdit {
+  const safeCaret = clampCaret(nodes, caret)
+  if (texts.length !== nodes.length) return refuse(nodes, safeCaret, 'Dieser Absatz ist zu lang.')
+  const next = nodes.map((node, index) => sameNode(node, cleanText(texts[index] ?? '')))
+  if (next.every((node, index) => node.text === nodes[index]?.text))
+    return { nodes: cloneNodes(nodes), caret: safeCaret }
+  for (let index = 0; index < next.length; index++) {
+    const cap = Math.max(OFFER_PROSE_MAX_TEXT, textLength(nodes[index]?.text ?? ''))
+    if (textLength(next[index]?.text ?? '') > cap)
+      return refuse(nodes, safeCaret, 'Dieser Absatz ist zu lang.')
+  }
+  const edit: ProseEdit = { nodes: clampProse(next), caret: clampCaret(next, caret) }
+  if (!proseNodesStorable(edit.nodes)) return refuse(nodes, safeCaret, 'Dieser Absatz ist zu lang.')
+  return edit
 }
 
 const pastedBlocks = new Set([
@@ -401,6 +531,11 @@ export function clipboardPlain(plain: string, html = ''): string {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   doc.querySelectorAll('script,style,noscript').forEach((node) => node.remove())
   const lines: string[] = []
+  const visibleLine = (value: string) =>
+    value
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
   const walk = (el: Element) => {
     const blocks = [...el.children].filter((child) => pastedBlocks.has(child.tagName))
     if (blocks.length === 0) {
@@ -409,11 +544,32 @@ export function clipboardPlain(plain: string, html = ''): string {
       return
     }
     let own = ''
-    for (const child of el.childNodes)
-      if (child.nodeType === Node.TEXT_NODE) own += child.textContent ?? ''
-    own = own.replace(/\s+/g, ' ').trim()
-    if (own) lines.push(own)
-    for (const child of blocks) walk(child)
+    const flush = () => {
+      const text = visibleLine(own)
+      own = ''
+      if (text) lines.push(text)
+    }
+    const containsBlock = (node: Element): boolean =>
+      pastedBlocks.has(node.tagName) || [...node.children].some(containsBlock)
+    const visit = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        own += node.textContent ?? ''
+        return
+      }
+      if (!(node instanceof Element)) return
+      if (pastedBlocks.has(node.tagName)) {
+        flush()
+        walk(node)
+        return
+      }
+      if (containsBlock(node)) {
+        for (const child of node.childNodes) visit(child)
+        return
+      }
+      own += node.textContent ?? ''
+    }
+    for (const child of el.childNodes) visit(child)
+    flush()
   }
   walk(doc.body)
   return lines.join('\n')

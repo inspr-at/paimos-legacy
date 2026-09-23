@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import {
+  applyStructure,
   backspaceProse,
   bulletGlyph,
   clipboardPlain,
   createProseHistory,
   deleteForwardProse,
-  editProseRange,
   enterProse,
   indentItem,
   insertProseText,
@@ -14,7 +14,9 @@ import {
   outdentItem,
   persistProse,
   proseNodes,
+  proseNodesStorable,
   rangeEnds,
+  reconcileProseTexts,
   toggleItem,
   type Caret,
   type ProseEdit,
@@ -45,6 +47,7 @@ let serial = 1
 let pending: Caret | null = null
 let pinned: ProseRange | null = null
 let suppressInput = false
+let composing = false
 
 watch(
   () => [props.body, props.nodes] as const,
@@ -59,9 +62,11 @@ watch(
 )
 
 function paint() {
+  if (composing) return
   root.value?.querySelectorAll<HTMLElement>('[data-text]').forEach((el) => {
     const want = local.value[Number(el.dataset.index)]?.text ?? ''
-    if (el.textContent !== want) el.textContent = want
+    const plain = el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE
+    if (!plain || el.textContent !== want) el.textContent = want
   })
 }
 function restore() {
@@ -123,6 +128,7 @@ function readRange(): ProseRange | null {
   return { anchor, focus }
 }
 function capture() {
+  if (composing) return
   const range = readRange()
   if (range) selection.value = range
 }
@@ -134,17 +140,24 @@ function snapshot() {
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
 function commit(edit: ProseEdit) {
-  if (edit.nodes.length !== local.value.length) keys.value = edit.nodes.map(() => serial++)
-  local.value = edit.nodes
+  const stored = persistProse(edit.nodes)
+  const nodes = stored.nodes ?? edit.nodes
+  if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
+  local.value = nodes.map((node) => ({ ...node }))
   pending = edit.caret
   selection.value = { anchor: edit.caret, focus: edit.caret }
   notice.value = edit.error ?? ''
   pinned = null
-  if (!edit.error) emit('update', persistProse(edit.nodes))
+  if (!edit.error) emit('update', stored)
 }
 function apply(edit: ProseEdit) {
   if (edit.error || JSON.stringify(edit.nodes) === JSON.stringify(local.value)) {
     notice.value = edit.error ?? ''
+    pinned = null
+    return
+  }
+  if (!proseNodesStorable(edit.nodes)) {
+    notice.value = 'Dieser Absatz ist zu lang.'
     pinned = null
     return
   }
@@ -216,17 +229,7 @@ function onKey(event: KeyboardEvent) {
   }
   if (event.key === 'Tab') {
     event.preventDefault()
-    const range = currentRange()
-    const op = event.shiftKey ? outdentItem : indentItem
-    const nodes = editProseRange(local.value, range, op)
-    const caret = rangeEnds(range).end
-    apply({
-      nodes,
-      caret: {
-        index: caret.index,
-        offset: Math.min(caret.offset, nodes[caret.index]?.text.length ?? 0),
-      },
-    })
+    apply(applyStructure(local.value, currentRange(), event.shiftKey ? outdentItem : indentItem))
     return
   }
   if (event.key === 'Backspace' || event.key === 'Delete') {
@@ -243,31 +246,64 @@ function onKey(event: KeyboardEvent) {
     )
   }
 }
+function holdNativeInput() {
+  suppressInput = true
+  queueMicrotask(() => {
+    suppressInput = false
+  })
+}
+function inputRange(event: InputEvent): ProseRange {
+  const read = event.getTargetRanges
+  if (typeof read === 'function') {
+    try {
+      const range = read.call(event)[0]
+      if (range) {
+        const anchor = caretFrom(range.startContainer, range.startOffset)
+        const focus = caretFrom(range.endContainer, range.endOffset)
+        if (anchor && focus) return { anchor, focus }
+      }
+    } catch {
+      // Target ranges are optional and may be unavailable until the DOM changes.
+    }
+  }
+  return currentRange()
+}
 function onBeforeInput(event: InputEvent) {
-  if (!props.editable || suppressInput || event.isComposing) return
+  if (!props.editable || suppressInput || composing || event.isComposing) return
   const type = event.inputType
   if (type === 'historyUndo') {
     event.preventDefault()
+    holdNativeInput()
     undo()
     return
   }
   if (type === 'historyRedo') {
     event.preventDefault()
+    holdNativeInput()
     redo()
     return
   }
   if (type === 'insertText') {
     event.preventDefault()
+    holdNativeInput()
     apply(insertProseText(local.value, currentRange(), event.data ?? ''))
+    return
+  }
+  if (type === 'insertReplacementText' && typeof event.data === 'string') {
+    event.preventDefault()
+    holdNativeInput()
+    apply(insertProseText(local.value, inputRange(event), event.data))
     return
   }
   if (type === 'insertLineBreak') {
     event.preventDefault()
+    holdNativeInput()
     apply(insertSoftBreak(local.value, currentRange()))
     return
   }
   if (type === 'insertParagraph') {
     event.preventDefault()
+    holdNativeInput()
     apply(enterProse(local.value, currentRange()))
     return
   }
@@ -277,6 +313,7 @@ function onBeforeInput(event: InputEvent) {
     type === 'deleteByCut'
   ) {
     event.preventDefault()
+    holdNativeInput()
     const range = currentRange()
     apply(
       type === 'deleteContentForward'
@@ -285,12 +322,50 @@ function onBeforeInput(event: InputEvent) {
     )
     return
   }
-  if (type === 'insertFromPaste' || type === 'insertFromDrop' || type.startsWith('format'))
+  if (type === 'insertFromPaste' || type === 'insertFromDrop' || type.startsWith('format')) {
     event.preventDefault()
+    holdNativeInput()
+  }
+}
+function reconcileNative() {
+  if (!props.editable || !root.value || composing) return
+  const texts: string[] = []
+  let markup = false
+  for (let index = 0; index < local.value.length; index++) {
+    const el = root.value.querySelector<HTMLElement>(`[data-text][data-index="${index}"]`)
+    if (!el) return
+    if ([...el.childNodes].some((node) => node.nodeType === Node.ELEMENT_NODE)) markup = true
+    texts.push(el.textContent ?? '')
+  }
+  const edit = reconcileProseTexts(local.value, texts, currentRange().focus)
+  if (edit.error) {
+    notice.value = edit.error
+    paint()
+    return
+  }
+  const changed = edit.nodes.some((node, index) => node.text !== local.value[index]?.text)
+  if (!changed) {
+    if (markup) paint()
+    return
+  }
+  apply(edit)
+}
+function onCompositionStart() {
+  composing = true
+}
+function onCompositionEnd() {
+  composing = false
+  holdNativeInput()
+  reconcileNative()
+}
+function onInput() {
+  if (!props.editable || composing || suppressInput) return
+  reconcileNative()
 }
 function onPaste(event: ClipboardEvent) {
   if (!props.editable) return
   event.preventDefault()
+  holdNativeInput()
   const text = clipboardPlain(
     event.clipboardData?.getData('text/plain') ?? '',
     event.clipboardData?.getData('text/html') ?? '',
@@ -306,15 +381,7 @@ function act(kind: 'toggle' | 'indent' | 'outdent') {
   const range = pinned ?? readRange() ?? selection.value
   pinned = null
   const op = kind === 'toggle' ? toggleItem : kind === 'indent' ? indentItem : outdentItem
-  const nodes = editProseRange(local.value, range, op)
-  const caret = rangeEnds(range).end
-  apply({
-    nodes,
-    caret: {
-      index: caret.index,
-      offset: Math.min(caret.offset, nodes[caret.index]?.text.length ?? 0),
-    },
-  })
+  apply(applyStructure(local.value, range, op))
 }
 function nodeClass(node: OfferTextNode, index: number) {
   return [node.kind === 'item' ? 'item' : 'paragraph', index > 0 ? 'spaced' : '']
@@ -351,6 +418,9 @@ function nodeClass(node: OfferTextNode, index: number) {
       :tabindex="editable ? 0 : undefined"
       @keydown="onKey"
       @beforeinput="onBeforeInput"
+      @input="onInput"
+      @compositionstart="onCompositionStart"
+      @compositionend="onCompositionEnd"
       @paste="onPaste"
     >
       <div
