@@ -304,7 +304,13 @@ creates a new editable offer. **Druckansicht / PDF** opens an authenticated rout
 without application chrome; browser Print / Save as PDF exports the same document.
 The v8 visual rules are preserved, with extra pages when the complete terms or
 positions exceed A4. An indivisible item exceeding a whole page must be split or
-shortened before printing. Bundled fonts avoid external font dependencies.
+shortened before printing. A text-block body may also carry optional `nodes`:
+paragraphs and nested bullet items (depth 0–5). Without `nodes`, `body` stays
+literal plain text, including characters that look like Markdown. The editor,
+public page and PDF share that markup. A block that is still taller than one
+page keeps its full text and refuses print instead of clipping it. Headings,
+addresses, the introduction and position lines stay plain. Settings preserve
+`nodes` but do not edit them. Bundled fonts avoid external font dependencies.
 
 API: admin `GET/PUT /api/integrations/crm/offers` stores `offer_sender` and
 `offer_defaults`; authenticated `GET /api/customers/{id}/offers` and

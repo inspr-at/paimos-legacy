@@ -21,8 +21,9 @@ import (
 )
 
 type OfferBlock struct {
-	Heading string `json:"heading"`
-	Body    string `json:"body"`
+	Heading string          `json:"heading"`
+	Body    string          `json:"body"`
+	Nodes   []OfferTextNode `json:"nodes,omitempty"`
 }
 type OfferSender struct {
 	Company       string `json:"company"`
@@ -142,6 +143,10 @@ func PutOfferSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Maximal 20 Textbausteine", 400)
 		return
 	}
+	if err := normalizeOfferBlocks(s.Defaults.Blocks); err != nil {
+		jsonError(w, err.Error(), 400)
+		return
+	}
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		jsonError(w, "Speichern fehlgeschlagen", 500)
@@ -201,6 +206,9 @@ func validateOfferSender(s OfferSender) error {
 func calculateOffer(d *OfferDocument, final bool) error {
 	if len(d.Positions) > 100 || len(d.Blocks) > 20 {
 		return errors.New("Zu viele Positionen oder Textbausteine")
+	}
+	if err := normalizeOfferBlocks(d.Blocks); err != nil {
+		return err
 	}
 	day, err := time.Parse("2006-01-02", d.OfferDate)
 	if err != nil {
