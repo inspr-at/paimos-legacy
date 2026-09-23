@@ -8,6 +8,12 @@ export interface OfferTextNode {
   text: string
   depth?: number
   marker?: OfferMarker
+  /** Multilevel 3 / 3.1 / 3.1.1. Absent decimal items stay plain per-level numbers. */
+  numbering?: 'outline'
+  /** Positive start for this item. Not copied onto a node created by splitting. */
+  list_start?: number
+  /** Continue the preceding matching numbering, including across a paragraph. */
+  list_continue?: boolean
 }
 export interface OfferFooterLayout {
   logo_width_mm: number

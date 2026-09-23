@@ -203,6 +203,52 @@ describe('offer document prose', () => {
     namedApp.unmount()
     expect(footer.querySelector('.right')?.getAttribute('style')).toBeNull()
     expect(footer.querySelector('span')?.getAttribute('style')).toBeNull()
+    sample.document.footer.logo_offset_mm = -6
+    await nextTick()
+    expect(mark.style.getPropertyValue('--mark-offset')).toBe('-6mm')
+    expect(footerCss).toMatch(/data-numbering='outline'/)
+    expect(footerCss).toMatch(/\.section-tools/)
     app.unmount()
+  })
+
+  it('adds and moves only the current offer section', async () => {
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const el = this as HTMLElement
+      if (el.classList.contains('page-content')) return rect(1000)
+      return rect(40)
+    }
+    installFonts()
+    const sample = offer([
+      { heading: 'Eins', body: 'Alpha' },
+      { heading: 'Zwei', body: 'Beta' },
+    ])
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferDocument, { offer: sample, editable: true })
+    const vm = app.mount(el) as unknown as { paginate: () => Promise<void> }
+    await vm.paginate()
+    await nextTick()
+    el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+    const up = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach oben"]')
+    const down = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')
+    expect(up?.disabled).toBe(true)
+    expect(down?.disabled).toBe(false)
+    down?.click()
+    await nextTick()
+    await nextTick()
+    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins'])
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Überschrift Textbaustein 2')
+    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt hinzufügen"]')?.click()
+    await nextTick()
+    await nextTick()
+    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins', ''])
+    expect(sample.document.blocks[2]).toEqual({ heading: '', body: '' })
+    app.unmount()
+    const locked = document.createElement('div')
+    document.body.appendChild(locked)
+    const lockedApp = createApp(OfferDocument, { offer: sample, editable: false })
+    lockedApp.mount(locked)
+    expect(locked.querySelector('.section-tools')).toBeNull()
+    lockedApp.unmount()
   })
 })

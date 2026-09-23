@@ -19,10 +19,13 @@ const (
 // OfferTextNode is an optional paragraph or bullet inside an offer text block.
 // Omitted nodes keep body as literal plain text.
 type OfferTextNode struct {
-	Kind   string `json:"kind"`
-	Text   string `json:"text"`
-	Depth  int    `json:"depth,omitempty"`
-	Marker string `json:"marker,omitempty"`
+	Kind         string `json:"kind"`
+	Text         string `json:"text"`
+	Depth        int    `json:"depth,omitempty"`
+	Marker       string `json:"marker,omitempty"`
+	Numbering    string `json:"numbering,omitempty"`
+	ListStart    int    `json:"list_start,omitempty"`
+	ListContinue bool   `json:"list_continue,omitempty"`
 }
 
 func offerBullet(depth int) string {
@@ -66,6 +69,19 @@ func validOfferMarker(kind, marker string) bool {
 	}
 }
 
+func validOfferNumbering(node OfferTextNode) bool {
+	if node.Numbering != "" && node.Numbering != "outline" {
+		return false
+	}
+	if node.ListStart < 0 || node.ListStart > 9999 {
+		return false
+	}
+	if node.Kind != "item" || node.Marker != "decimal" {
+		return node.Numbering == "" && node.ListStart == 0 && !node.ListContinue
+	}
+	return !(node.ListStart > 0 && node.ListContinue)
+}
+
 func offerItemGlyph(node OfferTextNode) string {
 	switch node.Marker {
 	case "disc":
@@ -82,12 +98,15 @@ func offerItemGlyph(node OfferTextNode) string {
 }
 
 func projectOfferNodes(nodes []OfferTextNode) string {
-	counters := make([]int, offerProseMaxDepth+1)
+	plain := make([]int, offerProseMaxDepth+1)
+	outline := make([]int, offerProseMaxDepth+1)
+	snaps := make([][]int, len(nodes))
 	lines := make([]string, len(nodes))
 	for i, node := range nodes {
 		if node.Kind != "item" {
-			for c := range counters {
-				counters[c] = 0
+			for c := range plain {
+				plain[c] = 0
+				outline[c] = 0
 			}
 			lines[i] = node.Text
 			continue
@@ -100,17 +119,61 @@ func projectOfferNodes(nodes []OfferTextNode) string {
 			depth = offerProseMaxDepth
 		}
 		if node.Marker != "decimal" {
-			for c := depth; c < len(counters); c++ {
-				counters[c] = 0
+			for c := depth; c < len(plain); c++ {
+				plain[c] = 0
+				outline[c] = 0
 			}
 			lines[i] = strings.Repeat("  ", node.Depth) + offerItemGlyph(node) + " " + node.Text
 			continue
 		}
-		counters[depth]++
-		for c := depth + 1; c < len(counters); c++ {
-			counters[c] = 0
+		source := plain
+		if node.Numbering == "outline" {
+			source = outline
 		}
-		lines[i] = strings.Repeat("  ", node.Depth) + strconv.Itoa(counters[depth]) + ". " + node.Text
+		levels := append([]int(nil), source...)
+		for c := depth + 1; c < len(levels); c++ {
+			levels[c] = 0
+		}
+		if node.ListStart > 0 {
+			levels[depth] = node.ListStart
+		} else if node.ListContinue {
+			previous := -1
+			for j := i - 1; j >= 0; j-- {
+				earlier := nodes[j]
+				sameMode := (earlier.Numbering == "outline") == (node.Numbering == "outline")
+				if earlier.Kind == "item" && earlier.Marker == "decimal" && earlier.Depth == depth && sameMode {
+					previous = j
+					break
+				}
+			}
+			if previous >= 0 {
+				snap := snaps[previous]
+				for c := 0; c <= depth && c < len(snap); c++ {
+					levels[c] = snap[c]
+				}
+			}
+			levels[depth]++
+		} else if levels[depth] > 0 {
+			levels[depth]++
+		} else {
+			levels[depth] = 1
+		}
+		snaps[i] = append([]int(nil), levels...)
+		if node.Numbering == "outline" {
+			copy(outline, levels)
+			parts := make([]string, depth+1)
+			for c := 0; c <= depth; c++ {
+				n := levels[c]
+				if n <= 0 {
+					n = 1
+				}
+				parts[c] = strconv.Itoa(n)
+			}
+			lines[i] = strings.Repeat("  ", node.Depth) + strings.Join(parts, ".") + " " + node.Text
+			continue
+		}
+		copy(plain, levels)
+		lines[i] = strings.Repeat("  ", node.Depth) + strconv.Itoa(levels[depth]) + ". " + node.Text
 	}
 	return strings.Join(lines, "\n")
 }
@@ -122,6 +185,16 @@ func canonOfferNode(node OfferTextNode, depth int) OfferTextNode {
 	out := OfferTextNode{Kind: "item", Text: node.Text, Marker: node.Marker}
 	if depth > 0 {
 		out.Depth = depth
+	}
+	if node.Marker == "decimal" {
+		if node.Numbering == "outline" {
+			out.Numbering = "outline"
+		}
+		if node.ListStart > 0 {
+			out.ListStart = node.ListStart
+		} else if node.ListContinue {
+			out.ListContinue = true
+		}
 	}
 	return out
 }
@@ -138,7 +211,7 @@ func normalizeOfferProse(body string, nodes []OfferTextNode) (string, []OfferTex
 	canon := make([]OfferTextNode, 0, len(nodes))
 	previous := -1
 	for _, node := range nodes {
-		if !validProseText(node.Text) || (node.Kind != "paragraph" && node.Kind != "item") || !validOfferMarker(node.Kind, node.Marker) {
+		if !validProseText(node.Text) || (node.Kind != "paragraph" && node.Kind != "item") || !validOfferMarker(node.Kind, node.Marker) || !validOfferNumbering(node) {
 			return body, nil, errors.New("Ungültige Textstruktur")
 		}
 		if node.Kind == "paragraph" {
@@ -156,7 +229,7 @@ func normalizeOfferProse(body string, nodes []OfferTextNode) (string, []OfferTex
 				maxDepth = offerProseMaxDepth
 			}
 		}
-		if node.Depth < 0 || node.Depth > maxDepth {
+		if node.Depth < 0 || node.Depth > offerProseMaxDepth || (node.Depth > maxDepth && !(previous < 0 && node.ListContinue)) {
 			return body, nil, errors.New("Ungültige Textstruktur")
 		}
 		previous = node.Depth

@@ -128,6 +128,71 @@ function move(i: number, direction: number) {
   props.offer.document.positions.splice(j, 0, p)
   emit('change')
 }
+const OFFER_MAX_BLOCKS = 20
+const sheetEl = ref<HTMLElement>()
+const activeBlock = ref<number | null>(null)
+const activeField = ref<'heading' | 'body'>('heading')
+const canAdd = computed(
+  () => !!props.editable && props.offer.document.blocks.length < OFFER_MAX_BLOCKS,
+)
+const canUp = computed(() => {
+  const index = activeBlock.value
+  return !!props.editable && index != null && index > 0
+})
+const canDown = computed(() => {
+  const index = activeBlock.value
+  return !!props.editable && index != null && index < props.offer.document.blocks.length - 1
+})
+function onSheetFocusIn(event: FocusEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const sec = target.closest('[data-section]')
+  if (!sec) return
+  const index = Number(sec.getAttribute('data-section'))
+  if (!Number.isInteger(index)) return
+  activeBlock.value = index
+  activeField.value = target.closest('.offer-prose') ? 'body' : 'heading'
+}
+function focusSection(index: number, field: 'heading' | 'body') {
+  const tryFocus = (left: number) => {
+    const sec = sheetEl.value?.querySelector(`[data-section="${index}"]`)
+    const el =
+      field === 'body'
+        ? sec?.querySelector<HTMLElement>('.offer-prose')
+        : sec?.querySelector<HTMLElement>('h3')
+    if (el) {
+      el.focus()
+      return
+    }
+    if (left <= 0) return
+    void nextTick(() => tryFocus(left - 1))
+  }
+  void nextTick(() => tryFocus(4))
+}
+function addSection() {
+  if (!canAdd.value) return
+  const blocks = props.offer.document.blocks
+  const at =
+    activeBlock.value == null ? blocks.length : Math.min(blocks.length, activeBlock.value + 1)
+  blocks.splice(at, 0, { heading: '', body: '' })
+  activeBlock.value = at
+  activeField.value = 'heading'
+  emit('change')
+  focusSection(at, 'heading')
+}
+function moveSection(direction: -1 | 1) {
+  const index = activeBlock.value
+  if (index == null) return
+  const blocks = props.offer.document.blocks
+  const next = index + direction
+  if (next < 0 || next >= blocks.length) return
+  const [block] = blocks.splice(index, 1)
+  if (!block) return
+  blocks.splice(next, 0, block)
+  activeBlock.value = next
+  emit('change')
+  focusSection(next, activeField.value)
+}
 const footerShift = computed(() => {
   const footer = props.offer.document.footer
   if (!footer) return undefined
@@ -173,7 +238,41 @@ defineExpose({ paginate })
         />
       </div>
     </div>
-    <div class="sheet" :style="{ '--offer-zoom': zoom ?? 1 }">
+    <div
+      ref="sheetEl"
+      class="sheet"
+      :style="{ '--offer-zoom': zoom ?? 1 }"
+      @focusin="onSheetFocusIn"
+    >
+      <div v-if="editable" class="section-tools" data-offer-chrome>
+        <button
+          type="button"
+          :disabled="!canAdd"
+          aria-label="Abschnitt hinzufügen"
+          @mousedown.prevent
+          @click="addSection"
+        >
+          Abschnitt hinzufügen
+        </button>
+        <button
+          type="button"
+          :disabled="!canUp"
+          aria-label="Abschnitt nach oben"
+          @mousedown.prevent
+          @click="moveSection(-1)"
+        >
+          Nach oben
+        </button>
+        <button
+          type="button"
+          :disabled="!canDown"
+          aria-label="Abschnitt nach unten"
+          @mousedown.prevent
+          @click="moveSection(1)"
+        >
+          Nach unten
+        </button>
+      </div>
       <section
         v-for="(page, index) in pages"
         :key="index"
@@ -196,7 +295,7 @@ defineExpose({ paginate })
             <OfferBrandDots />
           </h2>
           <div v-if="page.blocks.length" class="sections">
-            <div v-for="i in page.blocks" :key="i" class="sec">
+            <div v-for="i in page.blocks" :key="i" class="sec" :data-section="i">
               <span class="n">{{ i + 1 }}</span
               ><OfferText
                 v-model="offer.document.blocks[i]!.heading"

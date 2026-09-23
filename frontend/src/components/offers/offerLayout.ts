@@ -7,7 +7,8 @@ import type { OfferFooterLayout } from './types'
 export const OFFER_FOOTER_LOGO = {
   minWidthMm: 18,
   maxWidthMm: 96,
-  minOffsetMm: 0,
+  /** Negative lifts the mark; positive lowers it. -6 stays inside the 7mm gap above the rule. */
+  minOffsetMm: -6,
   maxOffsetMm: 10,
   defaultWidthMm: 43.3,
   defaultOffsetMm: 2,

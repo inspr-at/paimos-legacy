@@ -86,7 +86,7 @@ type OfferDocument struct {
 }
 
 // OfferFooterLayout stores the centered footer mark. Absent means the legacy CSS lockup.
-// Width 18–96mm and offset 0–10mm follow the A4 content box (168mm) and 16mm bottom padding.
+// Width 18–96mm. Offset -6..10mm: negative lifts the mark within the 7mm gap above the rule, positive lowers it inside the 16mm bottom padding.
 type OfferFooterLayout struct {
 	LogoWidthMM  float64 `json:"logo_width_mm"`
 	LogoOffsetMM float64 `json:"logo_offset_mm"`
@@ -284,7 +284,7 @@ func normalizeOfferFooter(d *OfferDocument) error {
 	if err != nil {
 		return err
 	}
-	offset, err := canonFooterMM(d.Footer.LogoOffsetMM, 0, 10)
+	offset, err := canonFooterMM(d.Footer.LogoOffsetMM, -6, 10)
 	if err != nil {
 		return err
 	}

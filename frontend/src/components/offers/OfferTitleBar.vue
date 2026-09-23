@@ -92,7 +92,13 @@ const icons: Record<OfferToolbarActionId, Component> = {
 const listEnabled = computed(() => !!session?.active.value)
 const listState = computed(() => {
   const revision = session?.revision.value ?? 0
-  const state = session?.active.value?.state() ?? { kind: 'mixed' as const, bullet: null }
+  const state = session?.active.value?.state() ?? {
+    kind: 'mixed' as const,
+    bullet: null,
+    outline: false as const,
+    continued: false as const,
+    start: null,
+  }
   return { ...state, revision }
 })
 const shownWidth = computed(() => props.footer?.logo_width_mm ?? OFFER_FOOTER_LOGO.defaultWidthMm)
@@ -132,8 +138,10 @@ function place(
 }
 function prime(event: MouseEvent) {
   if (event.button !== 0) return
-  event.preventDefault()
   session?.active.value?.remember()
+  const target = event.target
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+  event.preventDefault()
 }
 function run(command: ProseCommand) {
   session?.active.value?.apply(command)
@@ -190,6 +198,11 @@ function onWidth(event: Event) {
 }
 function onOffset(event: Event) {
   commitLayout(String(shownWidth.value), (event.target as HTMLInputElement).value)
+}
+function onListStart(event: Event) {
+  const raw = Number((event.target as HTMLInputElement).value)
+  if (!Number.isInteger(raw) || raw < 1 || raw > 9999) return
+  run({ type: 'numbering', mode: 'start', start: raw })
 }
 function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const key = event.key
@@ -318,6 +331,7 @@ defineExpose({ root })
           v-if="listOpen"
           ref="listPopover"
           class="chrome-popover list-popover"
+          data-offer-chrome
           role="dialog"
           aria-label="Listen und Punkte"
           @mousedown="prime"
@@ -362,6 +376,39 @@ defineExpose({ root })
               Ausrücken
             </button>
           </div>
+          <p class="popover-label">Nummerierung</p>
+          <div class="indent-row">
+            <button
+              type="button"
+              :aria-pressed="
+                listState.outline === true && listState.start === 1 && listState.continued !== true
+              "
+              @click="run({ type: 'numbering', mode: 'restart' })"
+            >
+              Neu beginnen
+            </button>
+            <button
+              type="button"
+              :aria-pressed="listState.continued === true"
+              @click="run({ type: 'numbering', mode: 'continue' })"
+            >
+              Fortsetzen
+            </button>
+          </div>
+          <label class="start-row">
+            Beginnen bei
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="9999"
+              step="1"
+              :value="typeof listState.start === 'number' ? listState.start : 1"
+              aria-label="Nummerierung beginnen bei"
+              @change="onListStart"
+            />
+          </label>
+          <p class="hint">3, 3.1, 3.1.1. Fortsetzen gilt auch nach einem Absatz.</p>
         </div>
       </div>
       <div class="zoom-controls" role="group" aria-label="Dokumentzoom">
@@ -470,7 +517,7 @@ defineExpose({ root })
             </span>
           </label>
           <label>
-            Abstand nach unten
+            Versatz
             <span class="mm">
               <input
                 type="number"
@@ -479,13 +526,15 @@ defineExpose({ root })
                 :min="OFFER_FOOTER_LOGO.minOffsetMm"
                 :max="OFFER_FOOTER_LOGO.maxOffsetMm"
                 :value="shownOffset"
-                aria-label="Abstand des Fußzeilenlogos nach unten in Millimetern"
+                aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
                 @input="onOffset"
               />
               mm
             </span>
           </label>
-          <p class="hint">Nummer, Linie und Seitenzahl bleiben auf ihrer Höhe.</p>
+          <p class="hint">
+            Negativ nach oben, positiv nach unten. Nummer, Linie und Seitenzahl bleiben.
+          </p>
         </div>
       </div>
     </div>
@@ -676,6 +725,28 @@ select:focus-visible,
 }
 .indent-row button {
   font-size: 12px;
+}
+.indent-row button[aria-pressed='true'] {
+  background: var(--h-fill, #e0f3f0);
+  color: var(--h-mint, #0e6f6c);
+}
+.start-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.start-row input {
+  width: 72px;
+  min-height: 30px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0 6px;
 }
 .menu-popover {
   width: min(340px, calc(100vw - 16px));

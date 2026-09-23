@@ -308,14 +308,19 @@ positions exceed A4. An indivisible item exceeding a whole page must be split or
 shortened before printing. A text-block body may also carry optional `nodes`:
 paragraphs and nested bullet or numbered items (depth 0–5). An item may set
 `marker` to `disc`, `circle`, `square`, `dash` or `decimal`. Without `marker`,
-an item keeps the depth glyph (•, ◦, ▪). Decimal numbers restart after a
+an item keeps the depth glyph (•, ◦, ▪). Decimal numbers without further fields restart after a
 paragraph or a non-numbered item at the same depth; nested numbers count on
-their own level. Without `nodes`, `body` stays
+their own level. `numbering: "outline"` renders multilevel decimals such as
+3, 3.1, 3.1.1. `list_start` is a positive start value and `list_continue`
+joins the preceding matching list even across a paragraph. Those fields are
+not stored on a node created by splitting a line. Without `nodes`, `body` stays
 literal plain text, including characters that look like Markdown. The editor,
 public page and PDF share that markup. Optional `footer.logo_width_mm` (18–96)
-and `footer.logo_offset_mm` (0–10) size and lower only the centered footer mark.
-Absent `footer` keeps the previous lockup. New offers start at 43.3 mm wide and
-2 mm lower. Accepted and other non-draft offers stay immutable. A block that is still taller than one
+and `footer.logo_offset_mm` (-6–10) size the centered footer mark and move it
+up (negative) or down (positive). Absent `footer` keeps the previous lockup.
+New offers start at 43.3 mm wide and 2 mm lower. Accepted and other non-draft
+offers stay immutable. Draft section order is part of the saved document;
+central text defaults are not copied into an offer that is already open. A block that is still taller than one
 page keeps its full text and refuses print instead of clipping it. Headings,
 addresses, the introduction and position lines stay plain. Settings preserve
 `nodes` but do not edit them. Bundled fonts avoid external font dependencies.

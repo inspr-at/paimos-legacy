@@ -74,7 +74,7 @@ export function offerToolbarActions(input: {
         id: 'layout',
         label: 'Fußzeilenlogo',
         detail:
-          'Breite und Abstand der Mitte in Millimetern. Nummer, Linie und Seitenzahl bleiben stehen.',
+          'Breite und Versatz der Mitte in Millimetern. Negativ hebt, positiv senkt. Nummer, Linie und Seitenzahl bleiben stehen.',
         disabled: false,
       },
     )
