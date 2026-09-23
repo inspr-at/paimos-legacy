@@ -9,6 +9,13 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260923073158.0.0] — 2026-09-23
+
+### Fixed
+
+- Render the sandbox-scoped reviewer Home instead of a refresh error: accept the privacy-redacted `reviewer_scope` orchestration root in the standalone and OpenAPI contracts and the frontend parser, and hide the account settings entry in the reviewer failure chrome (PAI-1056).
+- Audit immediate release merge provenance (PAI-1054).
+
 ## [260922104613.0.0] — 2026-09-22
 
 ### Added
