@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata"
 
@@ -111,12 +112,20 @@ type Offer struct {
 	AcceptedNote    string             `json:"accepted_note,omitempty"`
 }
 
+type settingsQuery interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func loadOfferSettings() (OfferSettings, error) {
+	return loadOfferSettingsFrom(db.DB)
+}
+
+func loadOfferSettingsFrom(q settingsQuery) (OfferSettings, error) {
 	var s OfferSettings
 	s.Defaults = OfferDefaults{Blocks: []OfferBlock{}, VATNote: "exklusive 20 % USt"}
 	for key, target := range map[string]any{"offer_sender": &s.Sender, "offer_defaults": &s.Defaults} {
 		var raw string
-		err := db.DB.QueryRow(`SELECT value FROM app_settings WHERE key=?`, key).Scan(&raw)
+		err := q.QueryRow(`SELECT value FROM app_settings WHERE key=?`, key).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -128,6 +137,26 @@ func loadOfferSettings() (OfferSettings, error) {
 		}
 	}
 	return s, nil
+}
+
+// offerSettingsWriteHook runs inside the settings write transaction, after the
+// stored-prose check and before the update. Tests overlap a second writer while
+// the SQLite writer lock is held.
+var offerSettingsWriteHook atomic.Value
+
+func SetOfferSettingsWriteHookForTest(fn func()) {
+	if fn == nil {
+		offerSettingsWriteHook.Store(func() {})
+		return
+	}
+	offerSettingsWriteHook.Store(fn)
+}
+
+func runOfferSettingsWriteHook() {
+	fn, _ := offerSettingsWriteHook.Load().(func())
+	if fn != nil {
+		fn()
+	}
 }
 func GetOfferSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := loadOfferSettings()
@@ -154,25 +183,30 @@ func PutOfferSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Maximal 20 Textbausteine", 400)
 		return
 	}
-	current, err := loadOfferSettings()
-	if err != nil {
-		jsonError(w, "Einstellungen konnten nicht geladen werden", 500)
-		return
-	}
-	if err = normalizeOfferBlocks(body.Defaults.Blocks); err != nil {
+	if err := normalizeOfferBlocks(body.Defaults.Blocks); err != nil {
 		jsonError(w, err.Error(), 400)
 		return
 	}
-	if offerProseWriteUnsafe(current.Defaults.Blocks, body.Defaults.Blocks, body.ProseWriterVersion) {
-		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
-		return
-	}
+	// The database opens with _txlock=immediate, so this BEGIN takes the writer
+	// lock before the stored defaults are read. A legacy save cannot pass the
+	// prose check and then overwrite a version-2 commit. The read stays on this
+	// transaction; querying db.DB here would wait on the same connection.
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		jsonError(w, "Speichern fehlgeschlagen", 500)
 		return
 	}
 	defer tx.Rollback()
+	current, err := loadOfferSettingsFrom(tx)
+	if err != nil {
+		jsonError(w, "Einstellungen konnten nicht geladen werden", 500)
+		return
+	}
+	if offerProseWriteUnsafe(current.Defaults.Blocks, body.Defaults.Blocks, body.ProseWriterVersion) {
+		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
+		return
+	}
+	runOfferSettingsWriteHook()
 	for key, value := range map[string]any{"offer_sender": body.Sender, "offer_defaults": body.Defaults} {
 		raw, e := json.Marshal(value)
 		if e != nil {

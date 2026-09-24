@@ -7,7 +7,9 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/handlers"
 )
@@ -336,5 +338,86 @@ func TestOfferProseCreateAndDefaultsRejectIncapableV2(t *testing.T) {
 	decode(t, resp, &saved)
 	if saved.Defaults.Blocks[0].Nodes != nil || saved.Defaults.Blocks[0].Body != "Klartext" {
 		t.Fatalf("capable settings clear = %#v", saved.Defaults.Blocks[0])
+	}
+}
+
+func TestOfferSettingsOverlappingLegacySaveCannotStripV2(t *testing.T) {
+	ts := newTestServer(t)
+	settings := offerSettingsFixture()
+	settings.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Alt", Body: "Klartext"}}
+	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, settings)
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	v2 := settings
+	v2.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Neu", Nodes: []handlers.OfferTextNode{
+		{Kind: "item", Text: "Erste Ebene", Depth: 1, Marker: "disc"},
+	}}}
+	legacy := settings
+	legacy.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Neu", Body: "ohne Knoten"}}
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+	var pauseOnce sync.Once
+	handlers.SetOfferSettingsWriteHookForTest(func() {
+		pauseOnce.Do(func() {
+			close(held)
+			<-release
+		})
+	})
+	t.Cleanup(func() { handlers.SetOfferSettingsWriteHookForTest(nil) })
+
+	type result struct {
+		status int
+		body   string
+	}
+	capableDone := make(chan result, 1)
+	go func() {
+		resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+			"sender": v2.Sender, "defaults": v2.Defaults, "prose_writer_version": 2,
+		})
+		capableDone <- result{status: resp.StatusCode, body: proseResponseBody(t, resp)}
+	}()
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("version-2 save did not reach the write transaction")
+	}
+
+	legacyDone := make(chan result, 1)
+	go func() {
+		resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, legacy)
+		legacyDone <- result{status: resp.StatusCode, body: proseResponseBody(t, resp)}
+	}()
+	select {
+	case early := <-legacyDone:
+		t.Fatalf("legacy save finished while the version-2 transaction held the writer lock: %d %s", early.status, early.body)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+
+	var capable result
+	select {
+	case capable = <-capableDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("version-2 save did not finish")
+	}
+	var stripped result
+	select {
+	case stripped = <-legacyDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("legacy save did not finish")
+	}
+	if capable.status != 200 {
+		t.Fatalf("version-2 save = %d %s", capable.status, capable.body)
+	}
+	if stripped.status != 409 || !strings.Contains(stripped.body, "neu laden") {
+		t.Fatalf("overlapping legacy save = %d %s", stripped.status, stripped.body)
+	}
+	resp = ts.get(t, "/api/integrations/crm/offers", ts.adminCookie)
+	var saved handlers.OfferSettings
+	decode(t, resp, &saved)
+	if len(saved.Defaults.Blocks) != 1 || saved.Defaults.Blocks[0].Nodes[0].Depth != 1 || saved.Defaults.Blocks[0].Nodes[0].Text != "Erste Ebene" {
+		t.Fatalf("overlapping legacy save stripped the template: %#v", saved.Defaults.Blocks)
 	}
 }
