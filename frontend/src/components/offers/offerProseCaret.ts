@@ -22,6 +22,40 @@ export type CaretBox = {
   height: number
 }
 
+/**
+ * Box of a collapsed caret at the selection focus.
+ * The full selection rectangle is the wrong target: a selection wider than the
+ * viewport makes Shift+End alternate between its two edges.
+ */
+export function focusCaretBox(selection: {
+  focusNode: Node | null
+  focusOffset: number
+  rangeCount: number
+}): CaretBox | null {
+  const node = selection.focusNode
+  if (!node || selection.rangeCount === 0) return null
+  const range = document.createRange()
+  try {
+    const max =
+      node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length
+    range.setStart(node, Math.max(0, Math.min(selection.focusOffset, max)))
+    range.collapse(true)
+  } catch {
+    return null
+  }
+  const rects = range.getClientRects()
+  const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+  if (!rect || (rect.width <= 0 && rect.height <= 0)) return null
+  return {
+    top: rect.top,
+    bottom: rect.bottom,
+    left: rect.left,
+    right: rect.right,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
 /** Scroll the nearest editor overflow ancestor just enough to show `caret`. The page itself stays put. */
 export function revealCaretInEditor(
   editor: HTMLElement,

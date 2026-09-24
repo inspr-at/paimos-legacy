@@ -28,7 +28,7 @@ import {
   type ProseEdit,
   type ProseRange,
 } from './offerProse'
-import { revealCaretInEditor, visualLineOf } from './offerProseCaret'
+import { focusCaretBox, revealCaretInEditor, visualLineOf } from './offerProseCaret'
 import type { OfferTextNode } from './types'
 import {
   isOfferChrome,
@@ -145,13 +145,9 @@ function restorePageOffset(saved: { x: number; y: number }) {
 function showCaretInEditor() {
   if (!root.value) return
   const live = window.getSelection()
-  if (!live?.rangeCount) return
-  let rect: DOMRect
-  try {
-    rect = live.getRangeAt(0).getBoundingClientRect()
-  } catch {
-    return
-  }
+  if (!live) return
+  const rect = focusCaretBox(live)
+  if (!rect) return
   revealCaretInEditor(root.value, rect)
 }
 function placeRange(range: ProseRange) {

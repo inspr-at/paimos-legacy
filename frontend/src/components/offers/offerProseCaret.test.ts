@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { logicalLineBounds, revealCaretInEditor, visualLineOf } from './offerProseCaret'
+import {
+  focusCaretBox,
+  logicalLineBounds,
+  revealCaretInEditor,
+  visualLineOf,
+} from './offerProseCaret'
 
 const wrapped = '0123456789ABCDEF'
 const tops = (index: number) => Math.floor(index / 8) * 20
@@ -48,7 +53,48 @@ describe('visual line bounds', () => {
     expect(scroller.scrollTop).toBe(136)
     expect(window.scrollX).toBe(page.x)
     expect(window.scrollY).toBe(page.y)
+    scroller.scrollTop = 0
+    revealCaretInEditor(
+      editor,
+      { top: 10, bottom: 26, left: 390, right: 400, width: 10, height: 16 },
+      () => ({ top: 0, bottom: 80, left: 0, right: 100 }),
+    )
+    const wideEdge = scroller.scrollLeft
+    scroller.scrollLeft = 0
+    revealCaretInEditor(
+      editor,
+      { top: 10, bottom: 26, left: 20, right: 20, width: 0, height: 16 },
+      () => ({ top: 0, bottom: 80, left: 0, right: 100 }),
+    )
+    expect(wideEdge).toBeGreaterThan(0)
+    expect(scroller.scrollLeft).toBe(0)
     scroller.remove()
+  })
+
+  it('measures a collapsed caret at the focus, not the whole selection', () => {
+    const text = document.createTextNode('abcdef')
+    const host = document.createElement('div')
+    host.appendChild(text)
+    document.body.appendChild(host)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.setBaseAndExtent(text, 0, text, 6)
+    const originalRects = Range.prototype.getClientRects
+    const originalBox = Range.prototype.getBoundingClientRect
+    Range.prototype.getClientRects = function getClientRects() {
+      const rect = this.collapsed ? new DOMRect(90, 4, 0, 16) : new DOMRect(0, 4, 120, 16)
+      const list = [rect]
+      return Object.assign(list, { item: (index: number) => list[index] ?? null }) as DOMRectList
+    }
+    Range.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return this.collapsed ? new DOMRect(90, 4, 0, 16) : new DOMRect(0, 4, 120, 16)
+    }
+    const box = focusCaretBox(selection!)
+    expect(box).toMatchObject({ left: 90, width: 0, height: 16 })
+    expect(selection?.getRangeAt(0).getBoundingClientRect().width).toBe(120)
+    Range.prototype.getClientRects = originalRects
+    Range.prototype.getBoundingClientRect = originalBox
+    host.remove()
   })
 
   it('treats a two-pixel difference as the same line and a larger gap as a wrap', () => {

@@ -57,6 +57,7 @@ describe('offer inspector', () => {
     expect(css).toMatch(/\.sheet-frame\s*\{[^}]*min-width:\s*100%/)
     expect(css).not.toMatch(/\.sheet\s*\{[^}]*justify-items:\s*center/)
     expect(css).toMatch(/\.sheet \.page\s*\{[^}]*zoom:\s*var\(--offer-zoom/)
+    expect(css).toMatch(/@media print\s*\{[\s\S]*\.offer-inspector\s*,/)
     expect(view).toContain('width: 300px')
     const none = await mount({ kind: 'none' })
     expect(none.el.querySelector('#offer-inspector')?.hasAttribute('hidden')).toBe(false)
@@ -103,5 +104,77 @@ describe('offer inspector', () => {
     await mounted.hide()
     expect(mounted.el.querySelector('#offer-inspector')?.hasAttribute('hidden')).toBe(true)
     mounted.unmount()
+  })
+
+  it('clears a numeric draft before undo so blur cannot write it back', async () => {
+    const footer = ref({ logo_width_mm: 43.3, logo_offset_mm: 2 })
+    const stack: { logo_width_mm: number; logo_offset_mm: number }[] = []
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const Host = defineComponent({
+      setup() {
+        return () =>
+          h(OfferInspector, {
+            open: true,
+            footer: footer.value,
+            canUndo: true,
+            canRedo: false,
+            selection: { kind: 'footer' },
+            blockCount: 0,
+            onFooter: (value: { logo_width_mm: number; logo_offset_mm: number }) => {
+              if (
+                value.logo_offset_mm === footer.value.logo_offset_mm &&
+                value.logo_width_mm === footer.value.logo_width_mm
+              )
+                return
+              stack.push({ ...footer.value })
+              footer.value = value
+            },
+            onUndo: () => {
+              const previous = stack.pop()
+              if (previous) footer.value = previous
+            },
+          })
+      },
+    })
+    const app = createApp(Host)
+    app.mount(el)
+    await nextTick()
+    const offset = el.querySelector<HTMLInputElement>(
+      '[aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."]',
+    )!
+    const type = (value: string) => {
+      offset.focus()
+      offset.value = value
+      offset.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    type('-6')
+    await nextTick()
+    expect(footer.value.logo_offset_mm).toBe(-6)
+    const undo = el.querySelector<HTMLButtonElement>('[aria-label="Rückgängig"]')!
+    undo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    undo.click()
+    await nextTick()
+    expect(footer.value.logo_offset_mm).toBe(2)
+    offset.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+    await nextTick()
+    expect(footer.value.logo_offset_mm).toBe(2)
+    type('-4')
+    await nextTick()
+    const key = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    offset.dispatchEvent(key)
+    await nextTick()
+    expect(key.defaultPrevented).toBe(true)
+    expect(footer.value.logo_offset_mm).toBe(2)
+    offset.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+    await nextTick()
+    expect(footer.value.logo_offset_mm).toBe(2)
+    app.unmount()
+    el.remove()
   })
 })

@@ -818,6 +818,7 @@
     overflow: visible !important;
   }
   .offer-tools,
+  .offer-inspector,
   .offer-notice,
   .offer-measure {
     display: none !important;

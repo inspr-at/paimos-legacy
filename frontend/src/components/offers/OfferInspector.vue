@@ -234,6 +234,28 @@ function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const host = event.currentTarget instanceof HTMLElement ? event.currentTarget.parentElement : null
   host?.querySelectorAll<HTMLButtonElement>(`[data-group="${group}"]`)[next]?.focus()
 }
+function finishNumericDrafts() {
+  finishListStart()
+  finishWidth()
+  finishOffset()
+}
+function undoEdit() {
+  finishNumericDrafts()
+  emit('undo')
+}
+function redoEdit() {
+  finishNumericDrafts()
+  emit('redo')
+}
+function onInspectorKey(event: KeyboardEvent) {
+  const key = event.key.toLowerCase()
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || (key !== 'z' && key !== 'y')) return
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('input, textarea')) return
+  event.preventDefault()
+  if (key === 'y' || event.shiftKey) redoEdit()
+  else undoEdit()
+}
 function openTemplates() {
   finishWidth()
   finishOffset()
@@ -260,6 +282,7 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
     aria-label="Inspektor"
     :hidden="!open"
     @mousedown="prime"
+    @keydown="onInspectorKey"
   >
     <header class="inspector-head">
       <h2 :id="selection?.kind === 'footer' ? 'this-offer-heading' : undefined">
@@ -269,11 +292,11 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
       <p v-if="textLabel" class="hint">{{ textLabel }}</p>
     </header>
     <div class="undo-row" role="group" aria-label="Änderungen">
-      <button type="button" :disabled="!canUndo" aria-label="Rückgängig" @click="emit('undo')">
+      <button type="button" :disabled="!canUndo" aria-label="Rückgängig" @click="undoEdit">
         <Undo2 :size="15" aria-hidden="true" />
         Rückgängig
       </button>
-      <button type="button" :disabled="!canRedo" aria-label="Wiederholen" @click="emit('redo')">
+      <button type="button" :disabled="!canRedo" aria-label="Wiederholen" @click="redoEdit">
         <Redo2 :size="15" aria-hidden="true" />
         Wiederholen
       </button>
