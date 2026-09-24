@@ -182,12 +182,44 @@ export function markStateFromBits(bits: number): InlineMarkState {
   return { bold: !!(bits & 1), italic: !!(bits & 2) }
 }
 
+function snapInlineOffset(text: string, offset: number): number {
+  const bounded = Math.max(0, Math.min(offset, text.length))
+  return inlineBoundary(text, bounded) ? bounded : bounded - 1
+}
+
+/** Marks for a known replacement. Returns null when the new text does not keep that span's surroundings. */
+function reconcileReplacedBits(
+  oldText: string,
+  newText: string,
+  marks: OfferInlineMark[] | undefined,
+  span: { start: number; end: number },
+  typing?: number,
+): OfferInlineMark[] | undefined | null {
+  const start = snapInlineOffset(oldText, span.start)
+  const end = Math.max(start, snapInlineOffset(oldText, span.end))
+  const prefix = oldText.slice(0, start)
+  const suffix = oldText.slice(end)
+  if (!newText.startsWith(prefix) || !newText.endsWith(suffix)) return null
+  const inserted = newText.slice(start, newText.length - suffix.length)
+  const bits = bitsFromMarks(oldText, marks)
+  const head = bits.slice(0, start)
+  const tail = bits.slice(end)
+  const inherited = typing ?? (head.length ? head[head.length - 1]! : (tail[0] ?? 0))
+  const mid = Array<number>(inserted.length).fill(inherited)
+  return marksFromBits(head.concat(mid, tail))
+}
+
 function reconcileMarkBits(
   oldText: string,
   newText: string,
   marks: OfferInlineMark[] | undefined,
   typing?: number,
+  span?: { start: number; end: number } | null,
 ): OfferInlineMark[] | undefined {
+  if (span) {
+    const replaced = reconcileReplacedBits(oldText, newText, marks, span, typing)
+    if (replaced !== null) return replaced
+  }
   let prefix = 0
   const limit = Math.min(oldText.length, newText.length)
   while (prefix < limit && oldText[prefix] === newText[prefix]) prefix += 1
@@ -1604,21 +1636,28 @@ export function reconcileProseTexts(
   texts: string[],
   caret: Caret,
   typing?: number,
+  replaced?: { index: number; start: number; end: number } | null,
 ): ProseEdit {
   const safeCaret = clampCaret(nodes, caret)
   if (texts.length !== nodes.length) return refuse(nodes, safeCaret, 'Dieser Absatz ist zu lang.')
   const next = nodes.map((node, index) => {
     const cleaned = cleanText(texts[index] ?? '')
+    const span = replaced && replaced.index === index ? replaced : null
+    const unchanged = cleaned === node.text && !(span && typing != null)
     return sameNode(
       node,
       cleaned,
       true,
-      cleaned === node.text
-        ? node.marks
-        : (reconcileMarkBits(node.text, cleaned, node.marks, typing) ?? null),
+      unchanged ? node.marks : (reconcileMarkBits(node.text, cleaned, node.marks, typing, span) ?? null),
     )
   })
-  if (next.every((node, index) => node.text === nodes[index]?.text))
+  if (
+    next.every(
+      (node, index) =>
+        node.text === nodes[index]?.text &&
+        JSON.stringify(node.marks ?? null) === JSON.stringify(nodes[index]?.marks ?? null),
+    )
+  )
     return { nodes: cloneNodes(nodes), caret: safeCaret }
   for (let index = 0; index < next.length; index++) {
     const cap = Math.max(OFFER_PROSE_MAX_TEXT, textLength(nodes[index]?.text ?? ''))

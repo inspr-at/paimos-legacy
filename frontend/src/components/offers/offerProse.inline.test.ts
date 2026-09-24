@@ -75,6 +75,44 @@ describe('inline prose marks', () => {
     expect(edit.nodes[0]?.marks).toEqual([{ start: 2, end: 3, bold: true }])
   })
 
+  it('styles the composed copy and leaves the identical neighbour unchanged', () => {
+    const before = paragraph('é')
+    const insertedBefore = reconcileProseTexts([before], ['éé'], { index: 0, offset: 1 }, 1, {
+      index: 0,
+      start: 0,
+      end: 0,
+    })
+    expect(insertedBefore.nodes[0]?.marks).toEqual([{ start: 0, end: 1, bold: true }])
+    const insertedAfter = reconcileProseTexts([before], ['éé'], { index: 0, offset: 2 }, 1, {
+      index: 0,
+      start: 1,
+      end: 1,
+    })
+    expect(insertedAfter.nodes[0]?.marks).toEqual([{ start: 1, end: 2, bold: true }])
+    const replaced = reconcileProseTexts(
+      [paragraph('é', [{ start: 0, end: 1, italic: true }])],
+      ['é'],
+      { index: 0, offset: 1 },
+      1,
+      { index: 0, start: 0, end: 1 },
+    )
+    expect(replaced.nodes[0]?.marks).toEqual([{ start: 0, end: 1, bold: true }])
+    const emoji = reconcileProseTexts([paragraph('😀')], ['😀é'], { index: 0, offset: 3 }, 1, {
+      index: 0,
+      start: 2,
+      end: 2,
+    })
+    expect(emoji.nodes[0]?.text).toBe('😀é')
+    expect(emoji.nodes[0]?.marks).toEqual([{ start: 2, end: 3, bold: true }])
+    const inside = reconcileProseTexts([paragraph('😀')], ['é😀'], { index: 0, offset: 1 }, 1, {
+      index: 0,
+      start: 1,
+      end: 1,
+    })
+    expect(inside.nodes[0]?.text).toBe('é😀')
+    expect(inside.nodes[0]?.marks).toEqual([{ start: 0, end: 1, bold: true }])
+  })
+
   it('styles part of a word and keeps the rest plain', () => {
     const edit = applyInlineStyle([paragraph('Hello')], range(1, 4), 'bold')
     expect(edit.nodes[0]).toEqual(paragraph('Hello', [{ start: 1, end: 4, bold: true }]))

@@ -21,6 +21,7 @@ export function offerToolbarActions(input: {
   isAdmin: boolean
   editable: boolean
   saving: boolean
+  loading?: boolean
   overflow: boolean
   copied: boolean
   linkAvailable: boolean
@@ -43,16 +44,16 @@ export function offerToolbarActions(input: {
       id: 'duplicate',
       label: 'Duplizieren',
       detail: 'Erstellt ein neues bearbeitbares Angebot mit demselben Inhalt.',
-      disabled: input.saving,
+      disabled: input.saving || !!input.loading,
     })
   }
-  if (input.editable) {
+  if (input.status === 'draft' && (input.editable || !!input.loading)) {
     actions.push({
       id: 'finalize',
       label: 'Finalisieren',
       detail:
         'Schreibt das Angebot fest und erzeugt den Kundenlink. Es wird keine E-Mail gesendet.',
-      disabled: input.saving || input.overflow,
+      disabled: input.saving || !!input.loading || input.overflow,
     })
   }
   if (input.isAdmin && !input.printMode) {
@@ -66,7 +67,7 @@ export function offerToolbarActions(input: {
       detail: input.deleted
         ? 'Blendet das Angebot wieder in den Übersichten ein.'
         : 'Blendet das Angebot aus den Übersichten aus. Inhalte, Nachweise und Kundenlinks bleiben.',
-      disabled: !!input.deleting,
+      disabled: !!input.deleting || !!input.loading,
     })
   }
   return actions

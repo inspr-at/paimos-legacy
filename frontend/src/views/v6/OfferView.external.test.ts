@@ -322,4 +322,77 @@ describe('offer remote revision on the open page', () => {
     expect(el.querySelector<HTMLInputElement>('[aria-label="Angebotsdatum"]')!.value).toBe('2026-09-23')
     app.unmount()
   })
+
+  it('refuses print, save, and finalize while a reload is still loading', async () => {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.open = true
+    }
+    HTMLDialogElement.prototype.close = function close() {
+      this.open = false
+    }
+    let releaseGet: (value: unknown) => void = () => {}
+    let gets = 0
+    api.get.mockImplementation((path: string) => {
+      if (path !== '/offers/41') return Promise.reject(new Error(path))
+      gets += 1
+      if (gets === 1) return Promise.resolve(structuredClone(draft(3)))
+      if (gets === 2) return Promise.resolve(structuredClone(draft(5)))
+      return new Promise((resolve) => {
+        releaseGet = resolve
+      })
+    })
+    api.put.mockResolvedValue(draft(4))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferView)
+    app.mount(el)
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    window.dispatchEvent(new Event('focus'))
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    const date = el.querySelector<HTMLInputElement>('[aria-label="Angebotsdatum"]')!
+    date.value = '2026-09-01'
+    date.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    el.querySelector<HTMLButtonElement>('.remote-refresh')!.click()
+    await nextTick()
+    await nextTick()
+    const dialog = el.querySelector<HTMLDialogElement>('[aria-label="Extern geändert"]')!
+    ;[...dialog.querySelectorAll('button')].find((button) => button.textContent?.includes('Aktualisieren'))!.click()
+    await nextTick()
+    const pdf = el.querySelector<HTMLButtonElement>('[aria-label="Druckansicht / PDF"]')!
+    const menu = el.querySelector<HTMLButtonElement>('[aria-label="Weitere Aktionen"]')!
+    menu.click()
+    await nextTick()
+    const action = (label: string) =>
+      [...el.querySelectorAll('button')].find((button) => button.textContent?.includes(label))!
+    expect(pdf.disabled).toBe(true)
+    expect(action('Finalisieren').disabled).toBe(true)
+    expect(action('Duplizieren').disabled).toBe(true)
+    for (const button of [pdf, action('Finalisieren'), action('Duplizieren'), action('gelöscht')]) {
+      button.disabled = false
+      button.click()
+      await nextTick()
+    }
+    const finalize = [...el.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Jetzt finalisieren')
+    if (finalize) {
+      finalize.disabled = false
+      finalize.click()
+      await nextTick()
+    }
+    expect(api.put).not.toHaveBeenCalled()
+    const server = draft(9)
+    server.document.title = 'Serverstand'
+    releaseGet(structuredClone(server))
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    expect(el.textContent).toContain('Serverstand')
+    expect(el.textContent).not.toContain('Speicherkonflikt')
+    expect(api.put).not.toHaveBeenCalled()
+    app.unmount()
+  })
 })

@@ -229,4 +229,62 @@ describe('inspector inline styles', () => {
     app.unmount()
     el.remove()
   })
+
+  it('bolds a composed é inserted before a plain é', async () => {
+    const prose = ref<{ body: string; nodes: OfferTextNode[] | null }>({ body: 'é', nodes: null })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const Host = defineComponent({
+      setup() {
+        provideOfferProseSession()
+        return () =>
+          h('div', [
+            h(OfferInspector, {
+              open: true,
+              footer: null,
+              selection: { kind: 'text', index: 0, count: 1, heading: 'Leistung' },
+              blockCount: 1,
+            }),
+            h(OfferProse, {
+              body: prose.value.body,
+              nodes: prose.value.nodes,
+              editable: true,
+              label: 'Textbaustein 1',
+              onUpdate: (value: { body: string; nodes?: OfferTextNode[] }) => {
+                prose.value = { body: value.body, nodes: value.nodes ?? null }
+              },
+            }),
+          ])
+      },
+    })
+    const app = createApp(Host)
+    app.mount(el)
+    await nextTick()
+    const root = el.querySelector<HTMLElement>('.offer-prose')!
+    root.focus()
+    root.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    const text = root.querySelector<HTMLElement>('[data-text][data-index="0"]')!
+    const place = (offset: number, end = offset) => {
+      const range = document.createRange()
+      range.setStart(text.firstChild ?? text, offset)
+      range.setEnd(text.firstChild ?? text, end)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    }
+    place(0)
+    await nextTick()
+    const fett = [...el.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Fett')!
+    click(fett)
+    await nextTick()
+    root.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    text.textContent = 'éé'
+    place(1)
+    root.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'é' }))
+    await nextTick()
+    expect(prose.value.nodes?.[0]?.text).toBe('éé')
+    expect(prose.value.nodes?.[0]?.marks).toEqual([{ start: 0, end: 1, bold: true }])
+    app.unmount()
+    el.remove()
+  })
 })

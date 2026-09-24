@@ -293,6 +293,7 @@ watch(
   { deep: true },
 )
 async function save(force = false): Promise<boolean> {
+  if (loading.value) return false
   if (document.querySelector('.offer-document .sheet input:invalid')) {
     saveFailed.value = true
     error.value = 'Bitte ungültige Zahlen korrigieren.'
@@ -484,6 +485,7 @@ const toolbarActions = computed(() =>
     isAdmin: auth.isAdmin,
     editable: editable.value,
     saving: saving.value,
+    loading: loading.value,
     overflow: !!overflow.value,
     copied: copied.value,
     linkAvailable: !!publicUrl.value || auth.isAdmin,
@@ -594,7 +596,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :saved-at-iso="offer?.updated_at || ''"
         v-model:zoom-mode="zoomMode"
         :zoom="zoom"
-        :print-disabled="saving || !!overflow || conflict"
+        :print-disabled="loading || saving || !!overflow || conflict"
         :show-print="!!offer"
         :actions="toolbarActions"
         :show-inspector="editable"
@@ -611,7 +613,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
       <p v-if="loading" class="offer-notice">Angebot wird geladen …</p>
       <p v-if="error || overflow" role="alert" class="offer-notice offer-error">
         {{ error || overflow }}
-        <button v-if="dirty && !conflict" class="btn" @click="save()">Erneut speichern</button>
+        <button v-if="dirty && !conflict && !loading" class="btn" @click="save()">Erneut speichern</button>
       </p>
       <p v-if="editable && !collapsed" class="offer-notice">
         Klicke in einen Text, um ihn zu bearbeiten. Die Werkzeuge dafür stehen im Inspektor.
@@ -656,7 +658,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
               : 'Das Angebot wird archiviert.'
           }}
         </p>
-        <button class="btn" type="button" :disabled="deleting" @click="setDeleted">
+        <button class="btn" type="button" :disabled="deleting || loading" @click="setDeleted">
           {{ offer?.status === 'draft' ? 'Als gelöscht markieren' : 'Archivieren' }}
         </button>
         <button class="btn" type="button" @click="deleteOpen = false">Abbrechen</button>
@@ -750,6 +752,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         <button
           class="btn btn-primary"
           :disabled="
+            loading ||
             saving ||
             !validOfferEmail(offer?.document.customer.email) ||
             !validOfferEmail(offer?.document.sender.email)

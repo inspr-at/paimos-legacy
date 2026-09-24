@@ -102,6 +102,7 @@ let visualEdge: {
 
 let hydrated = false
 let typingBits: number | null = null
+let compositionSpan: { index: number; start: number; end: number } | null = null
 let typingAt: ProseRange | null = null
 watch(
   () => [props.body, props.nodes] as const,
@@ -696,7 +697,7 @@ function onBeforeInput(event: InputEvent) {
     holdNativeInput()
   }
 }
-function reconcileNative() {
+function reconcileNative(replaced = compositionSpan) {
   if (!props.editable || !root.value || composing) return
   const texts: string[] = []
   let markup = false
@@ -711,13 +712,18 @@ function reconcileNative() {
     texts,
     currentRange().focus,
     typingBits ?? undefined,
+    replaced,
   )
   if (edit.error) {
     notice.value = edit.error
     paint()
     return
   }
-  const changed = edit.nodes.some((node, index) => node.text !== local.value[index]?.text)
+  const changed = edit.nodes.some(
+    (node, index) =>
+      node.text !== local.value[index]?.text ||
+      JSON.stringify(node.marks ?? null) !== JSON.stringify(local.value[index]?.marks ?? null),
+  )
   if (!changed) {
     if (markup) paint()
     return
@@ -726,11 +732,18 @@ function reconcileNative() {
 }
 function onCompositionStart() {
   composing = true
+  const { start, end } = rangeEnds(currentRange())
+  compositionSpan =
+    start.index === end.index
+      ? { index: start.index, start: start.offset, end: end.offset }
+      : null
 }
 function onCompositionEnd() {
+  const replaced = compositionSpan
   composing = false
+  compositionSpan = null
   holdNativeInput()
-  reconcileNative()
+  reconcileNative(replaced)
 }
 function onInput() {
   if (!props.editable || composing || suppressInput) return
