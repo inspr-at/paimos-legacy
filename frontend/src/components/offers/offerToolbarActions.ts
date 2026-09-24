@@ -5,7 +5,6 @@ export type OfferToolbarActionId =
   | 'duplicate'
   | 'finalize'
   | 'layout'
-  | 'chrome'
   | 'delete'
 
 export type OfferToolbarAction = {
@@ -24,7 +23,6 @@ export function offerToolbarActions(input: {
   saving: boolean
   overflow: boolean
   copied: boolean
-  collapsed: boolean
   linkAvailable: boolean
   deleted?: boolean
   deleting?: boolean
@@ -69,14 +67,6 @@ export function offerToolbarActions(input: {
         ? 'Blendet das Angebot wieder in den Übersichten ein.'
         : 'Blendet das Angebot aus den Übersichten aus. Inhalte, Nachweise und Kundenlinks bleiben.',
       disabled: !!input.deleting,
-    })
-  }
-  if (!input.printMode) {
-    actions.push({
-      id: 'chrome',
-      label: input.collapsed ? 'Kopfzeilen ausklappen' : 'Kopfzeilen einklappen',
-      detail: 'Blendet die Anwendungskopfzeilen ein oder aus.',
-      disabled: false,
     })
   }
   return actions

@@ -1,6 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Redo2, Undo2 } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  ArrowDown,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ArrowUp,
+  ChevronDown,
+  FileStack,
+  List,
+  ListEnd,
+  ListOrdered,
+  ListPlus,
+  ListRestart,
+  Minus,
+  PanelRightClose,
+  Plus,
+  Redo2,
+  RotateCcw,
+  Trash2,
+  Undo2,
+} from 'lucide-vue-next'
+import type { Component } from 'vue'
 import type { OfferBulletMarker, OfferFooterLayout, OfferSelection } from './types'
 import {
   canonMarkerMm,
@@ -27,6 +47,7 @@ const emit = defineEmits<{
   footer: [value: OfferFooterLayout]
   undo: []
   redo: []
+  hide: []
   action: [id: 'settings']
   'insert-section': []
   'insert-position': []
@@ -39,17 +60,28 @@ const emit = defineEmits<{
   'position-delete': []
 }>()
 
+type InspectorTab = 'text' | 'section' | 'document'
+const tab = ref<InspectorTab>('document')
+const tabs: { id: InspectorTab; label: string }[] = [
+  { id: 'text', label: 'Text' },
+  { id: 'section', label: 'Abschnitt' },
+  { id: 'document', label: 'Dokument' },
+]
 const widthDraft = ref<string | null>(null)
 const offsetDraft = ref<string | null>(null)
 const startDraft = ref<string | null>(null)
 const glyphDraft = ref<string | null>(null)
 const markerDraft = ref<{ axis: 'x' | 'y' | 'text'; raw: string } | null>(null)
+const placeOpen = ref(true)
+const insertOpen = ref(false)
+const insertButton = ref<HTMLButtonElement>()
+const insertMenu = ref<HTMLElement>()
 const session = useOfferProseSession()
 const maxBlocks = 20
-const listKinds: { id: ProseListKind; label: string }[] = [
-  { id: 'none', label: 'Ohne' },
-  { id: 'bullet', label: 'Aufzählung' },
-  { id: 'ordered', label: 'Nummerierung' },
+const listKinds: { id: ProseListKind; label: string; name: string; icon: Component }[] = [
+  { id: 'none', label: 'Ohne', name: 'Ohne', icon: Minus },
+  { id: 'bullet', label: 'Liste', name: 'Aufzählung', icon: List },
+  { id: 'ordered', label: 'Nummeriert', name: 'Nummerierung', icon: ListOrdered },
 ]
 const bullets: { id: OfferBulletMarker; label: string }[] = [
   { id: 'disc', label: 'Punkt' },
@@ -94,17 +126,34 @@ const contextTitle = computed(() => {
 })
 const contextDetail = computed(() => {
   const selection = props.selection
-  if (selection?.kind === 'heading' || selection?.kind === 'text')
-    return selection.heading.trim() || 'ohne Überschrift'
+  if (selection?.kind === 'heading') return selection.heading.trim() || 'ohne Überschrift'
+  if (selection?.kind === 'text') {
+    const heading = selection.heading.trim() || 'ohne Überschrift'
+    return `Textauswahl · ${heading}`
+  }
   if (selection?.kind === 'position') return 'Leistungsposition'
+  if (selection?.kind === 'footer') return 'Fußzeilenlogo'
   return ''
 })
-const textLabel = computed(() =>
-  props.selection?.kind === 'text' ? 'Text in diesem Abschnitt' : '',
-)
 const shownWidth = computed(() => props.footer?.logo_width_mm ?? OFFER_FOOTER_LOGO.defaultWidthMm)
 const shownOffset = computed(() => props.footer?.logo_offset_mm ?? OFFER_FOOTER_LOGO.legacyOffsetMm)
 const sectionFull = computed(() => (sectionSelection.value?.count ?? props.blockCount) >= maxBlocks)
+const showNumbering = computed(
+  () => listState.value.kind === 'ordered' || listState.value.kind === 'mixed',
+)
+const showStart = computed(() => showNumbering.value && listState.value.continued !== true)
+const bezugValue = computed(() => (listState.value.sectionBound === false ? 'independent' : 'section'))
+const numberingExample = computed(() => {
+  if (!showNumbering.value) return ''
+  const start = typeof listState.value.start === 'number' ? listState.value.start : 1
+  if (listState.value.sectionBound === false) return String(start)
+  const section = (sectionSelection.value?.index ?? 0) + 1
+  const depth = typeof listState.value.level === 'number' ? listState.value.level : 0
+  const parts = [String(section)]
+  for (let i = 0; i < depth; i++) parts.push('1')
+  parts.push(String(start))
+  return parts.join('.')
+})
 
 function limitTip(limit: LevelLimit | null | undefined, direction: 'deeper' | 'higher'): string {
   switch (limit) {
@@ -146,17 +195,27 @@ const levelLabel = computed(() => {
   if (level === 'mixed') return 'Gemischte Ebenen'
   return `Listenebene ${level + 1} · ${level}× eingerückt`
 })
-const showMarkerPlace = computed(() => listState.value.kind !== 'none')
+const levelShort = computed(() => {
+  const level = listState.value.level
+  if (level == null) return ''
+  if (level === 'mixed') return 'Gemischte Ebenen'
+  return `Ebene ${level + 1}`
+})
+const showMarkerPlace = computed(() => listState.value.kind !== 'none' && listState.value.kind !== 'mixed')
 
 watch(
   () => props.selection?.kind,
   (kind, previous) => {
+    if (kind === 'text') tab.value = 'text'
+    else if (kind === 'heading' || kind === 'position') tab.value = 'section'
+    else tab.value = 'document'
     if (previous === 'footer' && kind !== 'footer') {
       finishWidth()
       finishOffset()
     }
     if (previous === 'text' && kind !== 'text') finishListStart()
   },
+  { immediate: true },
 )
 
 function prime(event: MouseEvent) {
@@ -259,6 +318,26 @@ function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const host = event.currentTarget instanceof HTMLElement ? event.currentTarget.parentElement : null
   host?.querySelectorAll<HTMLButtonElement>(`[data-group="${group}"]`)[next]?.focus()
 }
+function onTabKey(event: KeyboardEvent) {
+  const key = event.key
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return
+  event.preventDefault()
+  const current = tabs.findIndex((item) => item.id === tab.value)
+  let next = current < 0 ? 0 : current
+  if (key === 'ArrowRight') next = (next + 1) % tabs.length
+  else if (key === 'ArrowLeft') next = (next - 1 + tabs.length) % tabs.length
+  else if (key === 'Home') next = 0
+  else next = tabs.length - 1
+  const item = tabs[next]
+  if (!item) return
+  tab.value = item.id
+  const host = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  host?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+}
+function onBezug(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  run({ type: 'numbering', mode: value === 'independent' ? 'independent' : 'section' })
+}
 function finishNumericDrafts() {
   finishListStart()
   finishMarkerDrafts()
@@ -320,6 +399,12 @@ function redoEdit() {
 }
 function onInspectorKey(event: KeyboardEvent) {
   const key = event.key.toLowerCase()
+  if (key === 'escape' && insertOpen.value) {
+    insertOpen.value = false
+    insertButton.value?.focus()
+    event.preventDefault()
+    return
+  }
   if (!(event.metaKey || event.ctrlKey) || event.altKey || (key !== 'z' && key !== 'y')) return
   const target = event.target
   if (!(target instanceof Element) || !target.closest('input, textarea')) return
@@ -332,18 +417,55 @@ function openTemplates() {
   finishOffset()
   emit('action', 'settings')
 }
+function placeInsert() {
+  const anchor = insertButton.value
+  const panel = insertMenu.value
+  if (!anchor || !panel) return
+  const rect = anchor.getBoundingClientRect()
+  const width = panel.offsetWidth
+  const height = panel.offsetHeight
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
+  const below = rect.bottom + 4
+  const above = rect.top - height - 4
+  const top = below + height <= window.innerHeight - 8 ? below : Math.max(8, above)
+  panel.style.top = `${top}px`
+  panel.style.left = `${left}px`
+}
+async function toggleInsert(event: MouseEvent) {
+  insertOpen.value = !insertOpen.value
+  if (!insertOpen.value) return
+  await nextTick()
+  placeInsert()
+  if (event.detail === 0)
+    insertMenu.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+}
+function chooseInsert(kind: 'section' | 'position') {
+  insertOpen.value = false
+  if (kind === 'section') emit('insert-section')
+  else emit('insert-position')
+}
 function onDocPointer(event: PointerEvent) {
   const target = event.target
   if (target instanceof Node && (event.currentTarget as Node | null) === target) return
   const root = document.getElementById('offer-inspector')
   if (target instanceof Node && root?.contains(target)) return
+  insertOpen.value = false
   finishListStart()
   finishMarkerDrafts()
   finishWidth()
   finishOffset()
 }
-onMounted(() => window.addEventListener('pointerdown', onDocPointer))
-onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
+function reposition() {
+  if (insertOpen.value) placeInsert()
+}
+onMounted(() => {
+  window.addEventListener('pointerdown', onDocPointer)
+  window.addEventListener('resize', reposition)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', onDocPointer)
+  window.removeEventListener('resize', reposition)
+})
 </script>
 <template>
   <aside
@@ -356,344 +478,392 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
     @mousedown="prime"
     @keydown="onInspectorKey"
   >
-    <header class="inspector-head">
-      <h2 :id="selection?.kind === 'footer' ? 'this-offer-heading' : undefined">
-        {{ contextTitle }}
-      </h2>
-      <p v-if="contextDetail" class="context-detail">{{ contextDetail }}</p>
-      <p v-if="textLabel" class="hint">{{ textLabel }}</p>
+    <header class="format-row">
+      <p class="format-title">Format</p>
+      <div class="format-actions" role="group" aria-label="Änderungen">
+        <button type="button" :disabled="!canUndo" aria-label="Rückgängig" title="Rückgängig" @click="undoEdit">
+          <Undo2 :size="14" aria-hidden="true" />
+        </button>
+        <button type="button" :disabled="!canRedo" aria-label="Wiederholen" title="Wiederholen" @click="redoEdit">
+          <Redo2 :size="14" aria-hidden="true" />
+        </button>
+        <button type="button" aria-label="Inspektor ausblenden" title="Inspektor ausblenden" @click="emit('hide')">
+          <PanelRightClose :size="14" aria-hidden="true" />
+        </button>
+      </div>
     </header>
-    <div class="undo-row" role="group" aria-label="Änderungen">
-      <button type="button" :disabled="!canUndo" aria-label="Rückgängig" @click="undoEdit">
-        <Undo2 :size="15" aria-hidden="true" />
-        Rückgängig
-      </button>
-      <button type="button" :disabled="!canRedo" aria-label="Wiederholen" @click="redoEdit">
-        <Redo2 :size="15" aria-hidden="true" />
-        Wiederholen
+    <div class="tabs" role="tablist" aria-label="Format" @keydown="onTabKey">
+      <button
+        v-for="item in tabs"
+        :key="item.id"
+        type="button"
+        role="tab"
+        :aria-selected="tab === item.id"
+        :tabindex="tab === item.id ? 0 : -1"
+        @click="tab = item.id"
+      >
+        {{ item.label }}
       </button>
     </div>
-    <p v-if="!selection || selection.kind === 'none'" class="hint">
-      Wähle eine Überschrift, einen Text, eine Leistungsposition oder das Fußzeilenlogo. Einfügen
-      bleibt hier verfügbar.
-    </p>
-    <section v-if="sectionSelection" class="group" aria-label="Abschnitt">
-      <h3>Abschnitt</h3>
-      <div class="action-grid">
-        <button type="button" :disabled="sectionFull" @click="emit('section-add')">Danach</button>
-        <button
-          type="button"
-          :disabled="sectionSelection.index === 0"
-          aria-label="Abschnitt nach oben"
-          @click="emit('section-up')"
-        >
-          Nach oben
-        </button>
-        <button
-          type="button"
-          :disabled="sectionSelection.index >= sectionSelection.count - 1"
-          aria-label="Abschnitt nach unten"
-          @click="emit('section-down')"
-        >
-          Nach unten
-        </button>
-        <button type="button" aria-label="Abschnitt löschen" @click="emit('section-delete')">
-          Löschen
-        </button>
+    <h2 :id="selection?.kind === 'footer' ? 'this-offer-heading' : undefined">{{ contextTitle }}</h2>
+    <p v-if="contextDetail" class="context-detail">{{ contextDetail }}</p>
+
+    <div v-show="tab === 'text'" class="panel" role="tabpanel" aria-label="Text">
+      <div class="zeichen" aria-label="Zeichen">
+        <p class="field-label">Zeichen</p>
+        <!-- PAI-1068 mounts OfferInlineStyleControls in this slot. No local stub. -->
+        <slot name="zeichen" />
       </div>
-    </section>
-    <section v-if="selection?.kind === 'text'" class="group" aria-label="Text">
-      <h3>Text</h3>
-      <p class="field-label">Listentyp</p>
-      <div
-        class="segment"
-        role="radiogroup"
-        aria-label="Listentyp"
-        @keydown="onRadioKey($event, 'list')"
-      >
-        <button
-          v-for="item in listKinds"
-          :key="item.id"
-          type="button"
-          role="radio"
-          data-group="list-kind"
-          :aria-checked="listState.kind === item.id"
-          :aria-label="item.label"
-          @click="run({ type: 'list', kind: item.id })"
-        >
-          {{ item.label }}
-        </button>
-      </div>
-      <template v-if="listState.kind !== 'ordered'">
-        <p class="field-label">Aufzählungszeichen</p>
-        <div class="bullets" role="radiogroup" aria-label="Aufzählungszeichen">
+      <section v-if="selection?.kind === 'text'" class="group" aria-label="Listen und Einzug">
+        <h3>Listen &amp; Einzug</h3>
+        <div class="segment" role="radiogroup" aria-label="Listentyp" @keydown="onRadioKey($event, 'list')">
           <button
-            v-for="item in bullets"
+            v-for="item in listKinds"
             :key="item.id"
             type="button"
             role="radio"
-            data-group="bullet"
-            :aria-checked="listState.bullet === item.id"
-            :aria-label="item.label"
-            @keydown="onRadioKey($event, 'bullet')"
-            @click="run({ type: 'marker', marker: item.id })"
+            data-group="list-kind"
+            :aria-checked="listState.kind === item.id"
+            :aria-label="item.name"
+            @click="run({ type: 'list', kind: item.id })"
           >
-            {{ OFFER_BULLET_GLYPH[item.id] }}
+            <component :is="item.icon" :size="13" aria-hidden="true" />
+            <span>{{ item.label }}</span>
           </button>
         </div>
-        <label v-if="listState.kind === 'bullet'" class="start-row">
-          Eigenes Zeichen
-          <input
-            type="text"
-            maxlength="8"
-            :value="shownGlyph()"
-            aria-label="Eigenes Aufzählungszeichen"
-            @input="onGlyph"
-            @blur="finishMarkerDrafts"
-          />
-        </label>
-      </template>
-      <p v-if="levelLabel" class="level-readout">{{ levelLabel }}</p>
-      <div class="action-grid">
-        <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+        <div class="level-row">
+          <p class="level-readout">
+            {{ levelShort || 'Ebene' }}
+            <span v-if="levelLabel && levelLabel !== levelShort" class="sr-only" aria-hidden="true">{{
+              levelLabel
+            }}</span>
+          </p>
+          <span class="level-tip" :data-tip="higherTip" :title="higherTip">
+            <button
+              type="button"
+              :disabled="!canOutdent"
+              :aria-label="outdentName"
+              @click="run({ type: 'outdent' })"
+            >
+              <ArrowLeftToLine :size="13" aria-hidden="true" />
+              Ausrücken
+            </button>
+          </span>
+          <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
+            <button
+              type="button"
+              :disabled="!canIndent"
+              :aria-label="indentName"
+              @click="run({ type: 'indent' })"
+            >
+              <ArrowRightToLine :size="13" aria-hidden="true" />
+              Einrücken
+            </button>
+          </span>
+        </div>
+        <template v-if="listState.kind === 'bullet'">
+          <div class="bullets" role="radiogroup" aria-label="Aufzählungszeichen" @keydown="onRadioKey($event, 'bullet')">
+            <button
+              v-for="item in bullets"
+              :key="item.id"
+              type="button"
+              role="radio"
+              data-group="bullet"
+              :aria-checked="listState.bullet === item.id"
+              :aria-label="item.label"
+              @click="run({ type: 'marker', marker: item.id })"
+            >
+              {{ OFFER_BULLET_GLYPH[item.id] }}
+            </button>
+          </div>
+          <label class="inline-field">
+            Zeichen
+            <input
+              type="text"
+              maxlength="8"
+              :value="shownGlyph()"
+              aria-label="Eigenes Aufzählungszeichen"
+              @input="onGlyph"
+              @blur="finishMarkerDrafts"
+            />
+          </label>
+        </template>
+        <template v-if="showNumbering">
+          <label class="inline-field">
+            Bezug
+            <select aria-label="Bezug" :value="bezugValue" @change="onBezug">
+              <option value="section">Abschnittsnummer</option>
+              <option value="independent">Unabhängig</option>
+            </select>
+          </label>
+          <p v-if="numberingExample" class="num-example">{{ numberingExample }}</p>
+          <div class="pair">
+            <button
+              type="button"
+              :aria-pressed="listState.continued === true"
+              @click="run({ type: 'numbering', mode: 'continue' })"
+            >
+              <ListEnd :size="13" aria-hidden="true" />
+              Fortsetzen
+            </button>
+            <button
+              type="button"
+              :aria-pressed="listState.outline === true && listState.start === 1 && listState.continued !== true"
+              @click="run({ type: 'numbering', mode: 'restart' })"
+            >
+              <ListRestart :size="13" aria-hidden="true" />
+              Neu beginnen
+            </button>
+          </div>
+          <label v-if="showStart" class="inline-field">
+            Beginn
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="9999"
+              step="1"
+              :value="startDraft ?? (typeof listState.start === 'number' ? listState.start : 1)"
+              aria-label="Nummerierung beginnen bei"
+              @input="onListStart"
+              @blur="finishListStart"
+              @keydown.enter.prevent="finishListStart"
+            />
+          </label>
+        </template>
+        <div v-if="showMarkerPlace" class="marker-place">
+          <div class="place-head">
+            <button
+              type="button"
+              class="disclosure"
+              :aria-expanded="placeOpen"
+              @click="placeOpen = !placeOpen"
+            >
+              <ChevronDown :size="13" aria-hidden="true" :class="{ folded: !placeOpen }" />
+              Einzug &amp; Position
+            </button>
+            <button type="button" title="Einzug zurücksetzen" @click="run({ type: 'layout-reset' })">
+              <RotateCcw :size="13" aria-hidden="true" />
+              <span class="sr-only">Standard</span>
+            </button>
+          </div>
+          <div v-show="placeOpen" class="marker-fields">
+            <div class="marker-field">
+              <span>Zeichen X</span>
+              <span class="marker-move">
+                <button type="button" aria-label="Zeichen horizontal nach links" @click="nudgeMarker('x', -0.5)">−</button>
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  :value="shownMarker('x')"
+                  aria-label="Zeichen horizontal"
+                  @input="onMarker('x', $event)"
+                  @blur="finishMarkerDrafts"
+                />
+                <button type="button" aria-label="Zeichen horizontal nach rechts" @click="nudgeMarker('x', 0.5)">+</button>
+              </span>
+              <span>mm</span>
+            </div>
+            <div class="marker-field">
+              <span>Zeichen Y</span>
+              <span class="marker-move">
+                <button type="button" aria-label="Zeichen vertikal nach oben" @click="nudgeMarker('y', -0.5)">−</button>
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  :value="shownMarker('y')"
+                  aria-label="Zeichen vertikal"
+                  @input="onMarker('y', $event)"
+                  @blur="finishMarkerDrafts"
+                />
+                <button type="button" aria-label="Zeichen vertikal nach unten" @click="nudgeMarker('y', 0.5)">+</button>
+              </span>
+              <span>mm</span>
+            </div>
+            <div class="marker-field">
+              <span>Textbeginn</span>
+              <span class="marker-move">
+                <button type="button" aria-label="Textbeginn nach links" @click="nudgeMarker('text', -0.5)">−</button>
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  :value="shownMarker('text')"
+                  aria-label="Textbeginn"
+                  @input="onMarker('text', $event)"
+                  @blur="finishMarkerDrafts"
+                />
+                <button type="button" aria-label="Textbeginn nach rechts" @click="nudgeMarker('text', 0.5)">+</button>
+              </span>
+              <span>mm</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-show="tab === 'section'" class="panel" role="tabpanel" aria-label="Abschnitt">
+      <section v-if="sectionSelection" class="group" aria-label="Abschnitt">
+        <div class="action-grid">
+          <button type="button" :disabled="sectionFull" @click="emit('section-add')">
+            <Plus :size="13" aria-hidden="true" />
+            Danach
+          </button>
           <button
             type="button"
-            :disabled="!canIndent"
-            :aria-label="indentName"
-            @click="run({ type: 'indent' })"
+            :disabled="sectionSelection.index === 0"
+            aria-label="Abschnitt nach oben"
+            @click="emit('section-up')"
           >
-            Einrücken
+            <ArrowUp :size="13" aria-hidden="true" />
+            Nach oben
           </button>
-        </span>
-        <span class="level-tip" :data-tip="higherTip" :title="higherTip">
           <button
             type="button"
-            :disabled="!canOutdent"
-            :aria-label="outdentName"
-            @click="run({ type: 'outdent' })"
+            :disabled="sectionSelection.index >= sectionSelection.count - 1"
+            aria-label="Abschnitt nach unten"
+            @click="emit('section-down')"
           >
-            Ausrücken
+            <ArrowDown :size="13" aria-hidden="true" />
+            Nach unten
           </button>
-        </span>
-      </div>
-      <template v-if="listState.kind !== 'bullet'">
-        <p class="field-label">Nummerierung</p>
+          <button type="button" aria-label="Abschnitt löschen" @click="emit('section-delete')">
+            <Trash2 :size="13" aria-hidden="true" />
+            Löschen
+          </button>
+        </div>
+      </section>
+      <section v-if="selection?.kind === 'position'" class="group" aria-label="Position">
         <div class="action-grid">
           <button
             type="button"
-            :aria-pressed="listState.sectionBound === true"
-            @click="run({ type: 'numbering', mode: 'section' })"
+            :disabled="selection.index === 0"
+            aria-label="Position nach oben"
+            @click="emit('position-up')"
           >
-            Abschnittsnummer
+            <ArrowUp :size="13" aria-hidden="true" />
+            Nach oben
           </button>
           <button
             type="button"
-            :aria-pressed="listState.sectionBound === false"
-            @click="run({ type: 'numbering', mode: 'independent' })"
+            :disabled="selection.index >= selection.count - 1"
+            aria-label="Position nach unten"
+            @click="emit('position-down')"
           >
-            Unabhängig
+            <ArrowDown :size="13" aria-hidden="true" />
+            Nach unten
           </button>
-          <button
-            type="button"
-            :aria-pressed="
-              listState.outline === true && listState.start === 1 && listState.continued !== true
-            "
-            @click="run({ type: 'numbering', mode: 'restart' })"
-          >
-            Neu beginnen
-          </button>
-          <button
-            type="button"
-            :aria-pressed="listState.continued === true"
-            @click="run({ type: 'numbering', mode: 'continue' })"
-          >
-            Fortsetzen
+          <button type="button" aria-label="Position löschen" @click="emit('position-delete')">
+            <Trash2 :size="13" aria-hidden="true" />
+            Löschen
           </button>
         </div>
-        <label class="start-row">
-          Beginnen bei
-          <input
-            type="number"
-            inputmode="numeric"
-            min="1"
-            max="9999"
-            step="1"
-            :value="startDraft ?? (typeof listState.start === 'number' ? listState.start : 1)"
-            aria-label="Nummerierung beginnen bei"
-            @input="onListStart"
-            @blur="finishListStart"
-            @keydown.enter.prevent="finishListStart"
-          />
+      </section>
+      <p v-if="!sectionSelection && selection?.kind !== 'position'" class="hint">
+        Abschnitt oder Position im Dokument wählen.
+      </p>
+    </div>
+
+    <div v-show="tab === 'document'" class="panel" role="tabpanel" aria-label="Dokument">
+      <section
+        v-if="selection?.kind === 'footer'"
+        class="group this-offer"
+        aria-labelledby="this-offer-heading"
+      >
+        <p class="hint">Breite und Versatz nur für dieses Angebot.</p>
+        <label class="inline-field">
+          Fußzeilenlogo Breite
+          <span class="mm">
+            <input
+              type="text"
+              inputmode="decimal"
+              :value="widthDraft ?? shownWidth"
+              aria-label="Breite des Fußzeilenlogos in Millimetern"
+              @input="onWidth"
+              @blur="finishWidth"
+              @keydown.enter.prevent="finishWidth"
+            />
+            mm
+          </span>
         </label>
-        <p class="hint">3, 3.1, 3.1.1. Fortsetzen gilt auch nach einem Absatz.</p>
-      </template>
-      <div v-if="showMarkerPlace" class="marker-place">
-        <p class="hint">Gilt für die ausgewählten Listeneinträge.</p>
-        <div class="marker-field">
-          <span>Zeichen horizontal</span>
-          <span class="marker-move">
-            <button
-              type="button"
-              aria-label="Zeichen horizontal nach links"
-              @click="nudgeMarker('x', -0.5)"
-            >
-              −
-            </button>
+        <label class="inline-field">
+          Fußzeilenlogo Versatz
+          <span class="mm">
             <input
               type="text"
               inputmode="decimal"
-              :value="shownMarker('x')"
-              aria-label="Zeichen horizontal"
-              @input="onMarker('x', $event)"
-              @blur="finishMarkerDrafts"
+              :value="offsetDraft ?? shownOffset"
+              aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
+              @input="onOffset"
+              @blur="finishOffset"
+              @keydown.enter.prevent="finishOffset"
             />
-            <button
-              type="button"
-              aria-label="Zeichen horizontal nach rechts"
-              @click="nudgeMarker('x', 0.5)"
-            >
-              +
-            </button>
-            <span>mm</span>
+            mm
           </span>
-        </div>
-        <div class="marker-field">
-          <span>Zeichen vertikal</span>
-          <span class="marker-move">
-            <button
-              type="button"
-              aria-label="Zeichen vertikal nach oben"
-              @click="nudgeMarker('y', -0.5)"
-            >
-              −
-            </button>
-            <input
-              type="text"
-              inputmode="decimal"
-              :value="shownMarker('y')"
-              aria-label="Zeichen vertikal"
-              @input="onMarker('y', $event)"
-              @blur="finishMarkerDrafts"
-            />
-            <button
-              type="button"
-              aria-label="Zeichen vertikal nach unten"
-              @click="nudgeMarker('y', 0.5)"
-            >
-              +
-            </button>
-            <span>mm</span>
-          </span>
-        </div>
-        <div class="marker-field">
-          <span>Textbeginn</span>
-          <span class="marker-move">
-            <button type="button" aria-label="Textbeginn nach links" @click="nudgeMarker('text', -0.5)">
-              −
-            </button>
-            <input
-              type="text"
-              inputmode="decimal"
-              :value="shownMarker('text')"
-              aria-label="Textbeginn"
-              @input="onMarker('text', $event)"
-              @blur="finishMarkerDrafts"
-            />
-            <button type="button" aria-label="Textbeginn nach rechts" @click="nudgeMarker('text', 0.5)">
-              +
-            </button>
-            <span>mm</span>
-          </span>
-        </div>
-        <p class="hint">Negativ nach oben oder links, positiv nach unten oder rechts.</p>
-        <button type="button" @click="run({ type: 'layout-reset' })">Standard</button>
-      </div>
-    </section>
-    <section v-if="selection?.kind === 'position'" class="group" aria-label="Position">
-      <h3>Position</h3>
-      <div class="action-grid">
-        <button type="button" :disabled="selection.index === 0" @click="emit('position-up')">
-          Nach oben
+        </label>
+      </section>
+      <section class="group future-templates" aria-label="Vorlagen für neue Angebote">
+        <h3>Vorlagen für neue Angebote</h3>
+        <p class="hint">Für künftige Angebote. Dieses Angebot bleibt unverändert.</p>
+        <button type="button" @click="openTemplates">
+          <FileStack :size="13" aria-hidden="true" />
+          Vorlagen bearbeiten
+        </button>
+      </section>
+    </div>
+
+    <div class="insert">
+      <button
+        ref="insertButton"
+        type="button"
+        class="insert-face"
+        aria-haspopup="menu"
+        :aria-expanded="insertOpen"
+        @click="toggleInsert"
+      >
+        <Plus :size="13" aria-hidden="true" />
+        Einfügen
+        <ChevronDown :size="13" aria-hidden="true" />
+      </button>
+      <div
+        ref="insertMenu"
+        class="insert-menu"
+        :class="{ 'is-open': insertOpen }"
+        role="menu"
+        aria-label="Einfügen"
+        :aria-hidden="!insertOpen"
+      >
+        <button
+          v-if="!sectionSelection"
+          type="button"
+          role="menuitem"
+          :tabindex="insertOpen ? 0 : -1"
+          :disabled="blockCount >= maxBlocks"
+          @click="chooseInsert('section')"
+        >
+          <ListPlus :size="13" aria-hidden="true" />
+          Abschnitt am Ende
         </button>
         <button
           type="button"
-          :disabled="selection.index >= selection.count - 1"
-          @click="emit('position-down')"
+          role="menuitem"
+          :tabindex="insertOpen ? 0 : -1"
+          @click="chooseInsert('position')"
         >
-          Nach unten
+          <Plus :size="13" aria-hidden="true" />
+          Leistungsposition
         </button>
-        <button type="button" @click="emit('position-delete')">Löschen</button>
       </div>
-    </section>
-    <section
-      v-if="selection?.kind === 'footer'"
-      class="group this-offer"
-      aria-labelledby="this-offer-heading"
-    >
-      <p class="hint">Logo-Breite und vertikaler Versatz gelten nur für dieses Angebot.</p>
-      <label>
-        Logo-Breite
-        <span class="mm">
-          <input
-            type="text"
-            inputmode="decimal"
-            :value="widthDraft ?? shownWidth"
-            aria-label="Breite des Fußzeilenlogos in Millimetern"
-            @input="onWidth"
-            @blur="finishWidth"
-            @keydown.enter.prevent="finishWidth"
-          />
-          mm
-        </span>
-      </label>
-      <label>
-        Vertikaler Versatz
-        <span class="mm">
-          <input
-            type="text"
-            inputmode="decimal"
-            :value="offsetDraft ?? shownOffset"
-            aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."
-            @input="onOffset"
-            @blur="finishOffset"
-            @keydown.enter.prevent="finishOffset"
-          />
-          mm
-        </span>
-      </label>
-      <p class="hint">
-        Negativ nach oben, positiv nach unten. Nummer, Linie und Seitenzahl bleiben.
-      </p>
-    </section>
-    <section class="group" aria-label="Einfügen">
-      <h3>Einfügen</h3>
-      <button
-        v-if="!sectionSelection"
-        type="button"
-        :disabled="blockCount >= maxBlocks"
-        @click="emit('insert-section')"
-      >
-        Abschnitt am Ende
-      </button>
-      <button type="button" @click="emit('insert-position')">Leistungsposition</button>
-    </section>
-    <section class="group future-templates" aria-label="Vorlagen für neue Angebote">
-      <h3>Vorlagen für neue Angebote</h3>
-      <p class="hint">
-        Absender und Textvorlagen für künftige Angebote. Dieses Angebot bleibt unverändert.
-      </p>
-      <button type="button" @click="openTemplates">Vorlagen bearbeiten</button>
-    </section>
+    </div>
   </aside>
 </template>
 <style scoped>
 .offer-inspector {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   box-sizing: border-box;
-  width: 300px;
-  padding: 12px;
+  width: 340px;
+  padding: 10px;
   color: var(--h-text, #203c3d);
   background: var(--h-surface, #fffefa);
   border-left: 1px solid var(--h-line, #d8e2df);
@@ -702,69 +872,136 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
 .offer-inspector[hidden] {
   display: none !important;
 }
-.inspector-head h2,
-.group h3 {
+.format-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.format-title,
+.group h3,
+.offer-inspector h2 {
   margin: 0;
   font-size: 13px;
   font-weight: 650;
-  line-height: 1.3;
+  line-height: 1.2;
 }
-.inspector-head h2 {
-  color: var(--h-mint, #0e6f6c);
-}
-.context-detail {
-  margin: 2px 0 0;
+.format-title {
   color: var(--h-text, #203c3d);
-  font-size: 12px;
-  line-height: 1.35;
 }
-.hint,
-.field-label {
-  margin: 0;
-  color: var(--h-muted, #596e70);
-  font-size: 11px;
-  line-height: 1.35;
+.offer-inspector h2 {
+  color: var(--h-mint, #0e6f6c);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.field-label {
-  margin-bottom: 4px;
+.format-actions,
+.level-row,
+.pair,
+.action-grid,
+.segment,
+.bullets,
+.place-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.group {
-  display: grid;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--h-line, #d8e2df);
-}
+.format-actions button,
 .group button,
-.undo-row button,
-.start-row input,
-.mm input {
+.insert-face,
+.insert-menu button,
+.marker-move button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--h-line, #d8e2df);
   border-radius: 6px;
   background: transparent;
   color: inherit;
   font: inherit;
   font-size: 12px;
-}
-.group button,
-.undo-row button {
-  min-height: 30px;
-  padding: 4px 8px;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  text-align: center;
+}
+.format-actions button {
+  width: 28px;
+  padding: 0;
+}
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--h-canvas, #f7f6f2);
+}
+.tabs button {
+  min-height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--h-muted, #596e70);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tabs button[aria-selected='true'] {
+  background: var(--h-surface, #fffefa);
+  color: var(--h-mint, #0e6f6c);
+  font-weight: 650;
+}
+.context-detail,
+.hint,
+.field-label,
+.num-example {
+  margin: 0;
+  color: var(--h-muted, #596e70);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.context-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel,
+.group,
+.marker-place,
+.marker-fields {
+  display: grid;
+  gap: 6px;
+}
+.group {
+  padding-top: 8px;
+  border-top: 1px solid var(--h-line, #d8e2df);
 }
 .group button:hover:not(:disabled),
-.undo-row button:hover:not(:disabled) {
+.insert-face:hover,
+.insert-menu button:hover:not(:disabled),
+.format-actions button:hover:not(:disabled),
+.tabs button:hover {
   background: var(--h-fill, #e0f3f0);
 }
 .group button:focus-visible,
-.undo-row button:focus-visible,
-.mm input:focus-visible,
-.start-row input:focus-visible {
+.insert-face:focus-visible,
+.insert-menu button:focus-visible,
+.format-actions button:focus-visible,
+.tabs button:focus-visible,
+.inline-field input:focus-visible,
+.inline-field select:focus-visible,
+.marker-move input:focus-visible {
   outline: 1px solid var(--h-mint, #0e6f6c);
   outline-offset: 2px;
 }
 .group button:disabled,
-.undo-row button:disabled {
+.format-actions button:disabled,
+.insert-menu button:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -773,28 +1010,26 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
   background: var(--h-fill, #e0f3f0);
   color: var(--h-mint, #0e6f6c);
 }
-.undo-row,
-.action-grid,
 .segment,
-.bullets {
+.action-grid {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.action-grid {
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
 }
-.undo-row button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
+.segment button,
+.action-grid button,
+.pair button {
+  min-width: 0;
 }
-.segment {
-  grid-template-columns: 1fr 1fr 1fr;
+.level-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
 }
-.bullets {
-  grid-template-columns: repeat(4, 1fr);
-}
-.bullets button {
-  font-size: 16px;
+.level-row .level-tip,
+.level-row .level-tip button {
+  min-width: 0;
 }
 .level-tip {
   position: relative;
@@ -807,25 +1042,29 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
   margin: 0;
   font-size: 12px;
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 28px;
+  white-space: nowrap;
 }
-.marker-place {
+.bullets {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-.marker-field {
-  display: grid;
-  gap: 4px;
+.bullets button {
+  font-size: 15px;
 }
-.marker-move {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 28px auto;
-  gap: 4px;
+.inline-field,
+.mm {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
-.marker-move input {
-  width: 100%;
-  min-height: 30px;
+.inline-field input,
+.inline-field select,
+.mm input {
+  width: 132px;
+  min-height: 28px;
   padding: 0 6px;
   border: 1px solid var(--h-line, #d8e2df);
   border-radius: 6px;
@@ -834,8 +1073,58 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
   font: inherit;
   font-size: 12px;
 }
+.mm {
+  width: 132px;
+  justify-content: flex-end;
+}
+.mm input {
+  width: 72px;
+}
+.num-example {
+  font-variant-numeric: tabular-nums;
+  color: var(--h-text, #203c3d);
+}
+.place-head {
+  justify-content: space-between;
+}
+.disclosure {
+  border: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  font-weight: 650;
+}
+.disclosure svg {
+  transition: transform 120ms linear;
+}
+.disclosure svg.folded {
+  transform: rotate(-90deg);
+}
+.marker-field {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+}
+.marker-move {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  gap: 2px;
+  align-items: center;
+}
+.marker-move input {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
 .marker-move button {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0;
 }
 .level-tip:hover::after,
@@ -844,40 +1133,62 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
   position: absolute;
   z-index: 5;
   left: 0;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   width: max-content;
-  max-width: 240px;
-  padding: 4px 8px;
+  max-width: 220px;
+  padding: 4px 6px;
   border-radius: 6px;
   background: var(--h-text, #203c3d);
   color: var(--h-surface, #fffefa);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.3;
   white-space: normal;
   pointer-events: none;
 }
-.start-row,
-.mm {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.insert {
+  position: relative;
+  margin-top: auto;
 }
-.start-row {
-  justify-content: space-between;
-}
-.start-row input,
-.mm input {
-  width: 88px;
-  min-height: 30px;
-  padding: 0 8px;
-}
-.mm {
-  flex: 1;
-}
-.mm input {
+.insert-face,
+.group > button,
+.insert-menu button {
   width: 100%;
 }
-.group > button {
-  width: 100%;
+.insert-menu {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  width: min(220px, calc(100vw - 16px));
+  padding: 4px;
+  background: var(--h-surface, #fffefa);
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #10232714;
+}
+.insert-menu:not(.is-open) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .disclosure svg {
+    transition: none;
+  }
 }
 </style>
