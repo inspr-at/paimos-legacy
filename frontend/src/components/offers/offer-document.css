@@ -378,6 +378,14 @@
   min-width: 1ch;
   min-height: 1.2em;
 }
+.offer-document .offer-prose [data-text] b {
+  font-weight: 700;
+  font-synthesis: weight none;
+}
+.offer-document .offer-prose [data-text] i {
+  font-style: italic;
+  font-synthesis: style;
+}
 .offer-document .offer-prose .paragraph,
 .offer-document .offer-prose .item {
   margin: 0;

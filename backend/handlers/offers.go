@@ -158,6 +158,25 @@ func runOfferSettingsWriteHook() {
 		fn()
 	}
 }
+
+// offerWriteHook runs inside the offer save transaction, after the stored-prose
+// check and before the update. Tests overlap a second writer while the lock is held.
+var offerWriteHook atomic.Value
+
+func SetOfferWriteHookForTest(fn func()) {
+	if fn == nil {
+		offerWriteHook.Store(func() {})
+		return
+	}
+	offerWriteHook.Store(fn)
+}
+
+func runOfferWriteHook() {
+	fn, _ := offerWriteHook.Load().(func())
+	if fn != nil {
+		fn()
+	}
+}
 func GetOfferSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := loadOfferSettings()
 	if err != nil {
@@ -534,9 +553,18 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), 400)
 		return
 	}
+	// The database opens with _txlock=immediate, so this BEGIN takes the writer
+	// lock before the stored document is read. A legacy save cannot pass the
+	// prose check and then overwrite a newer commit.
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "Speichern fehlgeschlagen", 500)
+		return
+	}
+	defer tx.Rollback()
 	// The immutable customer number is loaded from this offer, never trusted from a draft client.
 	var rawExisting string
-	err := db.DB.QueryRow(`SELECT document FROM offers WHERE id=?`, chi.URLParam(r, "id")).Scan(&rawExisting)
+	err = tx.QueryRow(`SELECT document FROM offers WHERE id=?`, chi.URLParam(r, "id")).Scan(&rawExisting)
 	if errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, "Angebot nicht gefunden", 404)
 		return
@@ -555,6 +583,7 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
 		return
 	}
+	runOfferWriteHook()
 	raw, _ := json.Marshal(body.Document)
 	status := "draft"
 	var sent any
@@ -573,12 +602,16 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 		status = "sent"
 		sent = time.Now().UTC().Format(time.RFC3339)
 	}
-	o, err := scanOffer(db.DB.QueryRow(`UPDATE offers SET document=?,status=?,sent_at=?,public_token=COALESCE(?,public_token),revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=? AND status='draft' RETURNING `+offerColumns, string(raw), status, sent, token, chi.URLParam(r, "id"), body.Revision))
+	o, err := scanOffer(tx.QueryRow(`UPDATE offers SET document=?,status=?,sent_at=?,public_token=COALESCE(?,public_token),revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=? AND status='draft' RETURNING `+offerColumns, string(raw), status, sent, token, chi.URLParam(r, "id"), body.Revision))
 	if errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, "Das Angebot wurde inzwischen geändert oder bereits finalisiert. Bitte neu laden.", 409)
 		return
 	}
 	if err != nil {
+		jsonError(w, "Speichern fehlgeschlagen", 500)
+		return
+	}
+	if err = tx.Commit(); err != nil {
 		jsonError(w, "Speichern fehlgeschlagen", 500)
 		return
 	}

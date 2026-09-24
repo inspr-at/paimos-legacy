@@ -3,15 +3,22 @@ import { readFileSync } from 'node:fs'
 import { createApp, h, nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import OfferTitleBar from './OfferTitleBar.vue'
-import { nextOfferZoomStep, OFFER_ZOOM_STEPS } from './offerZoom'
+import { nextOfferZoomStep, OFFER_ZOOM_STEPS, parseOfferZoom } from './offerZoom'
 
 describe('offer zoom steps', () => {
   it('covers 25 through 800 and stops at the ends', () => {
     expect(OFFER_ZOOM_STEPS[0]).toBe(25)
     expect(OFFER_ZOOM_STEPS[OFFER_ZOOM_STEPS.length - 1]).toBe(800)
     expect([...OFFER_ZOOM_STEPS]).toEqual([
-      25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 600, 700, 800,
+      25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 600, 800,
     ])
+    expect(OFFER_ZOOM_STEPS).not.toContain(500)
+    expect(OFFER_ZOOM_STEPS).not.toContain(700)
+    expect(parseOfferZoom('500')).toBe(500)
+    expect(parseOfferZoom('700')).toBe(700)
+    expect(parseOfferZoom('24')).toBeNull()
+    expect(parseOfferZoom('801')).toBeNull()
+    expect(parseOfferZoom('100.5')).toBeNull()
     expect(nextOfferZoomStep(100, 1)).toBe(125)
     expect(nextOfferZoomStep(100, -1)).toBe(75)
     expect(nextOfferZoomStep(200, 1)).toBe(250)
@@ -74,17 +81,33 @@ describe('offer zoom steps', () => {
     expect(copy?.querySelector('.offer-number')?.textContent).toContain('A260924-01')
     expect(copy?.querySelector('.save-state')?.textContent).toContain('Gespeichert')
     const controls = [...el.querySelector('.zoom-controls')!.children]
-    expect(controls.map((node) => node.tagName)).toEqual(['SELECT', 'BUTTON', 'BUTTON'])
+    expect(controls.map((node) => node.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON'])
+    expect(controls[0]?.getAttribute('aria-label')).toBe('Zoom')
     expect(controls[1]?.getAttribute('aria-label')).toBe('Verkleinern')
     expect(controls[2]?.getAttribute('aria-label')).toBe('Vergrößern')
-    const labels = [...el.querySelectorAll('option')].map((option) => option.textContent?.trim())
+    expect(el.querySelector('select')).toBeNull()
+    controls[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    const popover = el.querySelector('[role="dialog"]')!
+    const labels = [...popover.querySelectorAll('button')].map((option) => option.textContent?.trim())
     expect(labels).toContain('Seitenbreite')
     expect(labels).toContain('Ganze Seite')
     expect(labels).toContain('25 %')
     expect(labels).toContain('800 %')
+    expect(labels).not.toContain('500 %')
+    expect(labels).not.toContain('700 %')
+    expect(popover.scrollHeight).toBeLessThanOrEqual(popover.clientHeight || popover.scrollHeight)
+    const typed = popover.querySelector<HTMLInputElement>('[aria-label="Zoom in Prozent"]')!
+    typed.value = '500'
+    typed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(modes).toContain('500')
     controls[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     controls[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(modes).toEqual(['125', '75'])
+    expect(modes).toEqual(['500', '125', '75'])
+    const collapse = el.querySelector<HTMLButtonElement>('[aria-label="Kopfzeilen einklappen"]')!
+    expect(collapse.getAttribute('aria-expanded')).toBe('true')
+    expect(el.textContent).not.toContain('Kopfzeilen einklappen')
     expect(el.querySelector('[aria-label="Einfügen"]')).toBeNull()
     app.unmount()
     el.remove()

@@ -139,6 +139,34 @@ describe('offer document prose', () => {
     expect(sheet.textContent).toContain('Analyse')
     expect(sheet.textContent).toContain('- Punkt')
     expect(sheet.textContent).toContain('Interviews')
+    const styled = offer([
+      {
+        heading: 'Stil',
+        body: 'Hallo',
+        nodes: [
+          {
+            kind: 'paragraph',
+            text: 'Hallo',
+            marks: [
+              { start: 0, end: 2, bold: true },
+              { start: 2, end: 5, italic: true },
+            ],
+          },
+        ],
+      },
+    ])
+    const styledHost = document.createElement('div')
+    document.body.appendChild(styledHost)
+    const styledApp = createApp(OfferDocument, { offer: styled, editable: false })
+    const styledVm = styledApp.mount(styledHost) as unknown as { paginate: () => Promise<void> }
+    await styledVm.paginate()
+    await nextTick()
+    const page = styledHost.querySelector('.sheet .offer-prose')
+    expect(page?.querySelector('b')?.textContent).toBe('Ha')
+    expect(page?.querySelector('i')?.textContent).toBe('llo')
+    expect(page?.textContent).toContain('Hallo')
+    styledApp.unmount()
+    styledHost.remove()
     expect(el.querySelector('.offer-document')?.getAttribute('data-print-blocked')).toContain(
       'Textbaustein 2 ist länger als eine Seite',
     )

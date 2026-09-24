@@ -58,7 +58,7 @@ describe('offer inspector', () => {
     expect(css).not.toMatch(/\.sheet\s*\{[^}]*justify-items:\s*center/)
     expect(css).toMatch(/\.sheet \.page\s*\{[^}]*zoom:\s*var\(--offer-zoom/)
     expect(css).toMatch(/@media print\s*\{[\s\S]*\.offer-inspector\s*,/)
-    expect(view).toContain('width: 300px')
+    expect(view).toContain('width: 340px')
     const none = await mount({ kind: 'none' })
     expect(none.el.querySelector('#offer-inspector')?.hasAttribute('hidden')).toBe(false)
     expect(button(none.el, 'Abschnitt am Ende')).toBeTruthy()

@@ -11,6 +11,18 @@ import {
   type OfferToolbarActionId,
 } from '@/components/offers/offerToolbarActions'
 import { OFFER_PROSE_WRITER_VERSION } from '@/components/offers/offerProse'
+import {
+  beginSave,
+  createRemoteWatch,
+  finishSave,
+  noteOwnRevision,
+  observeRemote,
+  pollDelayMs,
+  reloadChoice,
+  remoteIsNewer,
+  shouldCheckRemote,
+  type RemoteWatch,
+} from '@/components/offers/offerExternalChange'
 import { provideOfferProseSession } from '@/components/offers/offerProseSession'
 import {
   offerStatus,
@@ -80,6 +92,16 @@ const error = ref(''),
   finalizeOpen = ref(false)
 const loading = ref(true),
   finalizing = ref(false)
+const remoteWatch = ref<RemoteWatch | null>(null)
+const remoteNewer = ref(false)
+const remoteConfirm = ref(false)
+const remoteDialog = ref<HTMLDialogElement>()
+let pollGeneration = 0
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+let pollInFlight = false
+let pollQueued = false
+let unchangedPolls = 0
+let checkSerial = 0
 const renderer = ref<InstanceType<typeof OfferDocument>>()
 const finalizeDialog = ref<HTMLDialogElement>()
 const deleteDialog = ref<HTMLDialogElement>()
@@ -119,11 +141,13 @@ const editable = computed(
     auth.isAdmin &&
     !printMode.value &&
     !conflict.value &&
-    !finalizing.value,
+    !finalizing.value &&
+    !loading.value,
 )
 let timer: ReturnType<typeof setTimeout> | undefined
 let savedDocument = ''
 let pending: Promise<boolean> | undefined
+let documentGeneration = 0
 const state = computed(() =>
   loading.value
     ? 'Lädt …'
@@ -141,23 +165,121 @@ const state = computed(() =>
                 ? offerStatus(offer.value.status)
                 : 'Gespeichert',
 )
+function stopRemotePoll() {
+  pollGeneration += 1
+  pollQueued = false
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = undefined
+}
+function scheduleRemotePoll() {
+  if (pollTimer) clearTimeout(pollTimer)
+  const generation = pollGeneration
+  pollTimer = setTimeout(() => {
+    if (generation === pollGeneration) void checkRemoteRevision()
+  }, pollDelayMs(unchangedPolls))
+}
+async function checkRemoteRevision() {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = undefined
+  const generation = pollGeneration
+  const current = offer.value
+  if (
+    !shouldCheckRemote({
+      hidden: document.visibilityState === 'hidden',
+      inFlight: pollInFlight,
+      loading: loading.value,
+      finalizing: finalizing.value,
+      offerId: current ? String(current.id) : '',
+    })
+  ) {
+    if (pollInFlight) pollQueued = true
+    if (generation === pollGeneration && !pollInFlight) scheduleRemotePoll()
+    return
+  }
+  pollInFlight = true
+  const offerId = String(current!.id)
+  const checkId = ++checkSerial
+  try {
+    const fresh = await api.get<Offer>(`/offers/${offerId}`)
+    if (generation !== pollGeneration || !offer.value || String(offer.value.id) !== offerId) return
+    const watched = remoteWatch.value ?? createRemoteWatch(offerId, offer.value.revision)
+    remoteWatch.value = observeRemote(watched, {
+      offerId,
+      revision: fresh.revision,
+      checkId,
+    })
+    remoteNewer.value = remoteIsNewer(remoteWatch.value)
+    unchangedPolls = remoteNewer.value ? 0 : unchangedPolls + 1
+  } catch {
+    unchangedPolls = Math.min(unchangedPolls + 1, 4)
+  } finally {
+    pollInFlight = false
+    if (generation !== pollGeneration) return
+    if (pollQueued) {
+      pollQueued = false
+      void checkRemoteRevision()
+      return
+    }
+    scheduleRemotePoll()
+  }
+}
+function onRemoteVisibility() {
+  if (document.visibilityState === 'hidden') {
+    if (pollTimer) clearTimeout(pollTimer)
+    pollTimer = undefined
+    return
+  }
+  unchangedPolls = 0
+  void checkRemoteRevision()
+}
+function onRemoteFocus() {
+  if (document.visibilityState === 'hidden') return
+  unchangedPolls = 0
+  void checkRemoteRevision()
+}
+function requestRemoteReload() {
+  const choice = reloadChoice({
+    external: remoteNewer.value,
+    dirty: dirty.value,
+    saving: saving.value,
+  })
+  if (choice === 'direct') void load()
+  else if (choice === 'confirm') remoteConfirm.value = true
+}
 async function load() {
+  const ownedDocument = ++documentGeneration
+  const routeId = String(route.params.id ?? '')
+  const baseline = offer.value ? JSON.stringify(offer.value.document) : null
+  stopRemotePoll()
+  const generation = pollGeneration
+  if (timer) clearTimeout(timer)
   loading.value = true
   error.value = ''
+  const inflight = pending
   try {
+    if (inflight) await inflight
+    if (ownedDocument !== documentGeneration || String(route.params.id ?? '') !== routeId) return
     await loadInstance()
-    offer.value = await api.get<Offer>(`/offers/${route.params.id}`)
-    savedDocument = JSON.stringify(offer.value.document)
+    const fresh = await api.get<Offer>(`/offers/${routeId}`)
+    if (ownedDocument !== documentGeneration || String(route.params.id ?? '') !== routeId) return
+    if (baseline != null && offer.value && JSON.stringify(offer.value.document) !== baseline) return
+    offer.value = fresh
+    savedDocument = JSON.stringify(fresh.document)
     dirty.value = false
     conflict.value = false
     saveFailed.value = false
-    document.title = `${offer.value.offer_no} · Angebot`
+    document.title = `${fresh.offer_no} · Angebot`
     await nextTick()
+    if (ownedDocument !== documentGeneration) return
     renderer.value?.resetHistory()
+    remoteWatch.value = createRemoteWatch(String(fresh.id), fresh.revision)
+    remoteNewer.value = false
+    remoteConfirm.value = false
   } catch (e) {
-    error.value = errMsg(e)
+    if (ownedDocument === documentGeneration) error.value = errMsg(e)
   } finally {
-    loading.value = false
+    if (ownedDocument === documentGeneration) loading.value = false
+    if (generation === pollGeneration) scheduleRemotePoll()
   }
 }
 watch(
@@ -185,38 +307,52 @@ async function save(force = false): Promise<boolean> {
   if (conflict.value) return false
   if (timer) clearTimeout(timer)
   pending = (async () => {
+    const ownedDocument = documentGeneration
     saving.value = true
     saveFailed.value = false
     saveFeedback.value = true
+    if (remoteWatch.value) remoteWatch.value = beginSave(remoteWatch.value)
     if (feedbackTimer) clearTimeout(feedbackTimer)
     const started = Date.now()
     error.value = ''
+    const current = () => ownedDocument === documentGeneration
     try {
       let forceWrite = force
       while (
+        current() &&
         offer.value &&
         (forceWrite || JSON.stringify(offer.value.document) !== savedDocument)
       ) {
         forceWrite = false
         const snapshot = JSON.stringify(offer.value.document)
-        const result = await api.put<Offer>(`/offers/${offer.value.id}`, {
-          revision: offer.value.revision,
+        const revision = offer.value.revision
+        const offerId = offer.value.id
+        const result = await api.put<Offer>(`/offers/${offerId}`, {
+          revision,
           document: JSON.parse(snapshot),
           prose_writer_version: OFFER_PROSE_WRITER_VERSION,
         })
+        if (!current() || !offer.value || offer.value.id !== offerId) return true
         offer.value.revision = result.revision
         offer.value.updated_at = result.updated_at
         savedDocument = snapshot
+        if (remoteWatch.value) remoteWatch.value = noteOwnRevision(remoteWatch.value, result.revision)
       }
-      dirty.value = false
-      return true
+      if (!current()) return true
+      dirty.value = JSON.stringify(offer.value?.document) !== savedDocument
+      return !dirty.value
     } catch (e) {
+      if (!current()) return true
       saveFailed.value = true
       error.value = errMsg(e)
       if (e instanceof ApiError && e.status === 409) conflict.value = true
       return false
     } finally {
       saving.value = false
+      if (remoteWatch.value) {
+        remoteWatch.value = finishSave(remoteWatch.value)
+        remoteNewer.value = remoteIsNewer(remoteWatch.value)
+      }
       pending = undefined
       feedbackTimer = setTimeout(
         () => {
@@ -272,6 +408,7 @@ async function finalize() {
   if (overflow.value) return
   saving.value = true
   finalizing.value = true
+  if (remoteWatch.value) remoteWatch.value = beginSave(remoteWatch.value)
   error.value = ''
   try {
     const result = await api.put<Offer>(`/offers/${offer.value.id}`, {
@@ -283,6 +420,7 @@ async function finalize() {
     savedDocument = JSON.stringify(result.document)
     offer.value = result
     dirty.value = false
+    if (remoteWatch.value) remoteWatch.value = noteOwnRevision(remoteWatch.value, result.revision)
     finalizeOpen.value = false
     await nextTick()
     renderer.value?.resetHistory()
@@ -291,6 +429,10 @@ async function finalize() {
   } finally {
     saving.value = false
     finalizing.value = false
+    if (remoteWatch.value) {
+      remoteWatch.value = finishSave(remoteWatch.value)
+      remoteNewer.value = remoteIsNewer(remoteWatch.value)
+    }
   }
 }
 async function printOffer() {
@@ -344,7 +486,6 @@ const toolbarActions = computed(() =>
     saving: saving.value,
     overflow: !!overflow.value,
     copied: copied.value,
-    collapsed: collapsed.value,
     linkAvailable: !!publicUrl.value || auth.isAdmin,
     deleted: !!offer.value?.deleted,
     deleting: deleting.value,
@@ -356,7 +497,6 @@ function onToolbarAction(id: OfferToolbarActionId) {
   else if (id === 'position') addPosition()
   else if (id === 'duplicate') void duplicate()
   else if (id === 'finalize') finalizeOpen.value = true
-  else if (id === 'chrome') collapsed.value = !collapsed.value
   else if (id === 'delete') {
     if (offer.value?.deleted) void setDeleted()
     else {
@@ -385,10 +525,25 @@ function beforeUnload(e: BeforeUnloadEvent) {
     e.returnValue = ''
   }
 }
+watch(
+  () => String(route.params.id ?? ''),
+  (id, previous) => {
+    if (!previous || id === previous) return
+    remoteConfirm.value = false
+    void load()
+  },
+)
+watch(remoteConfirm, async (open) => {
+  await nextTick()
+  if (open) remoteDialog.value?.showModal()
+  else remoteDialog.value?.close()
+})
 onMounted(() => {
   void load()
   window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('resize', fitZoom)
+  document.addEventListener('visibilitychange', onRemoteVisibility)
+  window.addEventListener('focus', onRemoteFocus)
   resizeObserver = new ResizeObserver(fitZoom)
   if (viewport.value) resizeObserver.observe(viewport.value)
   if (toolbarElement()) resizeObserver.observe(toolbarElement()!)
@@ -404,8 +559,11 @@ const confirmationTimer = setInterval(() => {
 onBeforeUnmount(() => {
   clearInterval(confirmationTimer)
   if (timer) clearTimeout(timer)
+  stopRemotePoll()
   window.removeEventListener('beforeunload', beforeUnload)
   window.removeEventListener('resize', fitZoom)
+  document.removeEventListener('visibilitychange', onRemoteVisibility)
+  window.removeEventListener('focus', onRemoteFocus)
   resizeObserver?.disconnect()
   if (feedbackTimer) clearTimeout(feedbackTimer)
 })
@@ -441,10 +599,14 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :actions="toolbarActions"
         :show-inspector="editable"
         :inspector-open="inspectorOpen"
+        :header-collapsed="collapsed"
+        :external-changed="remoteNewer"
         @save="save(true)"
         @print="printOffer"
         @action="onToolbarAction"
         @toggle-inspector="inspectorOpen = !inspectorOpen"
+        @toggle-header="collapsed = !collapsed"
+        @reload-remote="requestRemoteReload"
       />
       <p v-if="loading" class="offer-notice">Angebot wird geladen …</p>
       <p v-if="error || overflow" role="alert" class="offer-notice offer-error">
@@ -528,6 +690,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           @position-up="selection.kind === 'position' && renderer?.move(selection.index, -1)"
           @position-down="selection.kind === 'position' && renderer?.move(selection.index, 1)"
           @position-delete="selection.kind === 'position' && renderer?.remove(selection.index)"
+          @hide="inspectorOpen = false"
         />
         <div ref="viewport" class="offer-stage">
           <OfferDocument
@@ -544,6 +707,22 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           />
         </div>
       </div>
+      <dialog
+        ref="remoteDialog"
+        class="finalize-dialog"
+        aria-label="Extern geändert"
+        @cancel.prevent="remoteConfirm = false"
+      >
+        <h2>Extern geändert</h2>
+        <p>
+          Ein neuerer Stand liegt vor. Aktualisieren ersetzt die lokalen Änderungen. Abbrechen
+          behält sie.
+        </p>
+        <button class="btn btn-primary" type="button" @click="remoteConfirm = false; load()">
+          Aktualisieren
+        </button>
+        <button class="btn" type="button" @click="remoteConfirm = false">Abbrechen</button>
+      </dialog>
       <OfferSettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
       <dialog
         ref="finalizeDialog"
@@ -653,7 +832,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
     order: 2;
     flex: none;
     align-self: stretch;
-    width: 300px;
+    width: 340px;
     max-height: 100%;
     overflow: auto;
   }
