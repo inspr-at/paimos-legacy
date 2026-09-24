@@ -33,6 +33,7 @@ import {
   type ProseListKind,
 } from './offerProse'
 import { explicitFooter, OFFER_FOOTER_LOGO } from './offerLayout'
+import OfferInlineStyleControls from './OfferInlineStyleControls.vue'
 import { useOfferProseSession, type ProseCommand } from './offerProseSession'
 
 const props = defineProps<{
@@ -509,10 +510,9 @@ onBeforeUnmount(() => {
     <p v-if="contextDetail" class="context-detail">{{ contextDetail }}</p>
 
     <div v-show="tab === 'text'" class="panel" role="tabpanel" aria-label="Text">
-      <div class="zeichen" aria-label="Zeichen">
+      <div class="zeichen">
         <p class="field-label">Zeichen</p>
-        <!-- PAI-1068 mounts OfferInlineStyleControls in this slot. No local stub. -->
-        <slot name="zeichen" />
+        <OfferInlineStyleControls />
       </div>
       <section v-if="selection?.kind === 'text'" class="group" aria-label="Listen und Einzug">
         <h3>Listen &amp; Einzug</h3>
@@ -976,6 +976,18 @@ onBeforeUnmount(() => {
 .marker-fields {
   display: grid;
   gap: 6px;
+}
+.zeichen :deep(.offer-inline-styles) {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+}
+.zeichen :deep(.offer-inline-styles button) {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
 }
 .group {
   padding-top: 8px;

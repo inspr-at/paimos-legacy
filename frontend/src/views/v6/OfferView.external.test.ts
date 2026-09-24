@@ -15,7 +15,10 @@ vi.mock('vue-router', async () => {
     RouterLink: {
       name: 'RouterLink',
       props: { to: { type: [String, Object], default: '' } },
-      setup(props: { to?: string }, { slots }: { slots: { default?: () => unknown } }) {
+      setup(
+        props: { to?: string },
+        { slots }: { slots: { default?: () => import('vue').VNode[] } },
+      ) {
         return () => h('a', { href: String(props.to ?? '') }, slots.default?.())
       },
     },
