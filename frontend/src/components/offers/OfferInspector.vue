@@ -2,7 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Redo2, Undo2 } from 'lucide-vue-next'
 import type { OfferBulletMarker, OfferFooterLayout, OfferSelection } from './types'
-import { OFFER_BULLET_GLYPH, type LevelLimit, type ProseListKind } from './offerProse'
+import {
+  canonMarkerMm,
+  MARKER_X_MM,
+  MARKER_Y_MM,
+  OFFER_BULLET_GLYPH,
+  plainGlyph,
+  TEXT_START_MM,
+  type LevelLimit,
+  type ProseListKind,
+} from './offerProse'
 import { explicitFooter, OFFER_FOOTER_LOGO } from './offerLayout'
 import { useOfferProseSession, type ProseCommand } from './offerProseSession'
 
@@ -33,6 +42,8 @@ const emit = defineEmits<{
 const widthDraft = ref<string | null>(null)
 const offsetDraft = ref<string | null>(null)
 const startDraft = ref<string | null>(null)
+const glyphDraft = ref<string | null>(null)
+const markerDraft = ref<{ axis: 'x' | 'y' | 'text'; raw: string } | null>(null)
 const session = useOfferProseSession()
 const maxBlocks = 20
 const listKinds: { id: ProseListKind; label: string }[] = [
@@ -60,6 +71,11 @@ const listState = computed(() => {
     outdent: false,
     indentLimit: null,
     outdentLimit: null,
+    level: null,
+    glyph: null,
+    markerX: null,
+    markerY: null,
+    textStart: null,
   }
   return { ...state, revision }
 })
@@ -124,6 +140,13 @@ const indentName = computed(() =>
 const outdentName = computed(() =>
   canOutdent.value ? 'Eine Listenebene höher' : `Ausrücken. ${higherTip.value}`,
 )
+const levelLabel = computed(() => {
+  const level = listState.value.level
+  if (level == null) return ''
+  if (level === 'mixed') return 'Gemischte Ebenen'
+  return `Listenebene ${level + 1} · ${level}× eingerückt`
+})
+const showMarkerPlace = computed(() => listState.value.kind !== 'none')
 
 watch(
   () => props.selection?.kind,
@@ -208,9 +231,11 @@ function onListStart(event: Event) {
   applyStart(raw)
 }
 function finishListStart() {
-  const raw = startDraft.value
   startDraft.value = null
-  if (raw != null) applyStart(raw)
+}
+function finishMarkerDrafts() {
+  glyphDraft.value = null
+  markerDraft.value = null
 }
 function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
   const key = event.key
@@ -236,8 +261,54 @@ function onRadioKey(event: KeyboardEvent, kind: 'list' | 'bullet') {
 }
 function finishNumericDrafts() {
   finishListStart()
+  finishMarkerDrafts()
   finishWidth()
   finishOffset()
+}
+function shownGlyph() {
+  if (glyphDraft.value != null) return glyphDraft.value
+  return typeof listState.value.glyph === 'string' ? listState.value.glyph : ''
+}
+function shownMarker(axis: 'x' | 'y' | 'text') {
+  if (markerDraft.value?.axis === axis) return markerDraft.value.raw
+  const value =
+    axis === 'x'
+      ? listState.value.markerX
+      : axis === 'y'
+        ? listState.value.markerY
+        : listState.value.textStart
+  return typeof value === 'number' ? String(value) : '0'
+}
+function onGlyph(event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  glyphDraft.value = raw
+  const plain = plainGlyph(raw)
+  if (plain == null) return
+  run({ type: 'glyph', glyph: plain })
+}
+function applyMarker(axis: 'x' | 'y' | 'text', raw: string) {
+  const parsed = completeMm(raw)
+  if (parsed == null) return
+  const bounds = axis === 'x' ? MARKER_X_MM : axis === 'y' ? MARKER_Y_MM : TEXT_START_MM
+  const value = canonMarkerMm(parsed, bounds.min, bounds.max)
+  if (value == null) return
+  run({ type: 'layout', axis, value })
+}
+function onMarker(axis: 'x' | 'y' | 'text', event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  markerDraft.value = { axis, raw }
+  applyMarker(axis, raw)
+}
+function nudgeMarker(axis: 'x' | 'y' | 'text', delta: number) {
+  const current =
+    axis === 'x'
+      ? listState.value.markerX
+      : axis === 'y'
+        ? listState.value.markerY
+        : listState.value.textStart
+  const base = typeof current === 'number' ? current : 0
+  markerDraft.value = null
+  applyMarker(axis, String(base + delta))
 }
 function undoEdit() {
   finishNumericDrafts()
@@ -267,6 +338,7 @@ function onDocPointer(event: PointerEvent) {
   const root = document.getElementById('offer-inspector')
   if (target instanceof Node && root?.contains(target)) return
   finishListStart()
+  finishMarkerDrafts()
   finishWidth()
   finishOffset()
 }
@@ -369,7 +441,19 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
             {{ OFFER_BULLET_GLYPH[item.id] }}
           </button>
         </div>
+        <label v-if="listState.kind === 'bullet'" class="start-row">
+          Eigenes Zeichen
+          <input
+            type="text"
+            maxlength="8"
+            :value="shownGlyph()"
+            aria-label="Eigenes Aufzählungszeichen"
+            @input="onGlyph"
+            @blur="finishMarkerDrafts"
+          />
+        </label>
       </template>
+      <p v-if="levelLabel" class="level-readout">{{ levelLabel }}</p>
       <div class="action-grid">
         <span class="level-tip" :data-tip="deeperTip" :title="deeperTip">
           <button
@@ -443,6 +527,87 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
         </label>
         <p class="hint">3, 3.1, 3.1.1. Fortsetzen gilt auch nach einem Absatz.</p>
       </template>
+      <div v-if="showMarkerPlace" class="marker-place">
+        <p class="hint">Gilt für die ausgewählten Listeneinträge.</p>
+        <div class="marker-field">
+          <span>Zeichen horizontal</span>
+          <span class="marker-move">
+            <button
+              type="button"
+              aria-label="Zeichen horizontal nach links"
+              @click="nudgeMarker('x', -0.5)"
+            >
+              −
+            </button>
+            <input
+              type="text"
+              inputmode="decimal"
+              :value="shownMarker('x')"
+              aria-label="Zeichen horizontal"
+              @input="onMarker('x', $event)"
+              @blur="finishMarkerDrafts"
+            />
+            <button
+              type="button"
+              aria-label="Zeichen horizontal nach rechts"
+              @click="nudgeMarker('x', 0.5)"
+            >
+              +
+            </button>
+            <span>mm</span>
+          </span>
+        </div>
+        <div class="marker-field">
+          <span>Zeichen vertikal</span>
+          <span class="marker-move">
+            <button
+              type="button"
+              aria-label="Zeichen vertikal nach oben"
+              @click="nudgeMarker('y', -0.5)"
+            >
+              −
+            </button>
+            <input
+              type="text"
+              inputmode="decimal"
+              :value="shownMarker('y')"
+              aria-label="Zeichen vertikal"
+              @input="onMarker('y', $event)"
+              @blur="finishMarkerDrafts"
+            />
+            <button
+              type="button"
+              aria-label="Zeichen vertikal nach unten"
+              @click="nudgeMarker('y', 0.5)"
+            >
+              +
+            </button>
+            <span>mm</span>
+          </span>
+        </div>
+        <div class="marker-field">
+          <span>Textbeginn</span>
+          <span class="marker-move">
+            <button type="button" aria-label="Textbeginn nach links" @click="nudgeMarker('text', -0.5)">
+              −
+            </button>
+            <input
+              type="text"
+              inputmode="decimal"
+              :value="shownMarker('text')"
+              aria-label="Textbeginn"
+              @input="onMarker('text', $event)"
+              @blur="finishMarkerDrafts"
+            />
+            <button type="button" aria-label="Textbeginn nach rechts" @click="nudgeMarker('text', 0.5)">
+              +
+            </button>
+            <span>mm</span>
+          </span>
+        </div>
+        <p class="hint">Negativ nach oben oder links, positiv nach unten oder rechts.</p>
+        <button type="button" @click="run({ type: 'layout-reset' })">Standard</button>
+      </div>
     </section>
     <section v-if="selection?.kind === 'position'" class="group" aria-label="Position">
       <h3>Position</h3>
@@ -637,6 +802,41 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', onDocPointer))
 }
 .level-tip button {
   width: 100%;
+}
+.level-readout {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.marker-place {
+  display: grid;
+  gap: 6px;
+}
+.marker-field {
+  display: grid;
+  gap: 4px;
+}
+.marker-move {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px auto;
+  gap: 4px;
+  align-items: center;
+}
+.marker-move input {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+.marker-move button {
+  min-height: 30px;
+  padding: 0;
 }
 .level-tip:hover::after,
 .level-tip:focus-within::after {

@@ -8,6 +8,8 @@ import {
 export const OFFER_PROSE_MAX_DEPTH = 5
 export const OFFER_PROSE_MAX_NODES = 100
 export const OFFER_PROSE_MAX_TEXT = 2000
+/** Sent with offer and template saves so an older editor cannot drop newer prose. */
+export const OFFER_PROSE_WRITER_VERSION = 2
 
 export type Caret = { index: number; offset: number }
 export type ProseRange = { anchor: Caret; focus: Caret }
@@ -49,6 +51,9 @@ export type NumberingCommand =
   | 'unbound'
 export type NumberingMode = 'restart' | 'continue' | 'start' | 'section' | 'independent'
 export const OFFER_LIST_START_MAX = 9999
+export const MARKER_X_MM = { min: -30, max: 30 } as const
+export const MARKER_Y_MM = { min: -20, max: 20 } as const
+export const TEXT_START_MM = { min: -20, max: 40 } as const
 /** Why indent or outdent would leave the current selection unchanged. */
 export type LevelLimit = 'max-depth' | 'no-previous' | 'boundary' | 'not-list' | 'mixed'
 export type ProseListState = {
@@ -62,6 +67,12 @@ export type ProseListState = {
   outdent: boolean
   indentLimit: LevelLimit | null
   outdentLimit: LevelLimit | null
+  /** Item depth. The inspector shows this as level depth+1. */
+  level: number | 'mixed' | null
+  glyph: string | 'mixed' | null
+  markerX: number | 'mixed' | null
+  markerY: number | 'mixed' | null
+  textStart: number | 'mixed' | null
 }
 
 /** First selected item keeps the command. Later items follow, except ownership which stays per item. */
@@ -87,6 +98,31 @@ type ItemAnchor = {
   section_bound?: true
 }
 
+type ItemLayout = {
+  glyph?: string
+  marker_x_mm?: number
+  marker_y_mm?: number
+  text_start_mm?: number
+}
+
+export function plainGlyph(value: string): string | null {
+  const text = value.trim()
+  if (!text) return ''
+  if ([...text].length > 4) return null
+  if (/[<>&]/.test(text) || /[\u0000-\u001F\u007F]/.test(text)) return null
+  return text
+}
+
+/** One decimal place, half away from zero, then the inclusive range. −1.25 becomes −1.3. */
+export function canonMarkerMm(value: number, min: number, max: number): number | null {
+  if (!Number.isFinite(value)) return null
+  const scaled = value * 10
+  const away = Math.sign(scaled) * Math.round(Math.abs(scaled))
+  const tenth = (away === 0 ? 0 : away) / 10
+  if (tenth < min || tenth > max) return null
+  return tenth
+}
+
 function anchorOf(node: OfferTextNode, keepAnchor: boolean): ItemAnchor | undefined {
   if (node.kind !== 'item') return undefined
   const anchor: ItemAnchor = {}
@@ -97,11 +133,24 @@ function anchorOf(node: OfferTextNode, keepAnchor: boolean): ItemAnchor | undefi
   return anchor.numbering || anchor.list_start || anchor.list_continue ? anchor : undefined
 }
 
+function layoutOf(node: OfferTextNode, glyph = true): ItemLayout | undefined {
+  if (node.kind !== 'item') return undefined
+  const layout: ItemLayout = {}
+  if (glyph && node.glyph) layout.glyph = node.glyph
+  if (node.marker_x_mm) layout.marker_x_mm = node.marker_x_mm
+  if (node.marker_y_mm) layout.marker_y_mm = node.marker_y_mm
+  if (node.text_start_mm) layout.text_start_mm = node.text_start_mm
+  return layout.glyph || layout.marker_x_mm || layout.marker_y_mm || layout.text_start_mm
+    ? layout
+    : undefined
+}
+
 function listItem(
   text: string,
   depth: number,
   marker?: OfferMarker,
   anchor?: ItemAnchor,
+  layout?: ItemLayout,
 ): OfferTextNode {
   const node: OfferTextNode = { kind: 'item', text }
   if (depth > 0) node.depth = depth
@@ -111,13 +160,17 @@ function listItem(
   if (marker === 'decimal' && anchor?.list_start && anchor.list_start > 0)
     node.list_start = anchor.list_start
   else if (marker === 'decimal' && anchor?.list_continue) node.list_continue = true
+  if (marker !== 'decimal' && layout?.glyph) node.glyph = layout.glyph
+  if (layout?.marker_x_mm) node.marker_x_mm = layout.marker_x_mm
+  if (layout?.marker_y_mm) node.marker_y_mm = layout.marker_y_mm
+  if (layout?.text_start_mm) node.text_start_mm = layout.text_start_mm
   return node
 }
 
 function cloneNodes(nodes: OfferTextNode[]): OfferTextNode[] {
   return nodes.map((node) =>
     node.kind === 'item'
-      ? listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true))
+      ? listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true), layoutOf(node))
       : paragraph(node.text),
   )
 }
@@ -178,7 +231,7 @@ function ceilEdge(edges: number[], offset: number): number {
 
 function sameNode(node: OfferTextNode, text: string, keepAnchor = true): OfferTextNode {
   return node.kind === 'item'
-    ? listItem(text, node.depth ?? 0, node.marker, anchorOf(node, keepAnchor))
+    ? listItem(text, node.depth ?? 0, node.marker, anchorOf(node, keepAnchor), layoutOf(node))
     : paragraph(text)
 }
 
@@ -188,26 +241,114 @@ function storedShape(nodes: OfferTextNode[]): OfferTextNode[] {
   return nodes.map((node) => sameNode(node, normalizeLineEndings(node.text)))
 }
 
-/** A paragraph resets nesting. An item can be at most one level deeper than the previous item. */
+/** A paragraph stays a paragraph. Item depth is kept up to the fixed maximum. */
 export function clampProse(nodes: OfferTextNode[]): OfferTextNode[] {
-  let previous = -1
   return storedShape(
     nodes.map((node) => {
-      if (node.kind !== 'item') {
-        previous = -1
-        return paragraph(cleanText(node.text))
-      }
-      const requested = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
-      const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
-      const depth = previous < 0 && node.list_continue ? requested : Math.min(requested, max)
-      previous = depth
-      return listItem(cleanText(node.text), depth, node.marker, anchorOf(node, true))
+      if (node.kind !== 'item') return paragraph(cleanText(node.text))
+      const depth = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
+      return listItem(cleanText(node.text), depth, node.marker, anchorOf(node, true), layoutOf(node))
     }),
   )
 }
 
 function zeroFrom(values: number[], depth: number) {
   for (let i = depth; i < values.length; i++) values[i] = 0
+}
+
+export type OutlineColumn = { col: number; prefix: number; indent: string }
+
+/** Hundredths of an em. These match the bullet and decimal columns in offer-document.css. */
+const BULLET_STEP_EM = 135
+const BULLET_TEXT_EM = 150
+const DECIMAL_STEP_EM = 155
+const DECIMAL_TEXT_EM = 230
+const OUTLINE_GAP_EM = 40
+
+function itemDepth(node: OfferTextNode): number {
+  return Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
+}
+
+function isOutlineItem(node: OfferTextNode | undefined): boolean {
+  return !!node && node.kind === 'item' && node.numbering === 'outline' && node.marker === 'decimal'
+}
+
+function findShallowerItem(nodes: readonly OfferTextNode[], index: number): number {
+  const depth = itemDepth(nodes[index]!)
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const earlier = nodes[cursor]
+    if (!earlier || earlier.kind !== 'item') continue
+    if (itemDepth(earlier) < depth) return cursor
+  }
+  return -1
+}
+
+function hasMixedAncestor(nodes: readonly OfferTextNode[], index: number): boolean {
+  let parent = findShallowerItem(nodes, index)
+  while (parent >= 0) {
+    if (!isOutlineItem(nodes[parent])) return true
+    parent = findShallowerItem(nodes, parent)
+  }
+  return false
+}
+
+function formatEmHundredths(value: number): string {
+  const whole = Math.trunc(value / 100)
+  const frac = value % 100
+  if (frac === 0) return String(whole)
+  if (frac % 10 === 0) return `${whole}.${frac / 10}`
+  return `${whole}.${String(frac).padStart(2, '0')}`
+}
+
+function outlineIndent(prefix: number, emHundredths: number, gaps: number): string {
+  if (emHundredths === 0) return `calc(${prefix}ch + ${gaps} * 0.4em)`
+  const em = formatEmHundredths(emHundredths)
+  if (prefix === 0 && gaps === 0) return `calc(${em}em)`
+  if (gaps === 0) return `calc(${prefix}ch + ${em}em)`
+  if (prefix === 0) return `calc(${em}em + ${gaps} * 0.4em)`
+  return `calc(${prefix}ch + ${em}em + ${gaps} * 0.4em)`
+}
+
+/**
+ * Column width in `ch` for each outline level.
+ * A pure outline child starts after the widest shallower label.
+ * A child of a bullet or plain number starts where that parent's text starts.
+ */
+export function outlineMarkerColumns(
+  labels: readonly string[],
+  nodes: readonly OfferTextNode[],
+): OutlineColumn[] {
+  const widths = Array<number>(OFFER_PROSE_MAX_DEPTH + 1).fill(0)
+  nodes.forEach((node, index) => {
+    if (!isOutlineItem(node)) return
+    const depth = itemDepth(node)
+    widths[depth] = Math.max(widths[depth] ?? 0, [...(labels[index] ?? '')].length)
+  })
+  const leadOf = (index: number): { ch: number; em: number } => {
+    const parent = findShallowerItem(nodes, index)
+    if (parent < 0) return { ch: 0, em: 0 }
+    const parentNode = nodes[parent]!
+    if (isOutlineItem(parentNode)) {
+      const base = leadOf(parent)
+      const col = Math.max(widths[itemDepth(parentNode)] ?? 0, 1)
+      return { ch: base.ch + col, em: base.em + OUTLINE_GAP_EM }
+    }
+    const depth = itemDepth(parentNode)
+    if (parentNode.marker === 'decimal') return { ch: 0, em: depth * DECIMAL_STEP_EM + DECIMAL_TEXT_EM }
+    return { ch: 0, em: depth * BULLET_STEP_EM + BULLET_TEXT_EM }
+  }
+  return nodes.map((node, index) => {
+    if (!isOutlineItem(node)) return { col: 0, prefix: 0, indent: '' }
+    const depth = itemDepth(node)
+    const col = Math.max(widths[depth] ?? 0, 1)
+    if (!hasMixedAncestor(nodes, index)) {
+      let prefix = 0
+      for (let level = 0; level < depth; level++) prefix += widths[level] ?? 0
+      return { col, prefix, indent: outlineIndent(prefix, 0, depth) }
+    }
+    const lead = leadOf(index)
+    return { col, prefix: lead.ch, indent: outlineIndent(lead.ch, lead.em, 0) }
+  })
 }
 
 /** One label per node. Plain decimals stay `1.`; outline decimals are `3`, `3.1`, `3.1.1`. */
@@ -227,6 +368,7 @@ export function proseMarkerLabels(nodes: OfferTextNode[], sectionNumber = 0): st
       zeroFrom(plain, depth)
       zeroFrom(outline, depth)
       snaps[index] = []
+      if (node.glyph) return node.glyph
       return node.marker ? OFFER_BULLET_GLYPH[node.marker] : bulletGlyph(depth)
     }
     const levels = (node.numbering === 'outline' ? outline : plain).slice()
@@ -256,9 +398,16 @@ export function proseMarkerLabels(nodes: OfferTextNode[], sectionNumber = 0): st
     snaps[index] = levels
     if (node.numbering === 'outline') {
       outline.splice(0, outline.length, ...levels)
-      const parts: number[] = []
-      for (let i = 0; i <= depth; i++) parts.push((levels[i] ?? 0) > 0 ? levels[i]! : 1)
-      if (node.section_bound && sectionNumber > 0) parts.unshift(sectionNumber)
+      const parts: string[] = []
+      if (node.section_bound && sectionNumber > 0) parts.push(String(sectionNumber))
+      for (let i = 0; i <= depth; i++) {
+        let n = levels[i] ?? 0
+        if (n <= 0) {
+          if (i < depth) continue
+          n = 1
+        }
+        parts.push(String(n))
+      }
       return parts.join('.')
     }
     plain.splice(0, plain.length, ...levels)
@@ -266,11 +415,17 @@ export function proseMarkerLabels(nodes: OfferTextNode[], sectionNumber = 0): st
   })
 }
 
+function readMarkerMm(value: unknown, min: number, max: number): number | null | undefined {
+  if (value == null) return null
+  if (typeof value !== 'number') return undefined
+  const canon = canonMarkerMm(value, min, max)
+  return canon == null ? undefined : canon
+}
+
 export function parseProseNodes(value: unknown): OfferTextNode[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length > OFFER_PROSE_MAX_NODES)
     return null
   const nodes: OfferTextNode[] = []
-  let previous = -1
   for (const raw of value) {
     if (!raw || typeof raw !== 'object') return null
     const record = raw as {
@@ -282,6 +437,10 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
       list_start?: unknown
       list_continue?: unknown
       section_bound?: unknown
+      glyph?: unknown
+      marker_x_mm?: unknown
+      marker_y_mm?: unknown
+      text_start_mm?: unknown
     }
     if ((record.kind !== 'paragraph' && record.kind !== 'item') || typeof record.text !== 'string')
       return null
@@ -311,10 +470,13 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
         numbering != null ||
         listStart != null ||
         listContinue === true ||
-        sectionBound === true
+        sectionBound === true ||
+        record.glyph != null ||
+        record.marker_x_mm != null ||
+        record.marker_y_mm != null ||
+        record.text_start_mm != null
       )
         return null
-      previous = -1
       nodes.push(paragraph(record.text))
       continue
     }
@@ -334,16 +496,31 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
       depth > OFFER_PROSE_MAX_DEPTH
     )
       return null
-    const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
-    if (depth > max && !(previous < 0 && listContinue === true)) return null
-    previous = depth
+    const glyph = record.glyph == null || record.glyph === '' ? '' : record.glyph
+    if (typeof glyph !== 'string' || (glyph !== '' && plainGlyph(glyph) !== glyph)) return null
+    if (itemMarker === 'decimal' && glyph) return null
+    const markerX = readMarkerMm(record.marker_x_mm, MARKER_X_MM.min, MARKER_X_MM.max)
+    const markerY = readMarkerMm(record.marker_y_mm, MARKER_Y_MM.min, MARKER_Y_MM.max)
+    const textStart = readMarkerMm(record.text_start_mm, TEXT_START_MM.min, TEXT_START_MM.max)
+    if (markerX === undefined || markerY === undefined || textStart === undefined) return null
     nodes.push(
-      listItem(record.text, depth, itemMarker, {
-        numbering: numbering === 'outline' ? 'outline' : undefined,
-        list_start: typeof listStart === 'number' ? listStart : undefined,
-        list_continue: listContinue === true ? true : undefined,
-        section_bound: sectionBound === true ? true : undefined,
-      }),
+      listItem(
+        record.text,
+        depth,
+        itemMarker,
+        {
+          numbering: numbering === 'outline' ? 'outline' : undefined,
+          list_start: typeof listStart === 'number' ? listStart : undefined,
+          list_continue: listContinue === true ? true : undefined,
+          section_bound: sectionBound === true ? true : undefined,
+        },
+        {
+          glyph: glyph || undefined,
+          marker_x_mm: markerX ?? undefined,
+          marker_y_mm: markerY ?? undefined,
+          text_start_mm: textStart ?? undefined,
+        },
+      ),
     )
   }
   return nodes
@@ -485,11 +662,13 @@ export function proseListState(nodes: OfferTextNode[], input: Caret | ProseRange
   const sectionBound: ProseListState['sectionBound'] =
     bounds.size === 1 ? [...bounds][0]! : bounds.size > 1 ? 'mixed' : false
   const level = proseLevelMoves(nodes, input)
+  const placement = selectionLayout(nodes, from, to)
   const shared = {
     outline,
     continued,
     start: startValue,
     sectionBound,
+    ...placement,
     indent: level.indent,
     outdent: level.outdent,
     indentLimit: level.indentLimit,
@@ -565,20 +744,9 @@ export function toggleItem(nodes: OfferTextNode[], index: number): OfferTextNode
   return clampProse(next)
 }
 
-function previousItemDepth(nodes: OfferTextNode[], index: number): number {
-  let previous = -1
-  for (let i = 0; i < index; i++) {
-    const node = nodes[i]
-    previous = node?.kind === 'item' ? (node.depth ?? 0) : -1
-  }
-  return previous
-}
-
-/** Depth the list structure allows, ignoring a continuation that is only holding its current level. */
-function structuralDepth(nodes: OfferTextNode[], index: number, requested: number): number {
-  const previous = previousItemDepth(nodes, index)
-  const max = previous < 0 ? 0 : Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
-  return Math.max(0, Math.min(requested, max))
+/** Depth allowed for an ordinary indent. A previous item is not required. */
+function structuralDepth(_nodes: OfferTextNode[], _index: number, requested: number): number {
+  return Math.max(0, Math.min(requested, OFFER_PROSE_MAX_DEPTH))
 }
 
 /** A real level change keeps outline style and continuation, and drops a level-specific start. */
@@ -605,7 +773,13 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
     const current = node.depth ?? 0
     const nextDepth = structuralDepth(next, index, current + 1)
     if (nextDepth <= current) return next
-    next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
+    next[index] = listItem(
+      node.text,
+      nextDepth,
+      node.marker,
+      movedAnchor(node),
+      layoutOf(node),
+    )
   }
   return clampProse(next)
 }
@@ -623,7 +797,7 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   const structural = structuralDepth(next, index, stepped)
   const nextDepth = node.list_continue && structural < stepped ? stepped : structural
   if (nextDepth === current) return next
-  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node))
+  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node), layoutOf(node))
   return clampProse(next)
 }
 
@@ -640,14 +814,8 @@ function indentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null
   const node = nodes[index]
   if (!node) return 'boundary'
   if (node.kind !== 'item') return null
-  const current = node.depth ?? 0
-  if (structuralDepth(nodes, index, current + 1) > current) return null
-  if (current >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
-  const previous = previousItemDepth(nodes, index)
-  if (previous < 0) return 'no-previous'
-  const max = Math.min(OFFER_PROSE_MAX_DEPTH, previous + 1)
-  if (current >= max && max >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
-  return 'boundary'
+  if ((node.depth ?? 0) >= OFFER_PROSE_MAX_DEPTH) return 'max-depth'
+  return null
 }
 
 function outdentLimitAt(nodes: OfferTextNode[], index: number): LevelLimit | null {
@@ -725,12 +893,12 @@ export function setListKind(
       if (node.list_start && node.list_start > 0) anchor.list_start = node.list_start
       else if (node.list_continue) anchor.list_continue = true
     }
-    next[index] = listItem(node.text, depth, 'decimal', anchor)
+    next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false))
     return clampProse(next)
   }
   const marker =
     node.kind === 'item' && node.marker && node.marker !== 'decimal' ? node.marker : undefined
-  next[index] = listItem(node.text, depth, marker)
+  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node))
   return clampProse(next)
 }
 
@@ -743,8 +911,87 @@ export function setBulletMarker(
   const node = next[index]
   if (!node) return next
   const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
-  next[index] = listItem(node.text, depth, marker)
+  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node, false))
   return clampProse(next)
+}
+
+function replaceItemLayout(
+  nodes: OfferTextNode[],
+  index: number,
+  layout: ItemLayout | undefined,
+): OfferTextNode[] {
+  const next = cloneNodes(nodes)
+  const node = next[index]
+  if (!node || node.kind !== 'item') return next
+  next[index] = listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true), layout)
+  return clampProse(next)
+}
+
+export function setItemGlyph(nodes: OfferTextNode[], index: number, glyph: string): OfferTextNode[] {
+  const node = nodes[index]
+  if (!node || node.kind !== 'item' || node.marker === 'decimal') return nodes
+  const plain = plainGlyph(glyph)
+  if (plain == null) return nodes
+  const layout = layoutOf(node) ?? {}
+  if (plain) layout.glyph = plain
+  else delete layout.glyph
+  return replaceItemLayout(nodes, index, layout)
+}
+
+export function setItemLayout(
+  nodes: OfferTextNode[],
+  index: number,
+  axis: 'x' | 'y' | 'text',
+  value: number,
+): OfferTextNode[] {
+  const node = nodes[index]
+  if (!node || node.kind !== 'item') return nodes
+  const bounds = axis === 'x' ? MARKER_X_MM : axis === 'y' ? MARKER_Y_MM : TEXT_START_MM
+  const canon = canonMarkerMm(value, bounds.min, bounds.max)
+  if (canon == null) return nodes
+  const layout = layoutOf(node) ?? {}
+  const key = axis === 'x' ? 'marker_x_mm' : axis === 'y' ? 'marker_y_mm' : 'text_start_mm'
+  if (canon === 0) delete layout[key]
+  else layout[key] = canon
+  return replaceItemLayout(nodes, index, layout)
+}
+
+export function resetItemLayout(nodes: OfferTextNode[], index: number): OfferTextNode[] {
+  const node = nodes[index]
+  if (!node || node.kind !== 'item' || !layoutOf(node)) return nodes
+  return replaceItemLayout(nodes, index, undefined)
+}
+
+function oneLayout<T>(values: Set<T>, count: number): T | 'mixed' | null {
+  if (count === 0) return null
+  if (values.size !== 1) return 'mixed'
+  return [...values][0]!
+}
+
+function selectionLayout(nodes: OfferTextNode[], from: number, to: number) {
+  const glyphs = new Set<string | null>()
+  const xs = new Set<number | null>()
+  const ys = new Set<number | null>()
+  const starts = new Set<number | null>()
+  const depths = new Set<number>()
+  let items = 0
+  for (let index = from; index <= to; index++) {
+    const node = nodes[index]
+    if (!node || node.kind !== 'item') continue
+    items += 1
+    depths.add(node.depth ?? 0)
+    glyphs.add(node.glyph ?? null)
+    xs.add(node.marker_x_mm ?? null)
+    ys.add(node.marker_y_mm ?? null)
+    starts.add(node.text_start_mm ?? null)
+  }
+  return {
+    level: items === 0 ? null : depths.size === 1 ? [...depths][0]! : ('mixed' as const),
+    glyph: oneLayout(glyphs, items),
+    markerX: oneLayout(xs, items),
+    markerY: oneLayout(ys, items),
+    textStart: oneLayout(starts, items),
+  }
 }
 
 /**
@@ -786,7 +1033,7 @@ export function setDecimalControl(
       return next
     anchor.list_start = start
   }
-  next[index] = listItem(node.text, depth, 'decimal', anchor)
+  next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false))
   return clampProse(next)
 }
 

@@ -16,6 +16,13 @@ export interface OfferTextNode {
   list_continue?: boolean
   /** Prefix the outline with the owning section number. The digits are not stored in the text. */
   section_bound?: boolean
+  /** Plain bullet symbol. Decimal items keep their generated number. */
+  glyph?: string
+  /** Signed millimetres from the marker's default position. */
+  marker_x_mm?: number
+  marker_y_mm?: number
+  /** Signed millimetres added before the item text. Wrapped lines use the same start. */
+  text_start_mm?: number
 }
 export interface OfferFooterLayout {
   logo_width_mm: number

@@ -306,9 +306,40 @@ without application chrome; browser Print / Save as PDF exports the same documen
 The v8 visual rules are preserved, with extra pages when the complete terms or
 positions exceed A4. An indivisible item exceeding a whole page must be split or
 shortened before printing. A text-block body may also carry optional `nodes`:
-paragraphs and nested bullet or numbered items (depth 0–5). An item may set
+paragraphs and nested bullet or numbered items (depth 0–5). Indent does not
+require a parent item; a saved depth is kept up to 5. An item may set
 `marker` to `disc`, `circle`, `square`, `dash` or `decimal`. Without `marker`,
-an item keeps the depth glyph (•, ◦, ▪). Decimal numbers without further fields restart after a
+an item keeps the depth glyph (•, ◦, ▪). A bullet may also set `glyph` to a
+short plain symbol; HTML is rejected, and numbered items keep their generated
+labels. `marker_x_mm` (−30–30), `marker_y_mm` (−20–20) and `text_start_mm`
+(−20–40) move that marker and the text start for the selected items. Omitted
+values keep the default alignment. Those offsets are stored to one decimal
+millimetre, rounding half away from zero, so 1.25 and −1.25 become 1.3 and
+−1.3. A value that rounds outside its range is rejected; −30.05 is outside
+−30–30. Each outline level is only as wide as its own number, and the next
+level starts at that text, so 5.4.1 does not begin left of the parent text and
+a short number does not reserve a wide gutter. An outline under a bullet or a
+plain number starts where that parent's text starts.
+Saves from an editor that understands this layout send `prose_writer_version: 2`
+on `PUT /api/offers/{id}` (including finalization) and on
+`PUT /api/integrations/crm/offers`. The server requires that version when the
+stored offer, the stored text defaults, or the incoming text already uses a
+feature the previous editor would drop: a custom bullet symbol, a marker or
+text offset, a first item at a depth that editor rejected, or a depth that
+skips a level. Without the version the save is refused and nothing is
+rewritten, even when that editor loaded the current revision and would
+otherwise write the text back without `nodes`. A client that sends version 2
+may remove the list or the layout on purpose. `POST /api/offers` still accepts
+the legacy `customer_id` and `duplicate_id` body and copies stored defaults or
+the duplicated offer on the server. A client-supplied `document` on that
+request is not stored; if that document needs version 2 and does not say so,
+the request is refused.
+Once an offer or text default uses these features, installing an older server
+or an older application build is not a safe way to keep editing. The older
+server accepts the stripped save. Ship a forward fix, or keep a server that
+still refuses an incapable writer. Do not restore an older database snapshot
+over offers written after that point.
+Decimal numbers without further fields restart after a
 paragraph or a non-numbered item at the same depth; nested numbers count on
 their own level. `numbering: "outline"` renders multilevel decimals such as
 3, 3.1, 3.1.1. `section_bound: true` prefixes that outline with the

@@ -77,6 +77,24 @@ function labels(root: ParentNode) {
   )
 }
 
+function buttonNamed(root: ParentNode, label: string) {
+  return [...root.querySelectorAll('button')].find((item) => item.textContent?.trim() === label)
+}
+
+function placeCaret(root: ParentNode, index: number) {
+  const el = root.querySelector<HTMLElement>(`[data-text][data-index="${index}"]`)
+  if (!el) throw new Error(`missing text ${index}`)
+  const text = el.firstChild
+  const target = text && text.nodeType === Node.TEXT_NODE ? text : el
+  const range = document.createRange()
+  range.setStart(target, 0)
+  range.collapse(true)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  document.dispatchEvent(new Event('selectionchange'))
+}
+
 describe('offer list start and signed offset', () => {
   it('applies a typed start value and keeps it when the field blurs', async () => {
     const mounted = await mount({ kind: 'text', index: 0, count: 1, heading: 'Leistung' })
@@ -130,6 +148,129 @@ describe('offer list start and signed offset', () => {
     await nextTick()
     expect(mounted.updates[mounted.updates.length - 1]?.nodes?.[1]?.list_start).toBe(5)
     mounted.unmount()
+  })
+
+  it('keeps the selected paragraph when the start field moves through the document body', async () => {
+    const updates: { body: string; nodes?: OfferTextNode[] }[] = []
+    const history: { body: string; nodes: OfferTextNode[] | null }[] = []
+    const prose = ref<{ body: string; nodes: OfferTextNode[] | null }>({
+      body: '',
+      nodes: [
+        {
+          kind: 'item',
+          text: 'Plan',
+          marker: 'decimal',
+          numbering: 'outline',
+          section_bound: true,
+        },
+        {
+          kind: 'item',
+          text: 'Bau',
+          marker: 'decimal',
+          numbering: 'outline',
+          section_bound: true,
+          list_continue: true,
+        },
+      ],
+    })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const Host = defineComponent({
+      setup() {
+        provideOfferProseSession()
+        return () =>
+          h('div', [
+            h(OfferInspector, {
+              open: true,
+              footer: { logo_width_mm: 43.3, logo_offset_mm: 2 },
+              canUndo: true,
+              selection: { kind: 'text', index: 1, count: 2, heading: 'Leistung' },
+              blockCount: 2,
+              onUndo: () => {
+                const previous = history.pop()
+                if (previous) prose.value = previous
+              },
+            }),
+            h(OfferProse, {
+              body: prose.value.body,
+              nodes: prose.value.nodes,
+              editable: true,
+              label: 'Textbaustein 2',
+              sectionNumber: 2,
+              onUpdate: (value: { body: string; nodes?: OfferTextNode[] }) => {
+                updates.push(value)
+                history.push({
+                  body: prose.value.body,
+                  nodes: prose.value.nodes?.map((node) => ({ ...node })) ?? null,
+                })
+                prose.value = { body: value.body, nodes: value.nodes ?? null }
+              },
+            }),
+          ])
+      },
+    })
+    const app = createApp(Host)
+    app.mount(el)
+    await nextTick()
+    const root = el.querySelector<HTMLElement>('.offer-prose')!
+    root.focus()
+    root.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    placeCaret(root, 1)
+    await nextTick()
+    click(buttonNamed(el, 'Neu beginnen')!)
+    await nextTick()
+    const start = el.querySelector<HTMLInputElement>('[aria-label="Nummerierung beginnen bei"]')!
+    const position = buttonNamed(el, 'Leistungsposition')!
+    start.focus()
+    window.getSelection()?.removeAllRanges()
+    start.value = '5'
+    start.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(labels(root)).toEqual(['2.1', '2.5'])
+    const undo = el.querySelector<HTMLButtonElement>('[aria-label="Rückgängig"]')!
+    undo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    undo.click()
+    start.blur()
+    start.focus()
+    await nextTick()
+    expect(labels(root)).toEqual(['2.1', '2.1'])
+    start.focus()
+    window.getSelection()?.removeAllRanges()
+    start.value = '5'
+    start.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(labels(root)).toEqual(['2.1', '2.5'])
+    let duringBlur: Element | null = null
+    start.addEventListener('blur', () => {
+      duringBlur = document.activeElement
+    })
+    start.blur()
+    expect(duringBlur).toBe(document.body)
+    expect(document.activeElement).toBe(document.body)
+    position.focus()
+    await nextTick()
+    expect(document.activeElement).toBe(position)
+    expect(el.querySelector('[aria-label="Nummerierung"]')?.getAttribute('aria-checked')).toBe(
+      'true',
+    )
+    expect(buttonNamed(el, 'Einrücken')?.hasAttribute('disabled')).toBe(false)
+    const beforeContinue = updates.length
+    click(buttonNamed(el, 'Fortsetzen')!)
+    await nextTick()
+    expect(updates.length).toBeGreaterThan(beforeContinue)
+    expect(labels(root)).toEqual(['2.1', '2.2'])
+    expect(updates[updates.length - 1]?.nodes?.[0]).not.toMatchObject({ list_continue: true })
+    expect(updates[updates.length - 1]?.nodes?.[1]).toMatchObject({
+      list_continue: true,
+      text: 'Bau',
+    })
+    click(el.querySelector('[aria-label="Aufzählung"]')!)
+    await nextTick()
+    expect(labels(root)).toEqual(['2.1', '•'])
+    expect(updates[updates.length - 1]?.nodes?.[0]?.marker).toBe('decimal')
+    expect(updates[updates.length - 1]?.nodes?.[1]?.marker).not.toBe('decimal')
+    app.unmount()
+    el.remove()
   })
 
   it('keeps a leading minus until the offset is a real number', async () => {
