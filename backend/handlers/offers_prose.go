@@ -6,8 +6,10 @@ package handlers
 import (
 	"errors"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -15,27 +17,36 @@ const (
 	offerProseMaxDepth = 5
 	offerProseMaxNodes = 100
 	offerProseMaxText  = 2000
-	// Clients that understand first-item depth, skipped levels, and marker layout send this.
-	// Older editors omit it and would save those offers as plain text.
-	offerProseWriterVersion      = 2
+	// 3 understands character marks. 2 still round-trips depth, symbols and marker layout.
+	// Older editors omit the version and would save newer prose as plain text.
+	offerProseWriterVersion      = 3
 	offerProseStaleWriterMessage = "Die gespeicherte Textformatierung ist neuer als dieser Editor. Bitte die Seite neu laden, bevor Sie speichern."
 )
 
 // OfferTextNode is an optional paragraph or bullet inside an offer text block.
 // Omitted nodes keep body as literal plain text.
 type OfferTextNode struct {
-	Kind         string  `json:"kind"`
-	Text         string  `json:"text"`
-	Depth        int     `json:"depth,omitempty"`
-	Marker       string  `json:"marker,omitempty"`
-	Numbering    string  `json:"numbering,omitempty"`
-	ListStart    int     `json:"list_start,omitempty"`
-	ListContinue bool    `json:"list_continue,omitempty"`
-	SectionBound bool    `json:"section_bound,omitempty"`
-	Glyph        string  `json:"glyph,omitempty"`
-	MarkerXMM    float64 `json:"marker_x_mm,omitempty"`
-	MarkerYMM    float64 `json:"marker_y_mm,omitempty"`
-	TextStartMM  float64 `json:"text_start_mm,omitempty"`
+	Kind         string            `json:"kind"`
+	Text         string            `json:"text"`
+	Depth        int               `json:"depth,omitempty"`
+	Marker       string            `json:"marker,omitempty"`
+	Numbering    string            `json:"numbering,omitempty"`
+	ListStart    int               `json:"list_start,omitempty"`
+	ListContinue bool              `json:"list_continue,omitempty"`
+	SectionBound bool              `json:"section_bound,omitempty"`
+	Glyph        string            `json:"glyph,omitempty"`
+	MarkerXMM    float64           `json:"marker_x_mm,omitempty"`
+	MarkerYMM    float64           `json:"marker_y_mm,omitempty"`
+	TextStartMM  float64           `json:"text_start_mm,omitempty"`
+	Marks        []OfferInlineMark `json:"marks,omitempty"`
+}
+
+// OfferInlineMark is a bold and/or italic range in UTF-16 code units.
+type OfferInlineMark struct {
+	Start  int  `json:"start"`
+	End    int  `json:"end"`
+	Bold   bool `json:"bold,omitempty"`
+	Italic bool `json:"italic,omitempty"`
 }
 
 func offerBullet(depth int) string {
@@ -155,11 +166,79 @@ func offerBlocksNeedWriter(blocks []OfferBlock) bool {
 // offerProseWriteUnsafe is true when this client would replace newer prose.
 // A client that sends offerProseWriterVersion may remove that prose on purpose.
 // The offer revision does not help: the older editor already loaded this revision.
+func proseNodesHaveMarks(nodes []OfferTextNode) bool {
+	for _, node := range nodes {
+		if len(node.Marks) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func offerBlocksHaveMarks(blocks []OfferBlock) bool {
+	for _, block := range blocks {
+		if proseNodesHaveMarks(block.Nodes) {
+			return true
+		}
+	}
+	return false
+}
+
 func offerProseWriteUnsafe(stored, incoming []OfferBlock, writer int) bool {
 	if writer >= offerProseWriterVersion {
 		return false
 	}
+	if offerBlocksHaveMarks(stored) || offerBlocksHaveMarks(incoming) {
+		return true
+	}
+	if writer >= 2 {
+		return false
+	}
 	return offerBlocksNeedWriter(stored) || offerBlocksNeedWriter(incoming)
+}
+
+func utf16Boundary(units []uint16, offset int) bool {
+	if offset <= 0 || offset >= len(units) {
+		return true
+	}
+	prev := units[offset-1]
+	next := units[offset]
+	return !(prev >= 0xD800 && prev <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF)
+}
+
+func canonInlineMarks(text string, marks []OfferInlineMark) ([]OfferInlineMark, bool) {
+	if len(marks) == 0 {
+		return nil, true
+	}
+	units := utf16.Encode([]rune(text))
+	ordered := append([]OfferInlineMark(nil), marks...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Start == ordered[j].Start {
+			return ordered[i].End < ordered[j].End
+		}
+		return ordered[i].Start < ordered[j].Start
+	})
+	out := make([]OfferInlineMark, 0, len(ordered))
+	for _, mark := range ordered {
+		if mark.Start < 0 || mark.End <= mark.Start || mark.End > len(units) || (!mark.Bold && !mark.Italic) {
+			return nil, false
+		}
+		if !utf16Boundary(units, mark.Start) || !utf16Boundary(units, mark.End) {
+			return nil, false
+		}
+		if len(out) > 0 && mark.Start < out[len(out)-1].End {
+			return nil, false
+		}
+		if len(out) > 0 {
+			prev := &out[len(out)-1]
+			if mark.Start == prev.End && mark.Bold == prev.Bold && mark.Italic == prev.Italic {
+				prev.End = mark.End
+				continue
+			}
+		}
+		out = append(out, OfferInlineMark{Start: mark.Start, End: mark.End, Bold: mark.Bold, Italic: mark.Italic})
+	}
+	return out, true
 }
 
 func plainItemGlyph(glyph string, marker string) (string, bool) {
@@ -288,9 +367,9 @@ func projectOfferNodes(nodes []OfferTextNode, sectionNumber int) string {
 
 func canonOfferNode(node OfferTextNode, depth int) OfferTextNode {
 	if node.Kind != "item" {
-		return OfferTextNode{Kind: "paragraph", Text: node.Text}
+		return OfferTextNode{Kind: "paragraph", Text: node.Text, Marks: node.Marks}
 	}
-	out := OfferTextNode{Kind: "item", Text: node.Text, Marker: node.Marker}
+	out := OfferTextNode{Kind: "item", Text: node.Text, Marker: node.Marker, Marks: node.Marks}
 	if depth > 0 {
 		out.Depth = depth
 	}
@@ -341,6 +420,11 @@ func normalizeOfferProseInSection(body string, nodes []OfferTextNode, sectionNum
 		if !glyphOK || !xOK || !yOK || !textOK {
 			return body, nil, errors.New("Ungültige Textstruktur")
 		}
+		marks, marksOK := canonInlineMarks(node.Text, node.Marks)
+		if !marksOK {
+			return body, nil, errors.New("Ungültige Textstruktur")
+		}
+		node.Marks = marks
 		node.Glyph = glyph
 		node.MarkerXMM = markerX
 		node.MarkerYMM = markerY
@@ -357,7 +441,7 @@ func normalizeOfferProseInSection(body string, nodes []OfferTextNode, sectionNum
 		}
 		canon = append(canon, canonOfferNode(node, node.Depth))
 	}
-	if len(canon) == 1 && canon[0].Kind == "paragraph" {
+	if len(canon) == 1 && canon[0].Kind == "paragraph" && len(canon[0].Marks) == 0 {
 		return canon[0].Text, nil, nil
 	}
 	return projectOfferNodes(canon, sectionNumber), canon, nil

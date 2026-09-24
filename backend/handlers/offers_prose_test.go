@@ -299,4 +299,40 @@ func TestProseWriterDetectsInitialDepthAndLayoutOnly(t *testing.T) {
 	if offerProseWriteUnsafe(initial, nil, offerProseWriterVersion) {
 		t.Fatal("capable client could not clear or keep initial depth")
 	}
+	marked := []OfferTextNode{{Kind: "paragraph", Text: "Hallo", Marks: []OfferInlineMark{{Start: 0, End: 2, Bold: true}}}}
+	if !proseNodesHaveMarks(marked) || !offerProseWriteUnsafe([]OfferBlock{{Nodes: marked}}, nil, 2) {
+		t.Fatal("version 2 was allowed to erase marks")
+	}
+	if offerProseWriteUnsafe([]OfferBlock{{Nodes: marked}}, nil, offerProseWriterVersion) {
+		t.Fatal("version 3 could not keep marks")
+	}
+	if offerProseWriteUnsafe(initial, nil, 2) {
+		t.Fatal("version 2 was blocked from layout it already understands")
+	}
+}
+
+func TestInlineMarksRoundTripAndRejectSplitSurrogates(t *testing.T) {
+	text := "a😀b"
+	body, stored, err := normalizeOfferProse("ignored", []OfferTextNode{{
+		Kind: "paragraph", Text: text, Marks: []OfferInlineMark{{Start: 1, End: 3, Italic: true}},
+	}})
+	if err != nil || body != text || len(stored) != 1 || !stored[0].Marks[0].Italic || stored[0].Marks[0].Start != 1 {
+		t.Fatalf("styled paragraph = %q %#v %v", body, stored, err)
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{
+		Kind: "paragraph", Text: text, Marks: []OfferInlineMark{{Start: 2, End: 3, Bold: true}},
+	}}); err == nil {
+		t.Fatal("split surrogate was stored")
+	}
+	plain, nodes, err := normalizeOfferProse("Plain", []OfferTextNode{{Kind: "paragraph", Text: "Plain"}})
+	if err != nil || plain != "Plain" || nodes != nil {
+		t.Fatalf("legacy paragraph = %q %#v %v", plain, nodes, err)
+	}
+	merged, kept, err := normalizeOfferProse("ignored", []OfferTextNode{{
+		Kind: "item", Text: "Wort", Marker: "disc",
+		Marks: []OfferInlineMark{{Start: 0, End: 2, Bold: true}, {Start: 2, End: 4, Bold: true}},
+	}})
+	if err != nil || len(kept) != 1 || kept[0].Marks[0].End != 4 || !strings.Contains(merged, "Wort") {
+		t.Fatalf("merged marks = %q %#v %v", merged, kept, err)
+	}
 }

@@ -1,6 +1,7 @@
 import {
   OFFER_BULLET_MARKERS,
   type OfferBulletMarker,
+  type OfferInlineMark,
   type OfferMarker,
   type OfferTextNode,
 } from './types'
@@ -8,8 +9,15 @@ import {
 export const OFFER_PROSE_MAX_DEPTH = 5
 export const OFFER_PROSE_MAX_NODES = 100
 export const OFFER_PROSE_MAX_TEXT = 2000
-/** Sent with offer and template saves so an older editor cannot drop newer prose. */
-export const OFFER_PROSE_WRITER_VERSION = 2
+/**
+ * Sent with offer and template saves so an older editor cannot drop newer prose.
+ * 3 understands character marks. 2 still round-trips depth, symbols and marker layout.
+ */
+export const OFFER_PROSE_WRITER_VERSION = 3
+export type { OfferInlineMark }
+export type InlineMarkName = 'normal' | 'bold' | 'italic'
+export type InlineMarkFlag = boolean | 'mixed'
+export type InlineMarkState = { bold: InlineMarkFlag; italic: InlineMarkFlag }
 
 export type Caret = { index: number; offset: number }
 export type ProseRange = { anchor: Caret; focus: Caret }
@@ -73,6 +81,8 @@ export type ProseListState = {
   markerX: number | 'mixed' | null
   markerY: number | 'mixed' | null
   textStart: number | 'mixed' | null
+  /** Active when every covered character has the flag. Mixed when only some do. */
+  marks?: InlineMarkState
 }
 
 /** First selected item keeps the command. Later items follow, except ownership which stays per item. */
@@ -87,8 +97,233 @@ export function isOfferMarker(value: unknown): value is OfferMarker {
   return value === 'decimal' || (OFFER_BULLET_MARKERS as readonly string[]).includes(String(value))
 }
 
-function paragraph(text: string): OfferTextNode {
-  return { kind: 'paragraph', text }
+function highSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff
+}
+
+function lowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff
+}
+
+/** A boundary may sit on a character edge, never between the two units of one pair. */
+export function inlineBoundary(text: string, offset: number): boolean {
+  if (offset <= 0 || offset >= text.length) return true
+  return !(highSurrogate(text.charCodeAt(offset - 1)) && lowSurrogate(text.charCodeAt(offset)))
+}
+
+function styleBits(mark: OfferInlineMark): number {
+  return (mark.bold ? 1 : 0) | (mark.italic ? 2 : 0)
+}
+
+function marksFromBits(bits: readonly number[]): OfferInlineMark[] | undefined {
+  const marks: OfferInlineMark[] = []
+  let index = 0
+  while (index < bits.length) {
+    const bitsAt = bits[index] ?? 0
+    let end = index + 1
+    while (end < bits.length && bits[end] === bitsAt) end += 1
+    if (bitsAt) {
+      const mark: OfferInlineMark = { start: index, end }
+      if (bitsAt & 1) mark.bold = true
+      if (bitsAt & 2) mark.italic = true
+      marks.push(mark)
+    }
+    index = end
+  }
+  return marks.length ? marks : undefined
+}
+
+function bitsFromMarks(text: string, marks: readonly OfferInlineMark[] | undefined): number[] {
+  const bits = Array<number>(text.length).fill(0)
+  for (const mark of marks ?? []) {
+    const style = styleBits(mark)
+    const start = Math.max(0, mark.start)
+    const end = Math.min(text.length, mark.end)
+    for (let index = start; index < end; index += 1) bits[index] = style
+  }
+  return bits
+}
+
+function copyMarks(marks: readonly OfferInlineMark[] | undefined): OfferInlineMark[] | undefined {
+  if (!marks?.length) return undefined
+  return marks.map((mark) => ({ ...mark }))
+}
+
+function marksAfterInsert(
+  text: string,
+  marks: OfferInlineMark[] | undefined,
+  at: number,
+  length: number,
+  style: number,
+): OfferInlineMark[] | undefined {
+  const bits = bitsFromMarks(text, marks)
+  const extra = Array<number>(length).fill(style)
+  return marksFromBits(bits.slice(0, at).concat(extra, bits.slice(at)))
+}
+
+export function typingStyleBits(nodes: readonly OfferTextNode[], caret: Caret): number {
+  const index = Math.max(0, Math.min(caret.index, Math.max(0, nodes.length - 1)))
+  const node = nodes[index]
+  if (!node?.text) return 0
+  const bits = bitsFromMarks(node.text, node.marks)
+  const offset = Math.max(0, Math.min(caret.offset, bits.length))
+  if (offset <= 0) return bits[0] ?? 0
+  return bits[offset - 1] ?? 0
+}
+
+export function toggleTypingBits(bits: number, mark: InlineMarkName): number {
+  if (mark === 'normal') return 0
+  return bits ^ (mark === 'bold' ? 1 : 2)
+}
+
+export function markStateFromBits(bits: number): InlineMarkState {
+  return { bold: !!(bits & 1), italic: !!(bits & 2) }
+}
+
+function reconcileMarkBits(
+  oldText: string,
+  newText: string,
+  marks: OfferInlineMark[] | undefined,
+): OfferInlineMark[] | undefined {
+  let prefix = 0
+  const limit = Math.min(oldText.length, newText.length)
+  while (prefix < limit && oldText[prefix] === newText[prefix]) prefix += 1
+  if (prefix > 0 && !inlineBoundary(oldText, prefix)) prefix -= 1
+  let suffix = 0
+  while (
+    suffix < oldText.length - prefix &&
+    suffix < newText.length - prefix &&
+    oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+  )
+    suffix += 1
+  if (suffix > 0 && !inlineBoundary(newText, newText.length - suffix)) suffix -= 1
+  const bits = bitsFromMarks(oldText, marks)
+  const head = bits.slice(0, prefix)
+  const tail = suffix ? bits.slice(bits.length - suffix) : []
+  const inherited = head.length ? head[head.length - 1]! : (tail[0] ?? 0)
+  const mid = Array<number>(Math.max(0, newText.length - prefix - suffix)).fill(inherited)
+  return marksFromBits(head.concat(mid, tail))
+}
+
+export function proseMarkState(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+  typing?: number | null,
+): InlineMarkState {
+  const { start, end } = rangeEnds(proseRange(input))
+  const last = Math.max(0, nodes.length - 1)
+  const from = Math.max(0, Math.min(start.index, last))
+  const to = Math.max(0, Math.min(end.index, last))
+  const covered: number[] = []
+  for (let index = from; index <= to; index += 1) {
+    const node = nodes[index]
+    if (!node) continue
+    const bits = bitsFromMarks(node.text, node.marks)
+    const sliceFrom = index === from ? Math.max(0, Math.min(start.offset, bits.length)) : 0
+    const sliceTo = index === to ? Math.max(sliceFrom, Math.min(end.offset, bits.length)) : bits.length
+    if (from === to && sliceFrom === sliceTo) {
+      return markStateFromBits(typing ?? typingStyleBits(nodes, { index: from, offset: sliceFrom }))
+    }
+    covered.push(...bits.slice(sliceFrom, sliceTo))
+  }
+  if (!covered.length) {
+    return markStateFromBits(typing ?? typingStyleBits(nodes, { index: from, offset: start.offset }))
+  }
+  const flag = (bit: number): InlineMarkFlag => {
+    const some = covered.some((value) => value & bit)
+    const every = covered.every((value) => value & bit)
+    if (every) return true
+    if (some) return 'mixed'
+    return false
+  }
+  return { bold: flag(1), italic: flag(2) }
+}
+
+export function applyInlineStyle(
+  nodes: OfferTextNode[],
+  input: Caret | ProseRange,
+  mark: InlineMarkName,
+): ProseEdit {
+  const range = proseRange(input)
+  const { start, end } = rangeEnds(range)
+  const caret = clampCaret(nodes, end)
+  if (rangeCollapsed(range)) return { nodes: cloneNodes(nodes), caret }
+  const next = cloneNodes(nodes)
+  const from = clampCaret(next, start)
+  const to = clampCaret(next, end)
+  for (let index = from.index; index <= to.index; index += 1) {
+    const node = next[index]
+    if (!node) continue
+    const sliceFrom = index === from.index ? from.offset : 0
+    const sliceTo = index === to.index ? to.offset : node.text.length
+    const snapped = snapInline(node.text, sliceFrom, sliceTo)
+    if (snapped.start === snapped.end) continue
+    const bits = bitsFromMarks(node.text, node.marks)
+    const slice = bits.slice(snapped.start, snapped.end)
+    if (mark === 'normal') {
+      for (let unit = snapped.start; unit < snapped.end; unit += 1) bits[unit] = 0
+    } else {
+      const flag = mark === 'bold' ? 1 : 2
+      const all = slice.length > 0 && slice.every((value) => value & flag)
+      for (let unit = snapped.start; unit < snapped.end; unit += 1)
+        bits[unit] = all ? bits[unit]! & ~flag : bits[unit]! | flag
+    }
+    next[index] = sameNode(node, node.text, true, marksFromBits(bits) ?? null)
+  }
+  const edit: ProseEdit = { nodes: clampProse(next), caret }
+  if (!proseNodesStorable(edit.nodes)) return refuse(nodes, caret, 'Dieser Absatz ist zu lang.')
+  return edit
+}
+
+/** Rejects overlap, empty flags, out-of-range offsets and a split surrogate. Merges equal neighbours. */
+export function parseInlineMarks(
+  text: string,
+  value: unknown,
+): OfferInlineMark[] | undefined | null {
+  if (value == null) return undefined
+  if (!Array.isArray(value)) return null
+  if (value.length === 0) return undefined
+  const parsed: OfferInlineMark[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') return null
+    const record = raw as { start?: unknown; end?: unknown; bold?: unknown; italic?: unknown }
+    if (
+      typeof record.start !== 'number' ||
+      typeof record.end !== 'number' ||
+      !Number.isInteger(record.start) ||
+      !Number.isInteger(record.end)
+    )
+      return null
+    if (record.bold != null && record.bold !== true) return null
+    if (record.italic != null && record.italic !== true) return null
+    if (!record.bold && !record.italic) return null
+    if (record.start < 0 || record.end <= record.start || record.end > text.length) return null
+    if (!inlineBoundary(text, record.start) || !inlineBoundary(text, record.end)) return null
+    const mark: OfferInlineMark = { start: record.start, end: record.end }
+    if (record.bold) mark.bold = true
+    if (record.italic) mark.italic = true
+    parsed.push(mark)
+  }
+  parsed.sort((a, b) => a.start - b.start || a.end - b.end)
+  for (let index = 1; index < parsed.length; index += 1) {
+    if (parsed[index]!.start < parsed[index - 1]!.end) return null
+  }
+  return marksFromBits(bitsFromMarks(text, parsed))
+}
+
+function snapInline(text: string, start: number, end: number): { start: number; end: number } {
+  let from = Math.max(0, Math.min(start, text.length))
+  let to = Math.max(from, Math.min(end, text.length))
+  if (from > 0 && !inlineBoundary(text, from)) from -= 1
+  if (to < text.length && !inlineBoundary(text, to)) to += 1
+  return { start: from, end: to }
+}
+
+function paragraph(text: string, marks?: OfferInlineMark[]): OfferTextNode {
+  const node: OfferTextNode = { kind: 'paragraph', text }
+  const stored = copyMarks(marks)
+  if (stored) node.marks = stored
+  return node
 }
 
 type ItemAnchor = {
@@ -151,8 +386,11 @@ function listItem(
   marker?: OfferMarker,
   anchor?: ItemAnchor,
   layout?: ItemLayout,
+  marks?: OfferInlineMark[],
 ): OfferTextNode {
   const node: OfferTextNode = { kind: 'item', text }
+  const stored = copyMarks(marks)
+  if (stored) node.marks = stored
   if (depth > 0) node.depth = depth
   if (marker) node.marker = marker
   if (marker === 'decimal' && anchor?.numbering === 'outline') node.numbering = 'outline'
@@ -170,8 +408,15 @@ function listItem(
 function cloneNodes(nodes: OfferTextNode[]): OfferTextNode[] {
   return nodes.map((node) =>
     node.kind === 'item'
-      ? listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true), layoutOf(node))
-      : paragraph(node.text),
+      ? listItem(
+          node.text,
+          node.depth ?? 0,
+          node.marker,
+          anchorOf(node, true),
+          layoutOf(node),
+          node.marks,
+        )
+      : paragraph(node.text, node.marks),
   )
 }
 
@@ -229,25 +474,82 @@ function ceilEdge(edges: number[], offset: number): number {
   return edges[edges.length - 1] ?? offset
 }
 
-function sameNode(node: OfferTextNode, text: string, keepAnchor = true): OfferTextNode {
+function sameNode(
+  node: OfferTextNode,
+  text: string,
+  keepAnchor = true,
+  marks?: OfferInlineMark[] | null,
+): OfferTextNode {
+  const next = marks === undefined ? node.marks : (marks ?? undefined)
   return node.kind === 'item'
-    ? listItem(text, node.depth ?? 0, node.marker, anchorOf(node, keepAnchor), layoutOf(node))
-    : paragraph(text)
+    ? listItem(text, node.depth ?? 0, node.marker, anchorOf(node, keepAnchor), layoutOf(node), next)
+    : paragraph(text, next)
+}
+
+/** Map marks through a rewrite that deletes or replaces one code unit at a time. */
+function remapMarks(
+  source: string,
+  marks: OfferInlineMark[] | undefined,
+  map: readonly number[],
+): OfferInlineMark[] | undefined {
+  if (!marks?.length) return undefined
+  const bits = bitsFromMarks(source, marks)
+  const next = Array<number>(map[source.length] ?? 0).fill(0)
+  for (let index = 0; index < source.length; index += 1) {
+    const at = map[index] ?? 0
+    const after = map[index + 1] ?? at
+    if (after === at) continue
+    for (let unit = at; unit < after; unit += 1) next[unit] = bits[index] ?? 0
+  }
+  return marksFromBits(next)
+}
+
+function rewriteTracked(text: string, clean: boolean, lines: boolean): { text: string; map: number[] } {
+  let out = ''
+  const map = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!
+    const next = text[index + 1]
+    if (lines && char === '\r' && next === '\n') {
+      map.push(out.length)
+      continue
+    }
+    if (clean && /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(char)) {
+      map.push(out.length)
+      continue
+    }
+    out += lines && char === '\r' ? '\n' : char
+    map.push(out.length)
+  }
+  return { text: out, map }
+}
+
+function nodeWithRewrite(node: OfferTextNode, clean: boolean, lines: boolean): OfferTextNode {
+  const rewritten = rewriteTracked(node.text, clean, lines)
+  return sameNode(node, rewritten.text, true, remapMarks(node.text, node.marks, rewritten.map))
 }
 
 function storedShape(nodes: OfferTextNode[]): OfferTextNode[] {
-  const structured = nodes.length > 1 || nodes[0]?.kind === 'item'
+  const structured = nodes.length > 1 || nodes[0]?.kind === 'item' || !!nodes[0]?.marks?.length
   if (!structured) return nodes
-  return nodes.map((node) => sameNode(node, normalizeLineEndings(node.text)))
+  return nodes.map((node) => nodeWithRewrite(node, false, true))
 }
 
 /** A paragraph stays a paragraph. Item depth is kept up to the fixed maximum. */
 export function clampProse(nodes: OfferTextNode[]): OfferTextNode[] {
   return storedShape(
     nodes.map((node) => {
-      if (node.kind !== 'item') return paragraph(cleanText(node.text))
-      const depth = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
-      return listItem(cleanText(node.text), depth, node.marker, anchorOf(node, true), layoutOf(node))
+      const cleaned = nodeWithRewrite(node, true, false)
+      if (cleaned.kind !== 'item') return cleaned
+      const depth = Math.max(0, Math.min(cleaned.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
+      return listItem(
+        cleaned.text,
+        depth,
+        cleaned.marker,
+        anchorOf(cleaned, true),
+        layoutOf(cleaned),
+        cleaned.marks,
+      )
     }),
   )
 }
@@ -441,6 +743,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
       marker_x_mm?: unknown
       marker_y_mm?: unknown
       text_start_mm?: unknown
+      marks?: unknown
     }
     if ((record.kind !== 'paragraph' && record.kind !== 'item') || typeof record.text !== 'string')
       return null
@@ -477,7 +780,9 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
         record.text_start_mm != null
       )
         return null
-      nodes.push(paragraph(record.text))
+      const paragraphMarks = parseInlineMarks(record.text, record.marks)
+      if (paragraphMarks === null) return null
+      nodes.push(paragraph(record.text, paragraphMarks))
       continue
     }
     const itemMarker = isOfferMarker(marker) ? marker : undefined
@@ -503,6 +808,8 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
     const markerY = readMarkerMm(record.marker_y_mm, MARKER_Y_MM.min, MARKER_Y_MM.max)
     const textStart = readMarkerMm(record.text_start_mm, TEXT_START_MM.min, TEXT_START_MM.max)
     if (markerX === undefined || markerY === undefined || textStart === undefined) return null
+    const itemMarks = parseInlineMarks(record.text, record.marks)
+    if (itemMarks === null) return null
     nodes.push(
       listItem(
         record.text,
@@ -520,6 +827,7 @@ export function parseProseNodes(value: unknown): OfferTextNode[] | null {
           marker_y_mm: markerY ?? undefined,
           text_start_mm: textStart ?? undefined,
         },
+        itemMarks,
       ),
     )
   }
@@ -587,7 +895,8 @@ export function persistProse(
 ): { body: string; nodes?: OfferTextNode[] } {
   const clean = clampProse(nodes)
   const usable = clean.length > 0 ? clean : [paragraph('')]
-  if (usable.length === 1 && usable[0]!.kind === 'paragraph') return { body: usable[0]!.text }
+  if (usable.length === 1 && usable[0]!.kind === 'paragraph' && !usable[0]!.marks?.length)
+    return { body: usable[0]!.text }
   return { body: projectProse(usable, sectionNumber), nodes: usable }
 }
 
@@ -668,6 +977,7 @@ export function proseListState(nodes: OfferTextNode[], input: Caret | ProseRange
     continued,
     start: startValue,
     sectionBound,
+    marks: proseMarkState(nodes, input),
     ...placement,
     indent: level.indent,
     outdent: level.outdent,
@@ -706,7 +1016,14 @@ export function deleteProseRange(nodes: OfferTextNode[], input: Caret | ProseRan
     if (cut === keep) return { nodes: cloneNodes(nodes), caret: { index: from.index, offset: cut } }
     const text = node.text.slice(0, cut) + node.text.slice(keep)
     const next = cloneNodes(nodes)
-    next[from.index] = sameNode(node, text)
+    next[from.index] = sameNode(
+      node,
+      text,
+      true,
+      marksFromBits(
+        bitsFromMarks(node.text, node.marks).slice(0, cut).concat(bitsFromMarks(node.text, node.marks).slice(keep)),
+      ) ?? null,
+    )
     return { nodes: clampProse(next), caret: { index: from.index, offset: cut } }
   }
   const left = nodes[from.index]!
@@ -714,6 +1031,12 @@ export function deleteProseRange(nodes: OfferTextNode[], input: Caret | ProseRan
   const cut = floorEdge(graphemeEdges(left.text), from.offset)
   const keep = ceilEdge(graphemeEdges(right.text), to.offset)
   const text = left.text.slice(0, cut) + right.text.slice(keep)
+  const joined =
+    marksFromBits(
+      bitsFromMarks(left.text, left.marks)
+        .slice(0, cut)
+        .concat(bitsFromMarks(right.text, right.marks).slice(keep)),
+    ) ?? null
   if (textLength(text) > OFFER_PROSE_MAX_TEXT) {
     return refuse(
       nodes,
@@ -723,7 +1046,7 @@ export function deleteProseRange(nodes: OfferTextNode[], input: Caret | ProseRan
   }
   const next = clampProse([
     ...nodes.slice(0, from.index),
-    sameNode(left, text),
+    sameNode(left, text, true, joined),
     ...nodes.slice(to.index + 1),
   ])
   return {
@@ -736,10 +1059,17 @@ export function toggleItem(nodes: OfferTextNode[], index: number): OfferTextNode
   const next = cloneNodes(nodes)
   const node = next[index]
   if (!node) return next
-  if (node.kind === 'item') next[index] = paragraph(node.text)
+  if (node.kind === 'item') next[index] = paragraph(node.text, node.marks)
   else {
     const prev = next[index - 1]
-    next[index] = listItem(node.text, prev?.kind === 'item' ? (prev.depth ?? 0) : 0)
+    next[index] = listItem(
+      node.text,
+      prev?.kind === 'item' ? (prev.depth ?? 0) : 0,
+      undefined,
+      undefined,
+      undefined,
+      node.marks,
+    )
   }
   return clampProse(next)
 }
@@ -768,7 +1098,7 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
     const marker = prev?.kind === 'item' ? prev.marker : undefined
     const anchor: ItemAnchor | undefined =
       prev?.kind === 'item' && prev.numbering === 'outline' ? { numbering: 'outline' } : undefined
-    next[index] = listItem(node.text, depth, marker, anchor)
+    next[index] = listItem(node.text, depth, marker, anchor, undefined, node.marks)
   } else {
     const current = node.depth ?? 0
     const nextDepth = structuralDepth(next, index, current + 1)
@@ -779,6 +1109,7 @@ export function indentItem(nodes: OfferTextNode[], index: number): OfferTextNode
       node.marker,
       movedAnchor(node),
       layoutOf(node),
+      node.marks,
     )
   }
   return clampProse(next)
@@ -790,14 +1121,14 @@ export function outdentItem(nodes: OfferTextNode[], index: number): OfferTextNod
   if (!node || node.kind !== 'item') return next
   const current = node.depth ?? 0
   if (current <= 0) {
-    next[index] = paragraph(node.text)
+    next[index] = paragraph(node.text, node.marks)
     return clampProse(next)
   }
   const stepped = current - 1
   const structural = structuralDepth(next, index, stepped)
   const nextDepth = node.list_continue && structural < stepped ? stepped : structural
   if (nextDepth === current) return next
-  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node), layoutOf(node))
+  next[index] = listItem(node.text, nextDepth, node.marker, movedAnchor(node), layoutOf(node), node.marks)
   return clampProse(next)
 }
 
@@ -883,7 +1214,7 @@ export function setListKind(
   const node = next[index]
   if (!node) return next
   if (kind === 'none') {
-    next[index] = paragraph(node.text)
+    next[index] = paragraph(node.text, node.marks)
     return clampProse(next)
   }
   const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
@@ -893,12 +1224,12 @@ export function setListKind(
       if (node.list_start && node.list_start > 0) anchor.list_start = node.list_start
       else if (node.list_continue) anchor.list_continue = true
     }
-    next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false))
+    next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false), node.marks)
     return clampProse(next)
   }
   const marker =
     node.kind === 'item' && node.marker && node.marker !== 'decimal' ? node.marker : undefined
-  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node))
+  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node), node.marks)
   return clampProse(next)
 }
 
@@ -911,7 +1242,7 @@ export function setBulletMarker(
   const node = next[index]
   if (!node) return next
   const depth = node.kind === 'item' ? (node.depth ?? 0) : siblingDepth(next, index)
-  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node, false))
+  next[index] = listItem(node.text, depth, marker, undefined, layoutOf(node, false), node.marks)
   return clampProse(next)
 }
 
@@ -923,7 +1254,7 @@ function replaceItemLayout(
   const next = cloneNodes(nodes)
   const node = next[index]
   if (!node || node.kind !== 'item') return next
-  next[index] = listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true), layout)
+  next[index] = listItem(node.text, node.depth ?? 0, node.marker, anchorOf(node, true), layout, node.marks)
   return clampProse(next)
 }
 
@@ -1033,7 +1364,7 @@ export function setDecimalControl(
       return next
     anchor.list_start = start
   }
-  next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false))
+  next[index] = listItem(node.text, depth, 'decimal', anchor, layoutOf(node, false), node.marks)
   return clampProse(next)
 }
 
@@ -1085,11 +1416,12 @@ export function enterProse(nodes: OfferTextNode[], input: Caret | ProseRange): P
   }
   const left = current.text.slice(0, caret.offset)
   const right = current.text.slice(caret.offset)
+  const split = bitsFromMarks(current.text, current.marks)
   const edit: ProseEdit = {
     nodes: clampProse([
       ...cleared.nodes.slice(0, caret.index),
-      sameNode(current, left, true),
-      sameNode(current, right, false),
+      sameNode(current, left, true, marksFromBits(split.slice(0, caret.offset)) ?? null),
+      sameNode(current, right, false, marksFromBits(split.slice(caret.offset)) ?? null),
       ...cleared.nodes.slice(caret.index + 1),
     ]),
     caret: { index: caret.index + 1, offset: 0 },
@@ -1109,7 +1441,13 @@ export function insertSoftBreak(nodes: OfferTextNode[], input: Caret | ProseRang
   if (textLength(text) > OFFER_PROSE_MAX_TEXT)
     return refuse(nodes, caret, 'Dieser Absatz ist zu lang.')
   const next = cloneNodes(cleared.nodes)
-  next[caret.index] = sameNode(node, text)
+  const style = typingStyleBits([node], { index: 0, offset: caret.offset })
+  next[caret.index] = sameNode(
+    node,
+    text,
+    true,
+    marksAfterInsert(node.text, node.marks, caret.offset, 1, style) ?? null,
+  )
   return { nodes: next, caret: { index: caret.index, offset: caret.offset + 1 } }
 }
 
@@ -1131,7 +1469,13 @@ export function backspaceProse(nodes: OfferTextNode[], input: Caret | ProseRange
   const prev = nodes[caret.index - 1]!
   if (textLength(prev.text + current.text) > OFFER_PROSE_MAX_TEXT)
     return refuse(nodes, caret, 'Dieser Absatz ist zu lang.')
-  const merged = sameNode(prev, prev.text + current.text)
+  const merged = sameNode(
+    prev,
+    prev.text + current.text,
+    true,
+    marksFromBits(bitsFromMarks(prev.text, prev.marks).concat(bitsFromMarks(current.text, current.marks))) ??
+      null,
+  )
   return {
     nodes: clampProse([
       ...nodes.slice(0, caret.index - 1),
@@ -1161,7 +1505,14 @@ export function deleteForwardProse(nodes: OfferTextNode[], input: Caret | ProseR
   return {
     nodes: clampProse([
       ...nodes.slice(0, caret.index),
-      sameNode(current, current.text + nextNode.text),
+      sameNode(
+        current,
+        current.text + nextNode.text,
+        true,
+        marksFromBits(
+          bitsFromMarks(current.text, current.marks).concat(bitsFromMarks(nextNode.text, nextNode.marks)),
+        ) ?? null,
+      ),
       ...nodes.slice(caret.index + 2),
     ]),
     caret,
@@ -1172,6 +1523,7 @@ export function insertProseText(
   nodes: OfferTextNode[],
   input: Caret | ProseRange,
   raw: string,
+  typing?: number,
 ): ProseEdit {
   const caretBefore = clampCaret(nodes, rangeEnds(proseRange(input)).start)
   const originalLength = textLength(nodes[caretBefore.index]?.text ?? '')
@@ -1190,9 +1542,18 @@ export function insertProseText(
   }
   const head = current.text.slice(0, caret.offset)
   const tail = current.text.slice(caret.offset)
+  const existing = bitsFromMarks(current.text, current.marks)
+  const headBits = existing.slice(0, caret.offset)
+  const tailBits = existing.slice(caret.offset)
+  const inherit = typing ?? typingStyleBits([current], { index: 0, offset: caret.offset })
   const created = parts.map((part, index) => {
     const text = `${index === 0 ? head : ''}${part}${index === parts.length - 1 ? tail : ''}`
-    return sameNode(current, text, index === 0)
+    const bits = [
+      ...(index === 0 ? headBits : []),
+      ...Array<number>(part.length).fill(inherit),
+      ...(index === parts.length - 1 ? tailBits : []),
+    ]
+    return sameNode(current, text, index === 0, marksFromBits(bits) ?? null)
   })
   const limit = Math.max(OFFER_PROSE_MAX_TEXT, originalLength)
   const overLimit =
@@ -1226,7 +1587,17 @@ export function reconcileProseTexts(
 ): ProseEdit {
   const safeCaret = clampCaret(nodes, caret)
   if (texts.length !== nodes.length) return refuse(nodes, safeCaret, 'Dieser Absatz ist zu lang.')
-  const next = nodes.map((node, index) => sameNode(node, cleanText(texts[index] ?? '')))
+  const next = nodes.map((node, index) => {
+    const cleaned = cleanText(texts[index] ?? '')
+    return sameNode(
+      node,
+      cleaned,
+      true,
+      cleaned === node.text
+        ? node.marks
+        : (reconcileMarkBits(node.text, cleaned, node.marks) ?? null),
+    )
+  })
   if (next.every((node, index) => node.text === nodes[index]?.text))
     return { nodes: cloneNodes(nodes), caret: safeCaret }
   for (let index = 0; index < next.length; index++) {
@@ -1326,7 +1697,10 @@ export function createProseHistory(limit = 100): ProseHistory {
   const undoStack: ProseSnapshot[] = []
   const redoStack: ProseSnapshot[] = []
   const copy = (snap: ProseSnapshot): ProseSnapshot => ({
-    nodes: snap.nodes.map((node) => ({ ...node })),
+    nodes: snap.nodes.map((node) => ({
+      ...node,
+      marks: node.marks?.map((mark) => ({ ...mark })),
+    })),
     caret: { ...snap.caret },
   })
   return {

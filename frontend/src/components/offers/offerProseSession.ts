@@ -1,6 +1,6 @@
 import { inject, provide, ref, type InjectionKey, type Ref } from 'vue'
 import type { OfferBulletMarker, OfferTextNode } from './types'
-import type { ProseListKind, ProseListState } from './offerProse'
+import type { InlineMarkName, ProseListKind, ProseListState } from './offerProse'
 
 export type ProseCommand =
   | { type: 'list'; kind: ProseListKind }
@@ -15,6 +15,7 @@ export type ProseCommand =
   | { type: 'glyph'; glyph: string }
   | { type: 'layout'; axis: 'x' | 'y' | 'text'; value: number }
   | { type: 'layout-reset' }
+  | { type: 'inline'; mark: InlineMarkName }
 
 export type ProseTarget = {
   id: number

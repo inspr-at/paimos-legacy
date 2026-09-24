@@ -421,3 +421,73 @@ func TestOfferSettingsOverlappingLegacySaveCannotStripV2(t *testing.T) {
 		t.Fatalf("overlapping legacy save stripped the template: %#v", saved.Defaults.Blocks)
 	}
 }
+
+func TestOfferInlineMarksNeedWriterThree(t *testing.T) {
+	ts := newTestServer(t)
+	settings := offerSettingsFixture()
+	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, settings)
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Testkunde", "address": "Gasse 2\n1010 Wien", "contact_name": "Eva Test", "contact_email": "eva@example.test"})
+	assertStatus(t, resp, 201)
+	var customer struct {
+		ID int64 `json:"id"`
+	}
+	decode(t, resp, &customer)
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": customer.ID})
+	assertStatus(t, resp, 201)
+	offer := takeOffer(t, resp)
+	offer.Document.Positions = []handlers.OfferPosition{{ShortText: "Beratung", Quantity: 1, Unit: "Pauschale", UnitPriceCents: 10000}}
+	path := "/api/offers/" + jsonNumber(offer.ID)
+	styled := offer.Document
+	styled.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Nodes: []handlers.OfferTextNode{{
+		Kind: "paragraph", Text: "Hallo", Marks: []handlers.OfferInlineMark{{Start: 0, End: 2, Bold: true, Italic: true}},
+	}}}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": styled})
+	body := proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("version 2 stored marks: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 3, "document": styled})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	mark := offer.Document.Blocks[0].Nodes[0].Marks
+	if offer.Document.Blocks[0].Body != "Hallo" || len(mark) != 1 || !mark[0].Bold || !mark[0].Italic || mark[0].End != 2 {
+		t.Fatalf("stored marks = %#v", offer.Document.Blocks[0])
+	}
+	stripped := offer.Document
+	stripped.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Body: "Hallo"}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": stripped})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("version 2 stripped marks: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if len(offer.Document.Blocks[0].Nodes[0].Marks) != 1 || !offer.Document.Blocks[0].Nodes[0].Marks[0].Bold {
+		t.Fatalf("marks were erased: %#v", offer.Document.Blocks[0])
+	}
+
+	settings.Defaults.Blocks = styled.Blocks
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+		"sender": settings.Sender, "defaults": settings.Defaults, "prose_writer_version": 2,
+	})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("template writer 2: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+		"sender": settings.Sender, "defaults": settings.Defaults, "prose_writer_version": 3,
+	})
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	plain := settings
+	plain.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Body: "Klartext"}}
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+		"sender": plain.Sender, "defaults": plain.Defaults, "prose_writer_version": 2,
+	})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("template strip: %d %s", resp.StatusCode, body)
+	}
+}
