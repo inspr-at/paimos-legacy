@@ -28,7 +28,7 @@ import {
   type ProseEdit,
   type ProseRange,
 } from './offerProse'
-import { focusCaretBox, revealCaretInEditor, visualLineOf } from './offerProseCaret'
+import { focusCaretBox, lineBoundaryTarget, revealCaretInEditor } from './offerProseCaret'
 import type { OfferTextNode } from './types'
 import {
   isOfferChrome,
@@ -463,17 +463,15 @@ function onHomeEnd(event: KeyboardEvent) {
       visualEdge && visualEdge.index === focus.index && visualEdge.offset === offset
         ? visualEdge
         : null
-    const line = remembered ?? {
-      ...visualLineOf(text, offset, (charIndex) => glyphTopAt(focus.index, charIndex)),
-    }
-    const target = key === 'Home' ? line.start : line.end
-    const edge = { index: focus.index, offset: target, start: line.start, end: line.end }
-    const dest = { index: focus.index, offset: target }
+    const boundary = lineBoundaryTarget(key, offset, text, remembered, (charIndex) =>
+      glyphTopAt(focus.index, charIndex),
+    )
+    const dest = { index: focus.index, offset: boundary.target }
     const range = { anchor: event.shiftKey ? before.anchor : dest, focus: dest }
     selection.value = range
     held = range
     placeRange(range)
-    visualEdge = edge
+    visualEdge = { index: focus.index, ...boundary.edge }
   }
   restorePageOffset(page)
   showCaretInEditor()

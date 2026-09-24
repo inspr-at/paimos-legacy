@@ -91,6 +91,106 @@ export function revealCaretInEditor(
  * `glyphTopAt` receives a character index. A null top falls back to the logical line.
  * The result stays inside the current newline segment and the current text block.
  */
+export type LineEdge = { offset: number; start: number; end: number }
+
+/** Fallback Home/End target. A remembered edge keeps a second press on that wrapped line. */
+export function lineBoundaryTarget(
+  key: 'Home' | 'End',
+  offset: number,
+  text: string,
+  remembered: LineEdge | null,
+  glyphTopAt?: (charIndex: number) => number | null,
+): { target: number; edge: LineEdge } {
+  const clamped = Math.max(0, Math.min(offset, text.length))
+  const line =
+    remembered && remembered.offset === clamped
+      ? remembered
+      : visualLineOf(text, clamped, glyphTopAt)
+  const target = key === 'Home' ? line.start : line.end
+  return { target, edge: { offset: target, start: line.start, end: line.end } }
+}
+
+export function collectTextNodes(root: Node): Text[] {
+  if (root.nodeType === Node.TEXT_NODE) return [root as Text]
+  const nodes: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let current = walker.nextNode()
+  while (current) {
+    nodes.push(current as Text)
+    current = walker.nextNode()
+  }
+  return nodes
+}
+
+export function linearText(nodes: readonly Text[]): string {
+  return nodes.map((node) => node.data).join('')
+}
+
+/** Caret offset counted through existing text nodes. Does not rewrite the DOM. */
+export function offsetInTextNodes(
+  nodes: readonly Text[],
+  focus: Node,
+  focusOffset: number,
+): number | null {
+  let cursor = 0
+  for (const node of nodes) {
+    if (node === focus) return cursor + Math.max(0, Math.min(focusOffset, node.data.length))
+    cursor += node.data.length
+  }
+  return null
+}
+
+export function offsetInRoot(root: HTMLElement, focus: Node, focusOffset: number): number {
+  const nodes = collectTextNodes(root)
+  const direct = offsetInTextNodes(nodes, focus, focusOffset)
+  if (direct != null) return direct
+  if (focus !== root) return 0
+  let count = 0
+  for (let index = 0; index < focusOffset && index < root.childNodes.length; index += 1) {
+    count += linearText(collectTextNodes(root.childNodes[index]!)).length
+  }
+  return count
+}
+
+/** Map a linear offset onto the text node that already holds that character. */
+export function pointInTextNodes(
+  nodes: readonly Text[],
+  offset: number,
+): { node: Text; offset: number } | null {
+  if (!nodes.length) return null
+  let cursor = 0
+  for (const node of nodes) {
+    const next = cursor + node.data.length
+    if (offset <= next) return { node, offset: offset - cursor }
+    cursor = next
+  }
+  const last = nodes[nodes.length - 1]!
+  return { node: last, offset: last.data.length }
+}
+
+export function glyphTopAtLinear(nodes: readonly Text[], charIndex: number): number | null {
+  let cursor = 0
+  for (const node of nodes) {
+    const next = cursor + node.data.length
+    if (charIndex < next) {
+      const local = charIndex - cursor
+      const range = document.createRange()
+      try {
+        range.setStart(node, local)
+        range.setEnd(node, local + 1)
+        const rects = range.getClientRects()
+        const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+        if (!rect || rect.height <= 0) return null
+        return rect.top
+      } catch {
+        return null
+      }
+    }
+    cursor = next
+  }
+  return null
+}
+
 export function visualLineOf(
   text: string,
   offset: number,

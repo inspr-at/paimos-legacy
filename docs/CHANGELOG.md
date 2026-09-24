@@ -20,6 +20,7 @@ coordinate, from the first entry below that form).
 
 - Home and End in offer text move to the current visual line. Shift extends the selection, and Ctrl or Command keeps the browser's usual movement. The page no longer jumps (PAI-1063).
 - Undo no longer lets a focused footer or list number write itself back, Shift+Home/End follows the caret rather than the whole selection, and the inspector stays out of print and PDF (PAI-1063).
+- Home and End in a heading stay on the current wrapped line, and still move after paste splits the text (PAI-1063).
 
 ## [260923073158.0.0] — 2026-09-23
 

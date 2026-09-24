@@ -1,6 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { focusCaretBox, revealCaretInEditor, visualLineOf } from './offerProseCaret'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  collectTextNodes,
+  focusCaretBox,
+  glyphTopAtLinear,
+  lineBoundaryTarget,
+  linearText,
+  offsetInRoot,
+  pointInTextNodes,
+  revealCaretInEditor,
+  type LineEdge,
+} from './offerProseCaret'
 
 const props = withDefaults(
   defineProps<{ modelValue: string; editable?: boolean; tag?: string; label?: string }>(),
@@ -9,23 +19,35 @@ const props = withDefaults(
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const element = ref<HTMLElement>()
 let composing = false
+let placing = false
+let visualEdge: LineEdge | null = null
 function startComposition() {
   composing = true
+  visualEdge = null
 }
 function endComposition() {
   composing = false
+}
+function clearEdge() {
+  visualEdge = null
 }
 
 function sync() {
   if (element.value && document.activeElement !== element.value)
     element.value.textContent = props.modelValue
 }
-onMounted(sync)
+onMounted(() => {
+  sync()
+  document.addEventListener('selectionchange', onSelectionChange)
+})
+onBeforeUnmount(() => document.removeEventListener('selectionchange', onSelectionChange))
 watch(() => props.modelValue, sync)
 function input(e: Event) {
+  visualEdge = null
   emit('update:modelValue', (e.target as HTMLElement).innerText)
 }
 function paste(e: ClipboardEvent) {
+  visualEdge = null
   if (!props.editable) return
   e.preventDefault()
   const selection = window.getSelection()
@@ -40,57 +62,44 @@ function paste(e: ClipboardEvent) {
   selection.addRange(range)
   if (element.value) emit('update:modelValue', element.value.innerText)
 }
-function plain(root: HTMLElement): { node: Text | null; text: string } {
-  const only = root.childNodes.length === 1 ? root.firstChild : null
-  if (only instanceof Text) return { node: only, text: only.data }
-  return { node: null, text: root.innerText.replace(/\r\n/g, '\n') }
-}
 function caretOffset(root: HTMLElement): number | null {
   const live = window.getSelection()
   if (!live?.focusNode || !root.contains(live.focusNode)) return null
-  const text = plain(root)
-  if (text.node && live.focusNode === text.node)
-    return Math.max(0, Math.min(live.focusOffset, text.text.length))
-  const range = document.createRange()
-  try {
-    range.setStart(root, 0)
-    range.setEnd(live.focusNode, live.focusOffset)
-  } catch {
-    return null
-  }
-  return Math.max(0, Math.min(range.toString().length, text.text.length))
-}
-function glyphTop(textNode: Text, charIndex: number): number | null {
-  if (charIndex < 0 || charIndex >= textNode.data.length) return null
-  const range = document.createRange()
-  try {
-    range.setStart(textNode, charIndex)
-    range.setEnd(textNode, charIndex + 1)
-    const rects = range.getClientRects()
-    const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
-    if (!rect || rect.height <= 0) return null
-    return rect.top
-  } catch {
-    return null
-  }
+  return offsetInRoot(root, live.focusNode, live.focusOffset)
 }
 function placeCaret(root: HTMLElement, offset: number, shift: boolean) {
   const live = window.getSelection()
-  if (!live) return
-  const text = plain(root)
-  const target = Math.max(0, Math.min(offset, text.text.length))
-  if (!text.node) return
-  if (shift && live.anchorNode && root.contains(live.anchorNode)) {
-    live.setBaseAndExtent(live.anchorNode, live.anchorOffset, text.node, target)
+  const point = pointInTextNodes(collectTextNodes(root), offset)
+  if (!live || !point) return
+  const anchorNode = live.anchorNode
+  const anchorOffset = live.anchorOffset
+  placing = true
+  try {
+    if (shift && anchorNode && root.contains(anchorNode))
+      live.setBaseAndExtent(anchorNode, anchorOffset, point.node, point.offset)
+    else live.setBaseAndExtent(point.node, point.offset, point.node, point.offset)
+  } finally {
+    placing = false
+  }
+}
+function onSelectionChange() {
+  if (placing || !visualEdge || !element.value) return
+  const live = window.getSelection()
+  if (!live?.focusNode || !element.value.contains(live.focusNode)) {
+    visualEdge = null
     return
   }
-  live.setBaseAndExtent(text.node, target, text.node, target)
+  if (offsetInRoot(element.value, live.focusNode, live.focusOffset) !== visualEdge.offset)
+    visualEdge = null
 }
 function restorePage(saved: { x: number; y: number }) {
   if (window.scrollX !== saved.x || window.scrollY !== saved.y) window.scrollTo(saved.x, saved.y)
 }
 function onHomeEnd(event: KeyboardEvent) {
-  if (event.key !== 'Home' && event.key !== 'End') return
+  if (event.key !== 'Home' && event.key !== 'End') {
+    visualEdge = null
+    return
+  }
   if (event.isComposing || composing) return
   if (event.altKey || event.ctrlKey || event.metaKey) return
   event.preventDefault()
@@ -112,14 +121,14 @@ function onHomeEnd(event: KeyboardEvent) {
       native = false
     }
   }
+  if (native) visualEdge = null
   if (!native && before != null) {
-    const text = plain(root)
-    const line = visualLineOf(
-      text.text,
-      before,
-      text.node ? (index) => glyphTop(text.node as Text, index) : undefined,
+    const nodes = collectTextNodes(root)
+    const boundary = lineBoundaryTarget(event.key, before, linearText(nodes), visualEdge, (index) =>
+      glyphTopAtLinear(nodes, index),
     )
-    placeCaret(root, event.key === 'Home' ? line.start : line.end, event.shiftKey)
+    placeCaret(root, boundary.target, event.shiftKey)
+    visualEdge = boundary.edge
   }
   restorePage(page)
   if (live) {
@@ -137,6 +146,7 @@ function onHomeEnd(event: KeyboardEvent) {
     :role="editable ? 'textbox' : undefined"
     :aria-label="label"
     :tabindex="editable ? 0 : undefined"
+    @pointerdown="clearEdge"
     @keydown="onHomeEnd"
     @input="input"
     @paste="paste"

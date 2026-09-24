@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   focusCaretBox,
+  lineBoundaryTarget,
   logicalLineBounds,
+  pointInTextNodes,
   revealCaretInEditor,
   visualLineOf,
 } from './offerProseCaret'
@@ -69,6 +71,25 @@ describe('visual line bounds', () => {
     expect(wideEdge).toBeGreaterThan(0)
     expect(scroller.scrollLeft).toBe(0)
     scroller.remove()
+  })
+
+  it('keeps a repeated End on the remembered wrapped line', () => {
+    const text = '0123456789ABCDEF'
+    const tops = (index: number) => Math.floor(index / 8) * 20
+    const first = lineBoundaryTarget('End', 3, text, null, tops)
+    expect(first.target).toBe(8)
+    const second = lineBoundaryTarget('End', first.target, text, first.edge, tops)
+    expect(second.target).toBe(8)
+    expect(lineBoundaryTarget('End', 8, text, null, tops).target).toBe(16)
+  })
+
+  it('maps a linear offset onto an existing text node', () => {
+    const first = document.createTextNode('0123')
+    const second = document.createTextNode('456789')
+    expect(pointInTextNodes([first, second], 0)).toEqual({ node: first, offset: 0 })
+    expect(pointInTextNodes([first, second], 4)).toEqual({ node: first, offset: 4 })
+    expect(pointInTextNodes([first, second], 6)).toEqual({ node: second, offset: 2 })
+    expect(pointInTextNodes([first, second], 4)?.node.data).toBe('0123')
   })
 
   it('measures a collapsed caret at the focus, not the whole selection', () => {
