@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import {
+  applyInlineStyle,
   applyStructure,
   backspaceProse,
   clipboardPlain,
@@ -11,6 +12,7 @@ import {
   indentItem,
   insertProseText,
   insertSoftBreak,
+  markStateFromBits,
   numberingCommandForIndex,
   outlineMarkerColumns,
   outdentItem,
@@ -20,8 +22,13 @@ import {
   proseNodes,
   proseNodesStorable,
   rangeAfterStore,
+  rangeCollapsed,
   rangeEnds,
   reconcileProseTexts,
+  toggleTypingBits,
+  typingStyleBits,
+  type InlineMarkName,
+  type OfferInlineMark,
   resetItemLayout,
   setBulletMarker,
   setDecimalControl,
@@ -32,7 +39,12 @@ import {
   type ProseEdit,
   type ProseRange,
 } from './offerProse'
-import { focusCaretBox, lineBoundaryTarget, revealCaretInEditor } from './offerProseCaret'
+import {
+  collectTextNodes,
+  focusCaretBox,
+  lineBoundaryTarget,
+  revealCaretInEditor,
+} from './offerProseCaret'
 import type { OfferTextNode } from './types'
 import {
   isOfferChrome,
@@ -89,6 +101,9 @@ let visualEdge: {
 } | null = null
 
 let hydrated = false
+let typingBits: number | null = null
+let compositionSpan: { index: number; start: number; end: number } | null = null
+let typingAt: ProseRange | null = null
 watch(
   () => [props.body, props.nodes] as const,
   () => {
@@ -109,30 +124,71 @@ watch(
   { deep: true, immediate: true },
 )
 
+function markRuns(text: string, marks: OfferInlineMark[] | undefined): Node[] {
+  if (!marks?.length) return [document.createTextNode(text)]
+  const runs: Node[] = []
+  let cursor = 0
+  const push = (value: string, bold?: true, italic?: true) => {
+    if (!value) return
+    let node: Node = document.createTextNode(value)
+    if (italic) {
+      const em = document.createElement('i')
+      em.append(node)
+      node = em
+    }
+    if (bold) {
+      const strong = document.createElement('b')
+      strong.append(node)
+      node = strong
+    }
+    runs.push(node)
+  }
+  for (const mark of marks) {
+    push(text.slice(cursor, mark.start))
+    push(text.slice(mark.start, mark.end), mark.bold, mark.italic)
+    cursor = mark.end
+  }
+  push(text.slice(cursor))
+  return runs.length ? runs : [document.createTextNode(text)]
+}
 function paint() {
   if (composing) return
   root.value?.querySelectorAll<HTMLElement>('[data-text]').forEach((el) => {
-    const want = local.value[Number(el.dataset.index)]?.text ?? ''
-    const plain = el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE
-    if (!plain || el.textContent !== want) el.textContent = want
+    const node = local.value[Number(el.dataset.index)]
+    const want = node?.text ?? ''
+    const signature = JSON.stringify(node?.marks ?? [])
+    const hosted =
+      el.dataset.marks === signature &&
+      el.textContent === want &&
+      [...el.querySelectorAll('*')].every((child) => child.tagName === 'B' || child.tagName === 'I') &&
+      (!node?.marks?.length || el.querySelector('b, i') !== null || want === '')
+    if (hosted && (!node?.marks?.length ? el.querySelector('b, i') === null : true)) return
+    el.replaceChildren(...markRuns(want, node?.marks))
+    el.dataset.marks = signature
   })
 }
 function pointAt(caret: Caret): { node: Node; offset: number } | null {
   const el = root.value?.querySelector<HTMLElement>(`[data-text][data-index="${caret.index}"]`)
   if (!el) return null
-  const text = [...el.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
-  if (!text) return { node: el, offset: 0 }
-  return { node: text, offset: Math.min(caret.offset, text.textContent?.length ?? 0) }
+  const texts = collectTextNodes(el)
+  if (!texts.length) return { node: el, offset: 0 }
+  let remaining = Math.max(0, caret.offset)
+  for (const text of texts) {
+    if (remaining <= text.data.length) return { node: text, offset: remaining }
+    remaining -= text.data.length
+  }
+  const last = texts[texts.length - 1]!
+  return { node: last, offset: last.data.length }
 }
 function glyphTopAt(index: number, charIndex: number): number | null {
   const point = pointAt({ index, offset: charIndex })
   if (!point || point.node.nodeType !== Node.TEXT_NODE) return null
   const textNode = point.node as Text
-  if (charIndex < 0 || charIndex >= textNode.data.length) return null
+  if (point.offset < 0 || point.offset >= textNode.data.length) return null
   const range = document.createRange()
   try {
-    range.setStart(textNode, charIndex)
-    range.setEnd(textNode, charIndex + 1)
+    range.setStart(textNode, point.offset)
+    range.setEnd(textNode, point.offset + 1)
     const rects = range.getClientRects()
     const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
     if (!rect || rect.height <= 0) return null
@@ -189,6 +245,7 @@ function restore() {
 function remember() {
   const live = readRange()
   if (!live) return
+  if (typingAt && !sameRange(live, typingAt)) clearTyping()
   selection.value = live
   held = live
   if (
@@ -204,10 +261,30 @@ function claim() {
   if (!session || !props.editable) return
   session.claim({
     id: proseId,
-    state: () => proseListState(local.value, toolbarRange()),
+    state: () => {
+      const state = proseListState(local.value, toolbarRange())
+      if (typingBits != null && typingAt && sameRange(toolbarRange(), typingAt))
+        state.marks = markStateFromBits(typingBits)
+      const focus = rangeEnds(toolbarRange()).end
+      const label = proseMarkerLabels(local.value, props.sectionNumber || 0)[focus.index]
+      state.markerLabel = label || null
+      return state
+    },
     remember,
     apply: applyCommand,
   })
+}
+function sameRange(a: ProseRange, b: ProseRange): boolean {
+  return (
+    a.anchor.index === b.anchor.index &&
+    a.anchor.offset === b.anchor.offset &&
+    a.focus.index === b.focus.index &&
+    a.focus.offset === b.focus.offset
+  )
+}
+function clearTyping() {
+  typingBits = null
+  typingAt = null
 }
 function editorOwnsFocus(): boolean {
   const active = document.activeElement
@@ -491,6 +568,11 @@ function onKey(event: KeyboardEvent) {
   visualEdge = null
   if (!props.editable || event.isComposing || composing) return
   const key = event.key.toLowerCase()
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && (key === 'b' || key === 'i')) {
+    event.preventDefault()
+    applyInline(key === 'b' ? 'bold' : 'italic')
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && key === 'a') {
     event.preventDefault()
     selectAll()
@@ -573,7 +655,8 @@ function onBeforeInput(event: InputEvent) {
   if (type === 'insertText') {
     event.preventDefault()
     holdNativeInput()
-    apply(insertProseText(local.value, currentRange(), event.data ?? ''))
+    apply(insertProseText(local.value, currentRange(), event.data ?? '', typingBits ?? undefined))
+    clearTyping()
     return
   }
   if (type === 'insertReplacementText' && typeof event.data === 'string') {
@@ -614,7 +697,7 @@ function onBeforeInput(event: InputEvent) {
     holdNativeInput()
   }
 }
-function reconcileNative() {
+function reconcileNative(replaced = compositionSpan) {
   if (!props.editable || !root.value || composing) return
   const texts: string[] = []
   let markup = false
@@ -624,13 +707,23 @@ function reconcileNative() {
     if ([...el.childNodes].some((node) => node.nodeType === Node.ELEMENT_NODE)) markup = true
     texts.push(el.textContent ?? '')
   }
-  const edit = reconcileProseTexts(local.value, texts, currentRange().focus)
+  const edit = reconcileProseTexts(
+    local.value,
+    texts,
+    currentRange().focus,
+    typingBits ?? undefined,
+    replaced,
+  )
   if (edit.error) {
     notice.value = edit.error
     paint()
     return
   }
-  const changed = edit.nodes.some((node, index) => node.text !== local.value[index]?.text)
+  const changed = edit.nodes.some(
+    (node, index) =>
+      node.text !== local.value[index]?.text ||
+      JSON.stringify(node.marks ?? null) !== JSON.stringify(local.value[index]?.marks ?? null),
+  )
   if (!changed) {
     if (markup) paint()
     return
@@ -639,11 +732,18 @@ function reconcileNative() {
 }
 function onCompositionStart() {
   composing = true
+  const { start, end } = rangeEnds(currentRange())
+  compositionSpan =
+    start.index === end.index
+      ? { index: start.index, start: start.offset, end: end.offset }
+      : null
 }
 function onCompositionEnd() {
+  const replaced = compositionSpan
   composing = false
+  compositionSpan = null
   holdNativeInput()
-  reconcileNative()
+  reconcileNative(replaced)
 }
 function onInput() {
   if (!props.editable || composing || suppressInput) return
@@ -657,7 +757,8 @@ function onPaste(event: ClipboardEvent) {
     event.clipboardData?.getData('text/plain') ?? '',
     event.clipboardData?.getData('text/html') ?? '',
   )
-  apply(insertProseText(local.value, currentRange(), text))
+  apply(insertProseText(local.value, currentRange(), text, typingBits ?? undefined))
+  clearTyping()
 }
 function itemStyle(node: OfferTextNode, index: number): Record<string, string> | undefined {
   if (node.kind !== 'item') return undefined
@@ -673,6 +774,43 @@ function itemStyle(node: OfferTextNode, index: number): Record<string, string> |
     }
   }
   return style
+}
+function applyInline(mark: InlineMarkName) {
+  if (!props.editable || !root.value) return
+  const active = document.activeElement
+  const inEditor = !!active && root.value.contains(active)
+  const inChrome = isOfferChrome(active)
+  if (!inEditor && !inChrome && !readRange()) {
+    dropStaleTarget()
+    return
+  }
+  if (session && session.active.value?.id !== proseId) return
+  if (!inChrome) remember()
+  const range = toolbarRange()
+  if (rangeCollapsed(range)) {
+    const base = typingBits ?? typingStyleBits(local.value, rangeEnds(range).end)
+    typingBits = toggleTypingBits(base, mark)
+    typingAt = range
+    if (session?.active.value?.id === proseId) session.touch()
+    return
+  }
+  clearTyping()
+  const edit = applyInlineStyle(local.value, range, mark)
+  if (edit.error || JSON.stringify(edit.nodes) === JSON.stringify(local.value)) {
+    notice.value = edit.error ?? ''
+    return
+  }
+  if (
+    historyStack().push({
+      nodes: local.value.map((node) => ({
+        ...node,
+        marks: node.marks?.map((item) => ({ ...item })),
+      })),
+      caret: rangeEnds(range).end,
+    })
+  )
+    props.memory?.record?.()
+  commit(edit, range, !inChrome)
 }
 function opFor(command: ProseCommand) {
   if (command.type === 'indent') return indentItem
@@ -694,9 +832,16 @@ function opFor(command: ProseCommand) {
       return setDecimalControl(nodes, index, mode, command.start)
     }
   }
+  if (command.type !== 'list')
+    return (nodes: OfferTextNode[]) => nodes
   return (nodes: OfferTextNode[], index: number) => setListKind(nodes, index, command.kind)
 }
 function applyCommand(command: ProseCommand) {
+  if (command.type === 'inline') {
+    applyInline(command.mark)
+    return
+  }
+  clearTyping()
   if (!props.editable || !root.value) return
   const active = document.activeElement
   const inEditor = !!active && root.value.contains(active)

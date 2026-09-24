@@ -3,9 +3,18 @@ import { formatDateWithLocale, formatDateTimeWithLocale } from '@/composables/us
 export const OFFER_BULLET_MARKERS = ['disc', 'circle', 'square', 'dash'] as const
 export type OfferBulletMarker = (typeof OFFER_BULLET_MARKERS)[number]
 export type OfferMarker = OfferBulletMarker | 'decimal'
+/** Inclusive/exclusive UTF-16 offsets. Bold and italic are independent. */
+export interface OfferInlineMark {
+  start: number
+  end: number
+  bold?: true
+  italic?: true
+}
 export interface OfferTextNode {
   kind: 'paragraph' | 'item'
   text: string
+  /** Character ranges. Absent on legacy plain text. */
+  marks?: OfferInlineMark[]
   depth?: number
   marker?: OfferMarker
   /** Multilevel 3 / 3.1 / 3.1.1. Absent decimal items stay plain per-level numbers. */

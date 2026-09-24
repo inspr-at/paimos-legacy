@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, defineComponent, h, nextTick } from 'vue'
+import OfferInlineStyleControls from './OfferInlineStyleControls.vue'
 import OfferProse from './OfferProse.vue'
 import {
   provideOfferProseSession,
@@ -337,6 +338,111 @@ describe('OfferProse editor', () => {
     format({ type: 'list', kind: 'none' })
     await nextTick()
     expect(updates).toHaveLength(before)
+    app.unmount()
+    el.remove()
+  })
+
+  it('applies bold with the keyboard, keeps the selection, and undo restores it', async () => {
+    const mounted = await mount({ body: 'Hello' })
+    mounted.root.focus()
+    place(mounted.root, 0, 1, 4)
+    key(mounted.root, { key: 'b', metaKey: true })
+    await nextTick()
+    expect(lastUpdate(mounted.updates)?.nodes?.[0]?.marks).toEqual([{ start: 1, end: 4, bold: true }])
+    expect(mounted.root.querySelector('b')?.textContent).toBe('ell')
+    expect(window.getSelection()?.toString()).toBe('ell')
+    key(mounted.root, { key: 'z', metaKey: true })
+    await nextTick()
+    expect(lastUpdate(mounted.updates)?.body).toBe('Hello')
+    expect(mounted.root.querySelector('b')).toBeNull()
+    key(mounted.root, { key: 'z', metaKey: true, shiftKey: true })
+    await nextTick()
+    expect(mounted.root.querySelector('b')?.textContent).toBe('ell')
+    mounted.unmount()
+  })
+
+  it('reloads saved marks in a read-only field', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(OfferProse, {
+      body: 'Hello',
+      nodes: [{ kind: 'paragraph', text: 'Hello', marks: [{ start: 0, end: 2, italic: true }] }],
+      editable: false,
+      label: 'Textbaustein 1',
+    })
+    app.mount(el)
+    await nextTick()
+    expect(el.querySelector('i')?.textContent).toBe('He')
+    expect(el.querySelector('b')).toBeNull()
+    app.unmount()
+    el.remove()
+  })
+
+  it('shows active and mixed character styles and applies them from the controls', async () => {
+    const updates: Update[] = []
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const Host = defineComponent({
+      setup() {
+        provideOfferProseSession()
+        return () =>
+          h('div', [
+            h(OfferInlineStyleControls),
+            h(OfferProse, {
+              body: 'AB',
+              nodes: [{ kind: 'paragraph', text: 'AB', marks: [{ start: 0, end: 1, bold: true }] }],
+              editable: true,
+              label: 'Textbaustein 1',
+              onUpdate: (value: Update) => updates.push(value),
+            }),
+          ])
+      },
+    })
+    const app = createApp(Host)
+    app.mount(el)
+    await nextTick()
+    const root = el.querySelector<HTMLElement>('.offer-prose')!
+    root.focus()
+    const text = root.querySelector<HTMLElement>('[data-text]')!
+    const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT)
+    const nodes: Text[] = []
+    let current = walker.nextNode()
+    while (current) {
+      nodes.push(current as Text)
+      current = walker.nextNode()
+    }
+    const at = (offset: number) => {
+      let remaining = offset
+      for (const node of nodes) {
+        if (remaining <= node.data.length) return { node, offset: remaining }
+        remaining -= node.data.length
+      }
+      const last = nodes[nodes.length - 1]!
+      return { node: last, offset: last.data.length }
+    }
+    const span = document.createRange()
+    const start = at(0)
+    const end = at(2)
+    span.setStart(start.node, start.offset)
+    span.setEnd(end.node, end.offset)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(span)
+    document.dispatchEvent(new Event('selectionchange'))
+    await nextTick()
+    const button = (label: string) =>
+      [...el.querySelectorAll('button')].find((item) => item.textContent?.includes(label))
+    expect(button('Fett')?.getAttribute('aria-pressed')).toBe('mixed')
+    expect(button('Kursiv')?.getAttribute('aria-pressed')).toBe('false')
+    expect(button('Normal')?.getAttribute('aria-pressed')).toBe('false')
+    button('Kursiv')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    expect(updates[updates.length - 1]?.nodes?.[0]?.marks).toEqual([
+      { start: 0, end: 1, bold: true, italic: true },
+      { start: 1, end: 2, italic: true },
+    ])
+    expect(button('Kursiv')?.getAttribute('aria-pressed')).toBe('true')
+    expect(button('Fett')?.getAttribute('aria-pressed')).toBe('mixed')
     app.unmount()
     el.remove()
   })

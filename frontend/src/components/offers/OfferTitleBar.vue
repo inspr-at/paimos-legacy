@@ -21,42 +21,53 @@ import {
   Trash2,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { nextOfferZoomStep, OFFER_ZOOM_STEPS } from './offerZoom'
+import { nextOfferZoomStep, OFFER_ZOOM_STEPS, parseOfferZoom } from './offerZoom'
 import type { OfferToolbarAction, OfferToolbarActionId } from './offerToolbarActions'
 
-const props = defineProps<{
-  backTo: string
-  backLabel: string
-  offerNo: string
-  hostname: string
-  editable: boolean
-  busy: boolean
-  loading: boolean
-  dirty: boolean
-  saveFailed: boolean
-  state: string
-  savedAt: string
-  savedAtIso: string
-  zoomMode: string
-  zoom: number
-  printDisabled: boolean
-  showPrint: boolean
-  actions: OfferToolbarAction[]
-  showInspector: boolean
-  inspectorOpen: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    backTo: string
+    backLabel: string
+    offerNo: string
+    hostname: string
+    editable: boolean
+    busy: boolean
+    loading: boolean
+    dirty: boolean
+    saveFailed: boolean
+    state: string
+    savedAt: string
+    savedAtIso: string
+    zoomMode: string
+    zoom: number
+    printDisabled: boolean
+    showPrint: boolean
+    actions: OfferToolbarAction[]
+    showInspector: boolean
+    inspectorOpen: boolean
+    headerCollapsed?: boolean
+    externalChanged?: boolean
+  }>(),
+  { headerCollapsed: false, externalChanged: false },
+)
 const emit = defineEmits<{
   save: []
   'update:zoomMode': [value: string]
   print: []
   action: [id: OfferToolbarActionId]
   'toggle-inspector': []
+  'toggle-header': []
+  'reload-remote': []
 }>()
 
 const root = ref<HTMLElement>()
 const menuButton = ref<HTMLButtonElement>()
 const menuPopover = ref<HTMLElement>()
+const zoomButton = ref<HTMLButtonElement>()
+const zoomPopover = ref<HTMLElement>()
+const zoomInput = ref<HTMLInputElement>()
 const menuOpen = ref(false)
+const zoomOpen = ref(false)
 const icons: Record<OfferToolbarActionId, Component> = {
   link: Link,
   settings: Scaling,
@@ -64,12 +75,20 @@ const icons: Record<OfferToolbarActionId, Component> = {
   duplicate: Copy,
   finalize: FileCheck2,
   layout: Scaling,
-  chrome: ChevronDown,
   delete: Trash2,
 }
 const zoomPercent = computed(() => Math.round(props.zoom * 100))
 const canZoomOut = computed(() => nextOfferZoomStep(zoomPercent.value, -1) != null)
 const canZoomIn = computed(() => nextOfferZoomStep(zoomPercent.value, 1) != null)
+const zoomLabel = computed(() => {
+  if (props.zoomMode === 'width') return 'Breite'
+  if (props.zoomMode === 'page') return 'Seite'
+  const parsed = parseOfferZoom(props.zoomMode)
+  return `${parsed ?? zoomPercent.value} %`
+})
+const headerLabel = computed(() =>
+  props.headerCollapsed ? 'Kopfzeilen ausklappen' : 'Kopfzeilen einklappen',
+)
 
 watch(
   () => props.actions.length,
@@ -82,53 +101,96 @@ watch(menuOpen, async (open) => {
   await nextTick()
   place(menuButton.value, menuPopover.value)
 })
+watch(zoomOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  place(zoomButton.value, zoomPopover.value, 'start')
+})
 
-function place(anchor: HTMLElement | undefined, panel: HTMLElement | undefined) {
+function place(
+  anchor: HTMLElement | undefined,
+  panel: HTMLElement | undefined,
+  align: 'end' | 'start' = 'end',
+) {
   if (!anchor || !panel) return
   const rect = anchor.getBoundingClientRect()
   const width = panel.offsetWidth
   const height = panel.offsetHeight
-  let left = rect.right - width
+  let left = align === 'start' ? rect.left : rect.right - width
   left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
   const below = rect.bottom + 6
-  const limit = Math.max(8, window.innerHeight - height - 8)
-  panel.style.top = `${Math.min(below, limit)}px`
+  const above = rect.top - height - 6
+  const top = below + height <= window.innerHeight - 8 ? below : Math.max(8, above)
+  panel.style.top = `${top}px`
   panel.style.left = `${left}px`
 }
 function toggleMenu(event: MouseEvent) {
+  zoomOpen.value = false
   menuOpen.value = !menuOpen.value
   if (menuOpen.value && event.detail === 0)
     void nextTick(() =>
       menuPopover.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(),
     )
 }
+function toggleZoom(event: MouseEvent) {
+  menuOpen.value = false
+  zoomOpen.value = !zoomOpen.value
+  if (zoomOpen.value && event.detail === 0)
+    void nextTick(() => zoomPopover.value?.querySelector<HTMLButtonElement>('button')?.focus())
+}
 function choose(action: OfferToolbarAction) {
   if (action.disabled) return
   menuOpen.value = false
   emit('action', action.id)
+}
+function pickZoom(value: string) {
+  zoomOpen.value = false
+  emit('update:zoomMode', value)
+  zoomButton.value?.focus()
+}
+function commitZoomInput() {
+  const parsed = parseOfferZoom(zoomInput.value?.value ?? '')
+  if (parsed == null) return
+  pickZoom(String(parsed))
 }
 function stepZoom(direction: 1 | -1) {
   const next = nextOfferZoomStep(zoomPercent.value, direction)
   if (next == null) return
   emit('update:zoomMode', String(next))
 }
+function onZoomKey(event: KeyboardEvent) {
+  const key = event.key
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(key)) return
+  const items = [
+    ...(zoomPopover.value?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+  ]
+  if (!items.length) return
+  event.preventDefault()
+  const current = items.indexOf(document.activeElement as HTMLButtonElement)
+  let next = current < 0 ? 0 : current
+  if (key === 'ArrowDown') next = (next + 1) % items.length
+  else if (key === 'ArrowUp') next = (next - 1 + items.length) % items.length
+  else if (key === 'Home') next = 0
+  else next = items.length - 1
+  items[next]?.focus()
+}
 function onDocPointer(event: PointerEvent) {
   const target = event.target
   if (!(target instanceof Node) || root.value?.contains(target)) return
   menuOpen.value = false
+  zoomOpen.value = false
 }
 function onDocKey(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || !menuOpen.value) return
+  if (event.key !== 'Escape' || (!menuOpen.value && !zoomOpen.value)) return
+  const zoomWasOpen = zoomOpen.value
   menuOpen.value = false
-  menuButton.value?.focus()
+  zoomOpen.value = false
+  ;(zoomWasOpen ? zoomButton.value : menuButton.value)?.focus()
   event.preventDefault()
-}
-function iconFor(action: OfferToolbarAction) {
-  if (action.id === 'chrome' && action.label.startsWith('Kopfzeilen ein')) return ChevronUp
-  return icons[action.id]
 }
 function reposition() {
   if (menuOpen.value) place(menuButton.value, menuPopover.value)
+  if (zoomOpen.value) place(zoomButton.value, zoomPopover.value, 'start')
 }
 onMounted(() => {
   window.addEventListener('pointerdown', onDocPointer)
@@ -180,22 +242,32 @@ defineExpose({ root })
             :title="`Zuletzt gespeichert: ${savedAt}`"
             >{{ savedAt }}</time
           >
+          <button
+            v-if="externalChanged"
+            type="button"
+            class="remote-refresh"
+            title="Neueren Stand laden"
+            @click="emit('reload-remote')"
+          >
+            Extern geändert
+            <strong>Aktualisieren</strong>
+          </button>
         </div>
       </div>
     </div>
     <div class="zoom-slot">
       <div class="zoom-controls" role="group" aria-label="Dokumentzoom">
-        <select
-          :value="zoomMode"
+        <button
+          ref="zoomButton"
+          type="button"
+          class="zoom-face"
+          aria-haspopup="dialog"
+          :aria-expanded="zoomOpen"
           aria-label="Zoom"
-          @change="emit('update:zoomMode', ($event.target as HTMLSelectElement).value)"
+          @click="toggleZoom"
         >
-          <option value="width">Seitenbreite</option>
-          <option value="page">Ganze Seite</option>
-          <option v-for="level in OFFER_ZOOM_STEPS" :key="level" :value="String(level)">
-            {{ level }} %
-          </option>
-        </select>
+          {{ zoomLabel }}
+        </button>
         <button
           type="button"
           class="tool-button icon-only"
@@ -217,6 +289,43 @@ defineExpose({ root })
           <Plus :size="14" />
         </button>
       </div>
+      <div
+        v-if="zoomOpen"
+        ref="zoomPopover"
+        class="zoom-popover"
+        role="dialog"
+        aria-label="Zoom"
+        @keydown="onZoomKey"
+      >
+        <button type="button" :aria-pressed="zoomMode === 'width'" @click="pickZoom('width')">
+          Seitenbreite
+        </button>
+        <button type="button" :aria-pressed="zoomMode === 'page'" @click="pickZoom('page')">
+          Ganze Seite
+        </button>
+        <button
+          v-for="level in OFFER_ZOOM_STEPS"
+          :key="level"
+          type="button"
+          :aria-pressed="zoomMode === String(level)"
+          @click="pickZoom(String(level))"
+        >
+          {{ level }} %
+        </button>
+        <label class="zoom-custom">
+          Prozent
+          <input
+            ref="zoomInput"
+            type="text"
+            inputmode="numeric"
+            maxlength="3"
+            aria-label="Zoom in Prozent"
+            :placeholder="String(zoomPercent)"
+            @keydown.enter.prevent="commitZoomInput"
+            @blur="commitZoomInput"
+          />
+        </label>
+      </div>
     </div>
     <div class="offer-actions">
       <button
@@ -229,6 +338,17 @@ defineExpose({ root })
         @click="emit('print')"
       >
         <Printer :size="16" /><span>PDF</span>
+      </button>
+      <button
+        type="button"
+        class="tool-button icon-only header-collapse"
+        :aria-expanded="!headerCollapsed"
+        :aria-label="headerLabel"
+        :title="headerLabel"
+        @click="emit('toggle-header')"
+      >
+        <ChevronDown v-if="headerCollapsed" :size="14" aria-hidden="true" />
+        <ChevronUp v-else :size="14" aria-hidden="true" />
       </button>
       <div v-if="actions.length" class="menu-anchor">
         <button
@@ -258,7 +378,7 @@ defineExpose({ root })
             :disabled="action.disabled"
             @click="choose(action)"
           >
-            <component :is="iconFor(action)" :size="16" aria-hidden="true" />
+            <component :is="icons[action.id]" :size="16" aria-hidden="true" />
             <span>
               <strong>{{ action.label }}</strong>
               <small>{{ action.detail }}</small>
@@ -287,7 +407,7 @@ defineExpose({ root })
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
-  min-height: 48px;
+  min-height: 44px;
   padding: 4px 8px;
   background: var(--h-surface, #fffefa);
   color: var(--h-text, #203c3d);
@@ -318,6 +438,7 @@ defineExpose({ root })
   text-overflow: ellipsis;
 }
 .zoom-slot {
+  position: relative;
   justify-self: center;
 }
 .offer-actions {
@@ -328,7 +449,10 @@ defineExpose({ root })
   min-width: 0;
   justify-self: end;
 }
-.tool-button {
+.tool-button,
+.zoom-face,
+.remote-refresh,
+.zoom-popover button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -342,15 +466,22 @@ defineExpose({ root })
   color: inherit;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
 }
-.tool-button:hover:not(:disabled) {
+.tool-button:hover:not(:disabled),
+.zoom-face:hover,
+.remote-refresh:hover,
+.zoom-popover button:hover {
   background: var(--h-fill, #e0f3f0);
 }
 .tool-button:focus-visible,
-select:focus-visible,
+.zoom-face:focus-visible,
+.remote-refresh:focus-visible,
+.zoom-popover button:focus-visible,
+.zoom-custom input:focus-visible,
 .chrome-popover button:focus-visible {
   outline: 1px solid var(--h-mint, #0e6f6c);
   outline-offset: 2px;
@@ -360,13 +491,21 @@ select:focus-visible,
   cursor: default;
 }
 .tool-button[aria-expanded='true'],
-.tool-button[aria-pressed='true'] {
+.tool-button[aria-pressed='true'],
+.zoom-face[aria-expanded='true'],
+.zoom-popover button[aria-pressed='true'] {
   background: var(--h-fill, #e0f3f0);
   color: var(--h-mint, #0e6f6c);
 }
-.icon-only {
+.icon-only,
+.header-collapse {
   width: 30px;
   padding: 0;
+}
+.header-collapse {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
 }
 .save-state {
   display: flex;
@@ -414,6 +553,18 @@ select:focus-visible,
     animation: none;
   }
 }
+.remote-refresh {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 6px;
+  color: #8a5a12;
+  background: #f8f1e4;
+  font-size: 11px;
+}
+.remote-refresh strong {
+  color: var(--h-mint, #0e6f6c);
+  font-weight: 650;
+}
 .menu-anchor {
   position: relative;
 }
@@ -422,17 +573,53 @@ select:focus-visible,
   align-items: center;
   gap: 0;
 }
-.zoom-controls select {
-  max-width: 132px;
+.zoom-face {
+  min-width: 64px;
   height: 28px;
+  min-height: 28px;
   margin-right: 2px;
-  padding: 0 4px;
-  font: inherit;
+  padding: 0 6px;
+}
+.zoom-popover {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  width: 220px;
+  padding: 6px;
+  color: var(--h-text, #203c3d);
+  background: var(--h-surface, #fffefa);
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px #10232714;
+}
+.zoom-popover button {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.zoom-custom {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 0;
+  color: var(--h-muted, #596e70);
   font-size: 11px;
-  color: inherit;
-  border: 0;
-  border-radius: 4px;
+}
+.zoom-custom input {
+  width: 64px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--h-line, #d8e2df);
+  border-radius: 6px;
   background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
 }
 .print-button {
   color: var(--h-mint, #0e6f6c);
@@ -516,9 +703,6 @@ select:focus-visible,
   }
   .save-clock {
     display: none;
-  }
-  .zoom-controls select {
-    max-width: 108px;
   }
 }
 </style>
