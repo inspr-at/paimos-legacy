@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -37,8 +38,12 @@ func TestNormalizeOfferProseKeepsLegacyTextAndStoresLists(t *testing.T) {
 	if err != nil || len(nodes) != 1 || nodes[0].Text != script || body != "• "+script {
 		t.Fatalf("script text = %q %#v %v", body, nodes, err)
 	}
-	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "tief", Depth: 2}}); err == nil {
-		t.Fatal("skipped depth was accepted")
+	body, nodes, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "tief", Depth: 2}})
+	if err != nil || len(nodes) != 1 || nodes[0].Depth != 2 || !strings.Contains(body, "tief") {
+		t.Fatalf("first-item depth = %q %#v %v", body, nodes, err)
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "tief", Depth: 6}}); err == nil {
+		t.Fatal("depth above the maximum was accepted")
 	}
 	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "html", Text: "x"}}); err == nil {
 		t.Fatal("unknown kind was accepted")
@@ -171,5 +176,44 @@ func TestSectionBoundOutlineUsesSectionIndex(t *testing.T) {
 	body, _, err = normalizeOfferProseInSection("ignored", nodes, 3)
 	if err != nil || body != "3.1 A\n  3.1.1 Kind\n3.2 B" {
 		t.Fatalf("moved section = %q %v", body, err)
+	}
+}
+
+func TestOfferProseIndentGlyphAndMarkerOffset(t *testing.T) {
+	nodes := []OfferTextNode{
+		{Kind: "item", Text: "Planungsrahmen", Marker: "decimal", Numbering: "outline", ListStart: 4, SectionBound: true},
+		{Kind: "item", Text: "Projektstart", Depth: 2, Marker: "circle", Glyph: "✓", MarkerXMM: -1.5, MarkerYMM: 0.5, TextStartMM: 2},
+		{Kind: "item", Text: "Monat", Depth: 3, Marker: "square"},
+		{Kind: "item", Text: "Weiter", Marker: "decimal", Numbering: "outline", SectionBound: true},
+	}
+	body, stored, err := normalizeOfferProseInSection("ignored", nodes, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, ".0") || !strings.Contains(body, "5.4 Planungsrahmen") || !strings.Contains(body, "✓ Projektstart") || !strings.Contains(body, "5.5 Weiter") {
+		t.Fatalf("labels = %q", body)
+	}
+	if stored[1].Depth != 2 || stored[1].Glyph != "✓" || stored[1].Marker != "circle" || stored[1].MarkerXMM != -1.5 || stored[1].MarkerYMM != 0.5 || stored[1].TextStartMM != 2 || stored[2].Depth != 3 {
+		t.Fatalf("stored = %#v %#v", stored[1], stored[2])
+	}
+	long := []OfferTextNode{
+		{Kind: "item", Text: "Planungsrahmen", Marker: "decimal", Numbering: "outline", ListStart: 4, SectionBound: true},
+		{Kind: "item", Text: "Kind", Depth: 1, Marker: "decimal", Numbering: "outline", SectionBound: true},
+	}
+	body, _, err = normalizeOfferProseInSection("ignored", long, 5)
+	if err != nil || body != "5.4 Planungsrahmen\n  5.4.1 Kind" {
+		t.Fatalf("long label = %q %v", body, err)
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", Glyph: "<b>x</b>"}}); err == nil {
+		t.Fatal("html glyph was accepted")
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "decimal", Numbering: "outline", Glyph: "✓"}}); err == nil {
+		t.Fatal("decimal glyph was accepted")
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", MarkerXMM: 80}}); err == nil {
+		t.Fatal("wide marker offset was accepted")
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", MarkerYMM: math.NaN()}}); err == nil {
+		t.Fatal("nan marker offset was accepted")
 	}
 }

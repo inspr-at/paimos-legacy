@@ -12,6 +12,9 @@ export type ProseCommand =
       mode: 'restart' | 'continue' | 'start' | 'section' | 'independent'
       start?: number
     }
+  | { type: 'glyph'; glyph: string }
+  | { type: 'layout'; axis: 'x' | 'y' | 'text'; value: number }
+  | { type: 'layout-reset' }
 
 export type ProseTarget = {
   id: number

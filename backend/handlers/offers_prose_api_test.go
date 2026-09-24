@@ -44,7 +44,7 @@ func TestOfferProseRoundTripPreservesLegacyAndLists(t *testing.T) {
 		t.Fatalf("nodes = %#v", listed["nodes"])
 	}
 	bad := offerSettingsFixture()
-	bad.Defaults.Blocks[0].Nodes = []handlers.OfferTextNode{{Kind: "item", Text: "tief", Depth: 3}}
+	bad.Defaults.Blocks[0].Nodes = []handlers.OfferTextNode{{Kind: "item", Text: "tief", Depth: 6}}
 	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, bad)
 	assertStatus(t, resp, 400)
 	resp.Body.Close()

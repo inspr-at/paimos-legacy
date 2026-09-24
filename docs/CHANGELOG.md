@@ -16,8 +16,15 @@ coordinate, from the first entry below that form).
 - Draft offer editing lives in one hideable right inspector: section order, lists and numbering, inserting a section or service position, and the footer logo of the open offer. Templates for later offers stay a separate entry. The header keeps the offer number, save state, centered zoom, PDF and document actions (PAI-1063).
 - Offer page zoom runs from 25% to 800%. Fit width and whole page remain. Only the page scales, and a magnified page scrolls to every edge (PAI-1063).
 
+### Added
+
+- The offer inspector can set a bullet symbol, the marker's horizontal and vertical position, and where the text starts. It also shows the list level of the selection (PAI-1063).
+
 ### Fixed
 
+- Leaving the list-start field no longer drops the selected paragraph, so continue and bullet commands still apply to it (PAI-1063).
+- The first list item, and a bullet under a shallower number, can be indented. That depth is kept when the offer is saved (PAI-1063).
+- A longer outline number such as 5.4.1 starts at the parent text. The indent follows each level's own number, so short numbers stay narrow (PAI-1063).
 - Home and End in offer text move to the current visual line. Shift extends the selection, and Ctrl or Command keeps the browser's usual movement. The page no longer jumps (PAI-1063).
 - Undo no longer lets a focused footer or list number write itself back, Shift+Home/End follows the caret rather than the whole selection, and the inspector stays out of print and PDF (PAI-1063).
 - Home and End in a heading stay on the current wrapped line, and still move after paste splits the text (PAI-1063).

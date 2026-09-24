@@ -47,6 +47,11 @@ function button(root: ParentNode, label: string) {
   return [...root.querySelectorAll('button')].find((item) => item.textContent?.trim() === label)
 }
 
+function click(target: Element) {
+  target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+}
+
 describe('hosted prose history', () => {
   afterEach(() => {
     document.body.replaceChildren()
@@ -172,6 +177,7 @@ describe('offer level controls and this-offer settings', () => {
       count: 1,
       heading: 'Leistung',
     },
+    sectionNumber = 0,
   ) {
     const footer = ref<OfferFooterLayout>({ logo_width_mm: 43.3, logo_offset_mm: 2 })
     const actions: string[] = []
@@ -201,6 +207,7 @@ describe('offer level controls and this-offer settings', () => {
               nodes: prose.value.nodes,
               editable: true,
               label: 'Textbaustein 1',
+              sectionNumber,
               onUpdate: (value: { body: string; nodes?: OfferTextNode[] }) => {
                 prose.value = { body: value.body, nodes: value.nodes ?? prose.value.nodes }
               },
@@ -237,20 +244,124 @@ describe('offer level controls and this-offer settings', () => {
     expect(deeper().disabled).toBe(false)
     expect(higher().disabled).toBe(false)
     expect(deeper().getAttribute('aria-label')).toBe('Eine Listenebene tiefer')
+    expect(mounted.el.textContent).toContain('Listenebene 1 · 0× eingerückt')
     place(mounted.root, 0, 0)
     await nextTick()
-    expect(deeper().disabled).toBe(true)
+    expect(deeper().disabled).toBe(false)
     expect(higher().disabled).toBe(false)
-    expect(deeper().parentElement?.getAttribute('data-tip')).toBe('Kein vorheriger Listeneintrag.')
-    expect(deeper().getAttribute('aria-label')).toContain('Kein vorheriger Listeneintrag.')
+    expect(deeper().getAttribute('aria-label')).toBe('Eine Listenebene tiefer')
     expect(higher().getAttribute('aria-label')).toBe('Eine Listenebene höher')
-    expect(deeper().getAttribute('aria-label')).toContain('Kein vorheriger Listeneintrag.')
-    expect(deeper().parentElement?.getAttribute('title')).toBe('Kein vorheriger Listeneintrag.')
+    expect(mounted.el.textContent).toContain('Listenebene 1 · 0× eingerückt')
     const kept = window.getSelection()?.focusOffset
     deeper().dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }),
     )
     expect(window.getSelection()?.focusOffset).toBe(kept)
+    click(deeper())
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Listenebene 2 · 1× eingerückt')
+    expect(mounted.root.querySelector<HTMLElement>('[data-node="0"]')?.style.getPropertyValue('--depth')).toBe(
+      '1',
+    )
+    click(higher())
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Listenebene 1 · 0× eingerückt')
+    mounted.unmount()
+  })
+
+  it('places a custom bullet and keeps a long outline number on the selected items', async () => {
+    const mounted = await mount(
+      [
+        {
+          kind: 'item',
+          text: 'Planungsrahmen',
+          marker: 'decimal',
+          numbering: 'outline',
+          section_bound: true,
+          list_start: 4,
+        },
+        { kind: 'item', text: 'Projektstart', marker: 'circle', depth: 1 },
+        { kind: 'item', text: 'Monat', marker: 'square', depth: 2 },
+        {
+          kind: 'item',
+          text: 'Weiter',
+          marker: 'decimal',
+          numbering: 'outline',
+          section_bound: true,
+        },
+      ],
+      { kind: 'text', index: 4, count: 5, heading: 'Planung' },
+      5,
+    )
+    mounted.root.focus()
+    mounted.root.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    place(mounted.root, 1, 0)
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Listenebene 2 · 1× eingerückt')
+    expect(button(mounted.el, 'Einrücken')?.hasAttribute('disabled')).toBe(false)
+    const glyph = mounted.el.querySelector<HTMLInputElement>(
+      '[aria-label="Eigenes Aufzählungszeichen"]',
+    )!
+    glyph.value = '✓'
+    glyph.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(mounted.root.querySelector('[data-node="1"]')?.getAttribute('data-bullet')).toBe('✓')
+    glyph.value = '<b>x</b>'
+    glyph.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(mounted.root.querySelector('[data-node="1"]')?.getAttribute('data-bullet')).toBe('✓')
+    glyph.blur()
+    await nextTick()
+    expect(mounted.root.querySelector('[data-node="1"]')?.getAttribute('data-bullet')).toBe('✓')
+    click(mounted.el.querySelector('[aria-label="Zeichen horizontal nach rechts"]')!)
+    click(mounted.el.querySelector('[aria-label="Textbeginn nach rechts"]')!)
+    await nextTick()
+    const moved = mounted.root.querySelector<HTMLElement>('[data-node="1"]')!
+    expect(moved.style.getPropertyValue('--marker-x')).toBe('0.5mm')
+    expect(moved.style.getPropertyValue('--text-start')).toBe('0.5mm')
+    expect(moved.getAttribute('data-marker')).toBe('circle')
+    const horizontal = mounted.el.querySelector<HTMLInputElement>('[aria-label="Zeichen horizontal"]')!
+    horizontal.value = '80'
+    horizontal.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(moved.style.getPropertyValue('--marker-x')).toBe('0.5mm')
+    click(button(mounted.el, 'Standard')!)
+    await nextTick()
+    expect(moved.style.getPropertyValue('--marker-x')).toBe('')
+    expect(moved.getAttribute('data-bullet')).toBe('◦')
+    click(button(mounted.el, 'Einrücken')!)
+    await nextTick()
+    expect(moved.style.getPropertyValue('--depth')).toBe('2')
+    expect(moved.getAttribute('data-bullet')).toBe('◦')
+    expect(mounted.el.textContent).toContain('Listenebene 3 · 2× eingerückt')
+    click(button(mounted.el, 'Ausrücken')!)
+    await nextTick()
+    expect(moved.style.getPropertyValue('--depth')).toBe('1')
+    const span = document.createRange()
+    const from = mounted.root.querySelector('[data-text][data-index="1"]')!.firstChild!
+    const to = mounted.root.querySelector('[data-text][data-index="2"]')!.firstChild!
+    span.setStart(from, 0)
+    span.setEnd(to, 1)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(span)
+    document.dispatchEvent(new Event('selectionchange'))
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Gemischte Ebenen')
+    place(mounted.root, 0, 0)
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Eigenes Aufzählungszeichen"]')).toBeNull()
+    const parent = mounted.root.querySelector<HTMLElement>('[data-node="0"]')!
+    const child = mounted.root.querySelector<HTMLElement>('[data-node="3"]')
+    expect(parent.getAttribute('data-bullet')).toBe('5.4')
+    expect(parent.getAttribute('data-numbering')).toBe('outline')
+    expect(parent.style.getPropertyValue('--outline-col')).toBe('3ch')
+    expect(parent.style.getPropertyValue('--outline-indent')).toBe('calc(0ch + 0 * 0.4em)')
+    expect(child?.getAttribute('data-bullet')).toBe('5.5')
+    expect(child?.style.getPropertyValue('--outline-col')).toBe('3ch')
+    expect(mounted.root.querySelector('[data-node="1"]')?.getAttribute('style') ?? '').not.toContain(
+      '--outline-col',
+    )
+    expect(mounted.el.textContent).toContain('Listenebene 1 · 0× eingerückt')
     mounted.unmount()
   })
 

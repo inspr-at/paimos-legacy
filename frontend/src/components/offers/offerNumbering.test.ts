@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   applyStructure,
@@ -6,6 +7,7 @@ import {
   insertProseText,
   numberingCommandForIndex,
   OFFER_PROSE_MAX_DEPTH,
+  outlineMarkerColumns,
   outdentItem,
   parseProseNodes,
   persistProse,
@@ -114,11 +116,15 @@ describe('offer outline numbering', () => {
     expect(proseMarkerLabels(indented)).toEqual(['3', '3.1'])
   })
 
-  it('keeps a start when indent cannot change depth and keeps a continued level', () => {
+  it('indents the first item without inventing a parent number and keeps a continued level', () => {
     const started = [outline('A', 0, { list_start: 3 })]
-    expect(indentItem(started, 0)[0]).toMatchObject({ list_start: 3, numbering: 'outline' })
-    expect(indentItem(started, 0)[0]?.depth).toBeUndefined()
-    expect(proseMarkerLabels(indentItem(started, 0))).toEqual(['3'])
+    const indentedFirst = indentItem(started, 0)
+    expect(indentedFirst[0]).toMatchObject({ depth: 1, numbering: 'outline' })
+    expect(indentedFirst[0]?.list_start).toBeUndefined()
+    expect(proseMarkerLabels(indentedFirst)).toEqual(['1'])
+    expect(proseMarkerLabels(indentedFirst).join('')).not.toContain('.0')
+    expect(parseProseNodes(persistProse(indentedFirst).nodes)).toEqual(indentedFirst)
+    expect(outdentItem(indentedFirst, 0)[0]?.depth).toBeUndefined()
     const continued = [
       outline('A', 0, { list_start: 3 }),
       outline('B', 1),
@@ -127,8 +133,9 @@ describe('offer outline numbering', () => {
     ]
     expect(proseMarkerLabels(continued)[3]).toBe('3.2')
     const held = indentItem(continued, 3)
-    expect(held[3]).toMatchObject({ depth: 1, list_continue: true, numbering: 'outline' })
-    expect(proseMarkerLabels(held)[3]).toBe('3.2')
+    expect(held[3]).toMatchObject({ depth: 2, list_continue: true, numbering: 'outline' })
+    expect(proseMarkerLabels(held)[3]).not.toContain('.0')
+    expect(proseMarkerLabels(outdentItem(held, 3))[3]).toBe('3.2')
     const outdented = outdentItem(continued, 3)
     expect(outdented[3]).toMatchObject({ list_continue: true, numbering: 'outline' })
     expect(outdented[3]?.depth).toBeUndefined()
@@ -199,9 +206,9 @@ describe('offer outline numbering', () => {
     const caret = (index: number) => ({ index, offset: 0 })
     const all = { anchor: { index: 0, offset: 0 }, focus: { index: 1, offset: 1 } }
     expect(proseLevelMoves([outline('A')], caret(0))).toMatchObject({
-      indent: false,
+      indent: true,
       outdent: true,
-      indentLimit: 'no-previous',
+      indentLimit: null,
       outdentLimit: null,
     })
     const siblings = [outline('A'), outline('B')]
@@ -209,14 +216,13 @@ describe('offer outline numbering', () => {
     expect(proseLevelMoves(siblings, all).indent).toBe(true)
     const capped = [outline('A'), outline('B', 1)]
     expect(proseLevelMoves(capped, caret(1))).toMatchObject({
-      indent: false,
+      indent: true,
       outdent: true,
-      indentLimit: 'boundary',
+      indentLimit: null,
     })
     expect(proseLevelMoves(capped, all)).toMatchObject({
-      indent: false,
+      indent: true,
       outdent: true,
-      indentLimit: 'mixed',
     })
     const chain = Array.from({ length: OFFER_PROSE_MAX_DEPTH + 1 }, (_, depth) =>
       outline(String.fromCharCode(65 + depth), depth),
@@ -236,9 +242,96 @@ describe('offer outline numbering', () => {
     const afterParagraph = [paragraph('p'), outline('A')]
     expect(proseLevelMoves(afterParagraph, all).indent).toBe(true)
     expect(proseLevelMoves(afterParagraph, caret(1))).toMatchObject({
-      indent: false,
-      indentLimit: 'no-previous',
+      indent: true,
+      indentLimit: null,
     })
+  })
+
+  it('indents a bullet under a shallower number and keeps the section labels', () => {
+    const bullet = (
+      text: string,
+      depth: number,
+      marker: OfferTextNode['marker'],
+    ): OfferTextNode => ({
+      kind: 'item',
+      text,
+      depth,
+      marker,
+    })
+    const nodes = [
+      { ...outline('Planungsrahmen', 0, { list_start: 4 }), section_bound: true as const },
+      bullet('Projektstart', 1, 'circle'),
+      bullet('Monat', 2, 'square'),
+      { ...outline('Weiter'), section_bound: true as const },
+    ]
+    expect(proseMarkerLabels(nodes, 5)).toEqual(['5.4', '◦', '▪', '5.5'])
+    expect(proseLevelMoves(nodes, { index: 1, offset: 0 }).indent).toBe(true)
+    const indented = indentItem(nodes, 1)
+    expect(indented[1]).toMatchObject({ depth: 2, marker: 'circle', text: 'Projektstart' })
+    expect(indented[0]?.list_start).toBe(4)
+    expect(indented[0]?.depth).toBeUndefined()
+    expect(indented[3]?.marker).toBe('decimal')
+    expect(proseMarkerLabels(indented, 5)[0]).toBe('5.4')
+    expect(proseMarkerLabels(indented, 5)[1]).toBe('◦')
+    expect(proseMarkerLabels(outdentItem(indented, 1), 5)[1]).toBe('◦')
+    expect(outdentItem(indented, 1)[1]?.depth).toBe(1)
+    const stored = persistProse(indented, 5)
+    expect(stored.body).not.toContain('.0')
+    expect(parseProseNodes(stored.nodes)).toEqual(indented)
+    const nested = [
+      { ...outline('Planungsrahmen', 0, { list_start: 4 }), section_bound: true as const },
+      { ...outline('Kind', 1), section_bound: true as const },
+    ]
+    expect(proseMarkerLabels(nested, 5)).toEqual(['5.4', '5.4.1'])
+    const columns = outlineMarkerColumns(proseMarkerLabels(nested, 5), nested)
+    expect(columns[0]).toEqual({ col: 3, prefix: 0 })
+    expect(columns[1]).toEqual({ col: 5, prefix: 3 })
+    const short = [outline('A'), outline('B')]
+    expect(outlineMarkerColumns(proseMarkerLabels(short), short)).toEqual([
+      { col: 1, prefix: 0 },
+      { col: 1, prefix: 0 },
+    ])
+    const css = readFileSync('src/components/offers/offer-document.css', 'utf8')
+    expect(css).not.toContain('4.8em')
+    expect(css).toContain('minmax(var(--outline-col, max-content), max-content)')
+    expect(css).toContain('margin-left: var(--outline-indent, calc(var(--depth, 0) * 1.55em))')
+    const pair = [
+      { ...outline('A'), section_bound: true as const },
+      { ...outline('B', 1), section_bound: true as const },
+    ]
+    expect(proseMarkerLabels(pair, 2)).toEqual(['2.1', '2.1.1'])
+    const out = outdentItem(pair, 1)
+    expect(proseMarkerLabels(out, 2)).toEqual(['2.1', '2.2'])
+  })
+
+  it('stores a plain bullet symbol and marker offsets and rejects html', () => {
+    const nodes: OfferTextNode[] = [
+      {
+        kind: 'item',
+        text: 'Projektstart',
+        marker: 'circle',
+        depth: 1,
+        glyph: '✓',
+        marker_x_mm: -1.5,
+        marker_y_mm: 0.5,
+        text_start_mm: 2,
+      },
+    ]
+    const stored = persistProse(nodes)
+    expect(stored.body).toContain('✓ Projektstart')
+    expect(parseProseNodes(stored.nodes)).toEqual(nodes)
+    expect(
+      parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', glyph: '<b>x</b>' }]),
+    ).toBeNull()
+    expect(
+      parseProseNodes([
+        { kind: 'item', text: 'A', marker: 'decimal', numbering: 'outline', glyph: '✓' },
+      ]),
+    ).toBeNull()
+    expect(parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_x_mm: 80 }])).toBeNull()
+    expect(
+      parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_y_mm: Number.NaN }]),
+    ).toBeNull()
   })
 
   it('round-trips outline metadata and rejects a start stored with continue', () => {

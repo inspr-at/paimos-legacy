@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -19,14 +20,18 @@ const (
 // OfferTextNode is an optional paragraph or bullet inside an offer text block.
 // Omitted nodes keep body as literal plain text.
 type OfferTextNode struct {
-	Kind         string `json:"kind"`
-	Text         string `json:"text"`
-	Depth        int    `json:"depth,omitempty"`
-	Marker       string `json:"marker,omitempty"`
-	Numbering    string `json:"numbering,omitempty"`
-	ListStart    int    `json:"list_start,omitempty"`
-	ListContinue bool   `json:"list_continue,omitempty"`
-	SectionBound bool   `json:"section_bound,omitempty"`
+	Kind         string  `json:"kind"`
+	Text         string  `json:"text"`
+	Depth        int     `json:"depth,omitempty"`
+	Marker       string  `json:"marker,omitempty"`
+	Numbering    string  `json:"numbering,omitempty"`
+	ListStart    int     `json:"list_start,omitempty"`
+	ListContinue bool    `json:"list_continue,omitempty"`
+	SectionBound bool    `json:"section_bound,omitempty"`
+	Glyph        string  `json:"glyph,omitempty"`
+	MarkerXMM    float64 `json:"marker_x_mm,omitempty"`
+	MarkerYMM    float64 `json:"marker_y_mm,omitempty"`
+	TextStartMM  float64 `json:"text_start_mm,omitempty"`
 }
 
 func offerBullet(depth int) string {
@@ -86,7 +91,39 @@ func validOfferNumbering(node OfferTextNode) bool {
 	return !(node.ListStart > 0 && node.ListContinue)
 }
 
+func roundMarkerMM(value, min, max float64) (float64, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, false
+	}
+	scaled := math.Round(value*10) / 10
+	if scaled < min || scaled > max {
+		return 0, false
+	}
+	return scaled, true
+}
+
+func plainItemGlyph(glyph string, marker string) (string, bool) {
+	if glyph == "" {
+		return "", true
+	}
+	if marker == "decimal" || utf8.RuneCountInString(glyph) > 4 || strings.TrimSpace(glyph) != glyph {
+		return "", false
+	}
+	if strings.ContainsAny(glyph, "<>&") {
+		return "", false
+	}
+	for _, r := range glyph {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	return glyph, true
+}
+
 func offerItemGlyph(node OfferTextNode) string {
+	if node.Glyph != "" && node.Marker != "decimal" {
+		return node.Glyph
+	}
 	switch node.Marker {
 	case "disc":
 		return "•"
@@ -173,6 +210,9 @@ func projectOfferNodes(nodes []OfferTextNode, sectionNumber int) string {
 			for c := 0; c <= depth; c++ {
 				n := levels[c]
 				if n <= 0 {
+					if c < depth {
+						continue
+					}
 					n = 1
 				}
 				parts = append(parts, strconv.Itoa(n))
@@ -207,6 +247,12 @@ func canonOfferNode(node OfferTextNode, depth int) OfferTextNode {
 			out.ListContinue = true
 		}
 	}
+	if node.Marker != "decimal" {
+		out.Glyph = node.Glyph
+	}
+	out.MarkerXMM = node.MarkerXMM
+	out.MarkerYMM = node.MarkerYMM
+	out.TextStartMM = node.TextStartMM
 	return out
 }
 
@@ -224,30 +270,31 @@ func normalizeOfferProseInSection(body string, nodes []OfferTextNode, sectionNum
 		return body, nil, errors.New("Ungültige Textstruktur")
 	}
 	canon := make([]OfferTextNode, 0, len(nodes))
-	previous := -1
 	for _, node := range nodes {
 		if !validProseText(node.Text) || (node.Kind != "paragraph" && node.Kind != "item") || !validOfferMarker(node.Kind, node.Marker) || !validOfferNumbering(node) {
 			return body, nil, errors.New("Ungültige Textstruktur")
 		}
+		glyph, glyphOK := plainItemGlyph(node.Glyph, node.Marker)
+		markerX, xOK := roundMarkerMM(node.MarkerXMM, -30, 30)
+		markerY, yOK := roundMarkerMM(node.MarkerYMM, -20, 20)
+		textStart, textOK := roundMarkerMM(node.TextStartMM, -20, 40)
+		if !glyphOK || !xOK || !yOK || !textOK {
+			return body, nil, errors.New("Ungültige Textstruktur")
+		}
+		node.Glyph = glyph
+		node.MarkerXMM = markerX
+		node.MarkerYMM = markerY
+		node.TextStartMM = textStart
 		if node.Kind == "paragraph" {
-			if node.Depth != 0 {
+			if node.Depth != 0 || node.Glyph != "" || node.MarkerXMM != 0 || node.MarkerYMM != 0 || node.TextStartMM != 0 {
 				return body, nil, errors.New("Ungültige Textstruktur")
 			}
-			previous = -1
 			canon = append(canon, canonOfferNode(node, 0))
 			continue
 		}
-		maxDepth := 0
-		if previous >= 0 {
-			maxDepth = previous + 1
-			if maxDepth > offerProseMaxDepth {
-				maxDepth = offerProseMaxDepth
-			}
-		}
-		if node.Depth < 0 || node.Depth > offerProseMaxDepth || (node.Depth > maxDepth && !(previous < 0 && node.ListContinue)) {
+		if node.Depth < 0 || node.Depth > offerProseMaxDepth {
 			return body, nil, errors.New("Ungültige Textstruktur")
 		}
-		previous = node.Depth
 		canon = append(canon, canonOfferNode(node, node.Depth))
 	}
 	if len(canon) == 1 && canon[0].Kind == "paragraph" {

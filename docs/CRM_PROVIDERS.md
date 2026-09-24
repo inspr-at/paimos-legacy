@@ -306,9 +306,17 @@ without application chrome; browser Print / Save as PDF exports the same documen
 The v8 visual rules are preserved, with extra pages when the complete terms or
 positions exceed A4. An indivisible item exceeding a whole page must be split or
 shortened before printing. A text-block body may also carry optional `nodes`:
-paragraphs and nested bullet or numbered items (depth 0–5). An item may set
+paragraphs and nested bullet or numbered items (depth 0–5). Indent does not
+require a parent item; a saved depth is kept up to 5. An item may set
 `marker` to `disc`, `circle`, `square`, `dash` or `decimal`. Without `marker`,
-an item keeps the depth glyph (•, ◦, ▪). Decimal numbers without further fields restart after a
+an item keeps the depth glyph (•, ◦, ▪). A bullet may also set `glyph` to a
+short plain symbol; HTML is rejected, and numbered items keep their generated
+labels. `marker_x_mm` (−30–30), `marker_y_mm` (−20–20) and `text_start_mm`
+(−20–40) move that marker and the text start for the selected items. Omitted
+values keep the default alignment. Each outline level is only as wide as its
+own number, and the next level starts at that text, so 5.4.1 does not begin
+left of the parent text and a short number does not reserve a wide gutter.
+Decimal numbers without further fields restart after a
 paragraph or a non-numbered item at the same depth; nested numbers count on
 their own level. `numbering: "outline"` renders multilevel decimals such as
 3, 3.1, 3.1.1. `section_bound: true` prefixes that outline with the

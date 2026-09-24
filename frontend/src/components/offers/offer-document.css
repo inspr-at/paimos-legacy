@@ -392,6 +392,9 @@
   padding-top: 0.16em;
 }
 .offer-document .offer-prose .item {
+  --offer-marker-x: var(--marker-x, 0mm);
+  --offer-marker-y: var(--marker-y, 0mm);
+  --offer-text-start: var(--text-start, 0mm);
   display: grid;
   grid-template-columns: 1.15em minmax(0, 1fr);
   column-gap: 0.35em;
@@ -402,6 +405,10 @@
   color: var(--teal);
   font-weight: 700;
   user-select: none;
+  transform: translate(var(--offer-marker-x), var(--offer-marker-y));
+}
+.offer-document .offer-prose .item [data-text] {
+  margin-left: var(--offer-text-start);
 }
 .offer-document .offer-prose .item[data-marker='decimal'] {
   grid-template-columns: 1.9em minmax(0, 1fr);
@@ -417,7 +424,9 @@
   padding-top: 0.22em;
 }
 .offer-document .offer-prose .item[data-numbering='outline'] {
-  grid-template-columns: max-content minmax(0, 1fr);
+  /* Column is this level's own label width. Indent is the sum of earlier levels plus the same 0.4em gap. */
+  grid-template-columns: minmax(var(--outline-col, max-content), max-content) minmax(0, 1fr);
+  margin-left: var(--outline-indent, calc(var(--depth, 0) * 1.55em));
 }
 .offer-document .sec {
   position: relative;

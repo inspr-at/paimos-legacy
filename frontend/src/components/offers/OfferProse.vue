@@ -12,6 +12,7 @@ import {
   insertProseText,
   insertSoftBreak,
   numberingCommandForIndex,
+  outlineMarkerColumns,
   outdentItem,
   persistProse,
   proseListState,
@@ -21,8 +22,11 @@ import {
   rangeAfterStore,
   rangeEnds,
   reconcileProseTexts,
+  resetItemLayout,
   setBulletMarker,
   setDecimalControl,
+  setItemGlyph,
+  setItemLayout,
   setListKind,
   type Caret,
   type ProseEdit,
@@ -68,6 +72,7 @@ function rememberCaret() {
 const session = useOfferProseSession()
 const proseId = takeOfferProseId()
 const markerLabels = computed(() => proseMarkerLabels(local.value, props.sectionNumber || 0))
+const outlineColumns = computed(() => outlineMarkerColumns(markerLabels.value, local.value))
 let serial = 1
 let pendingRange: ProseRange | null = null
 let held: ProseRange | null = null
@@ -654,11 +659,34 @@ function onPaste(event: ClipboardEvent) {
   )
   apply(insertProseText(local.value, currentRange(), text))
 }
+function itemStyle(node: OfferTextNode, index: number): Record<string, string> | undefined {
+  if (node.kind !== 'item') return undefined
+  const style: Record<string, string> = { '--depth': String(node.depth ?? 0) }
+  if (node.marker_x_mm) style['--marker-x'] = `${node.marker_x_mm}mm`
+  if (node.marker_y_mm) style['--marker-y'] = `${node.marker_y_mm}mm`
+  if (node.text_start_mm) style['--text-start'] = `${node.text_start_mm}mm`
+  if (node.numbering === 'outline' && node.marker === 'decimal') {
+    const column = outlineColumns.value[index]
+    const depth = node.depth ?? 0
+    if (column) {
+      style['--outline-col'] = `${column.col}ch`
+      style['--outline-indent'] = `calc(${column.prefix}ch + ${depth} * 0.4em)`
+    }
+  }
+  return style
+}
 function opFor(command: ProseCommand) {
   if (command.type === 'indent') return indentItem
   if (command.type === 'outdent') return outdentItem
   if (command.type === 'marker')
     return (nodes: OfferTextNode[], index: number) => setBulletMarker(nodes, index, command.marker)
+  if (command.type === 'glyph')
+    return (nodes: OfferTextNode[], index: number) => setItemGlyph(nodes, index, command.glyph)
+  if (command.type === 'layout')
+    return (nodes: OfferTextNode[], index: number) =>
+      setItemLayout(nodes, index, command.axis, command.value)
+  if (command.type === 'layout-reset')
+    return (nodes: OfferTextNode[], index: number) => resetItemLayout(nodes, index)
   if (command.type === 'numbering') {
     let position = 0
     return (nodes: OfferTextNode[], index: number) => {
@@ -732,7 +760,7 @@ function nodeClass(node: OfferTextNode, index: number) {
         :data-bullet="node.kind === 'item' ? markerLabels[index] : undefined"
         :data-marker="node.marker || undefined"
         :data-numbering="node.numbering || undefined"
-        :style="node.kind === 'item' ? { '--depth': String(node.depth ?? 0) } : undefined"
+        :style="itemStyle(node, index)"
       >
         <span data-text :data-index="index" />
       </div>
