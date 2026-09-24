@@ -156,12 +156,12 @@ describe('offer settings stay off the open draft', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     await nextTick()
     expect(el.textContent).toContain('A260923-41')
-    el.querySelector<HTMLButtonElement>('[aria-label="Einstellungen"]')!.click()
-    await nextTick()
-    const settingsItem = [...el.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Vorlagen für neue Angebote'),
+    const settingsItem = [...el.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Vorlagen bearbeiten',
     )!
-    expect(settingsItem.textContent).toContain('geöffnete Angebot bleibt unverändert')
+    expect(settingsItem.closest('section')?.textContent).toContain(
+      'Dieses Angebot bleibt unverändert',
+    )
     settingsItem.click()
     await nextTick()
     await new Promise((resolve) => setTimeout(resolve, 0))

@@ -4,6 +4,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ensureUTC } from '@/composables/useDateFormat'
 import { OFFER_CHROME_KEY } from '@/composables/useOfferChrome'
 import { publicURL } from '@/publicPath'
+import OfferInspector from '@/components/offers/OfferInspector.vue'
 import OfferTitleBar from '@/components/offers/OfferTitleBar.vue'
 import {
   offerToolbarActions,
@@ -35,11 +36,16 @@ function toolbarElement(): HTMLElement | undefined {
   return toolbar.value?.root
 }
 const viewport = ref<HTMLElement>()
+const inspectorOpen = ref(true)
 const zoomMode = ref('width')
 const zoom = ref(1)
 function fitZoom() {
   const width = (viewport.value?.clientWidth ?? window.innerWidth) - 32
-  const height = window.innerHeight - (toolbarElement()?.getBoundingClientRect().bottom ?? 0) - 32
+  const stageHeight = viewport.value?.clientHeight ?? 0
+  const height =
+    stageHeight > 80
+      ? stageHeight - 32
+      : window.innerHeight - (toolbarElement()?.getBoundingClientRect().bottom ?? 0) - 32
   zoom.value =
     zoomMode.value === 'width'
       ? Math.max(0.1, width / ((210 * 96) / 25.4))
@@ -47,7 +53,7 @@ function fitZoom() {
         ? Math.max(0.1, Math.min(width / ((210 * 96) / 25.4), height / ((297 * 96) / 25.4)))
         : Number(zoomMode.value) / 100
 }
-watch([zoomMode, collapsed], async () => {
+watch([zoomMode, collapsed, inspectorOpen], async () => {
   await nextTick()
   fitZoom()
 })
@@ -403,7 +409,7 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(async () => !dirty.value || (await save()))
 </script>
 <template>
-  <main ref="viewport" class="offer-view" :class="{ 'is-collapsed': collapsed }">
+  <main class="offer-view" :class="{ 'is-collapsed': collapsed }">
     <template v-if="crmEnabled">
       <OfferTitleBar
         ref="toolbar"
@@ -430,26 +436,12 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :print-disabled="saving || !!overflow || conflict"
         :show-print="!!offer"
         :actions="toolbarActions"
-        :footer="offer?.document.footer ?? null"
-        :can-undo="!!renderer?.canUndo"
-        :can-redo="!!renderer?.canRedo"
-        :selection="selection"
+        :show-inspector="editable"
+        :inspector-open="inspectorOpen"
         @save="save(true)"
         @print="printOffer"
         @action="onToolbarAction"
-        @footer="onFooter"
-        @undo="renderer?.undo()"
-        @redo="renderer?.redo()"
-        @insert-section="renderer?.addSection()"
-        @insert-position="addPosition()"
-        @select-footer="renderer?.selectFooter()"
-        @section-add="renderer?.addSection()"
-        @section-up="renderer?.moveSection(-1)"
-        @section-down="renderer?.moveSection(1)"
-        @section-delete="renderer?.askDeleteSection()"
-        @position-up="selection.kind === 'position' && renderer?.move(selection.index, -1)"
-        @position-down="selection.kind === 'position' && renderer?.move(selection.index, 1)"
-        @position-delete="selection.kind === 'position' && renderer?.remove(selection.index)"
+        @toggle-inspector="inspectorOpen = !inspectorOpen"
       />
       <p v-if="loading" class="offer-notice">Angebot wird geladen …</p>
       <p v-if="error || overflow" role="alert" class="offer-notice offer-error">
@@ -457,8 +449,9 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         <button v-if="dirty && !conflict" class="btn" @click="save()">Erneut speichern</button>
       </p>
       <p v-if="editable && !collapsed" class="offer-notice">
-        Klicke in einen Text, um ihn zu bearbeiten. Änderungen werden automatisch gespeichert.
-        Kundenlink und QR-Code werden beim Finalisieren erstellt.
+        Klicke in einen Text, um ihn zu bearbeiten. Die Werkzeuge dafür stehen im Inspektor.
+        Änderungen werden automatisch gespeichert. Kundenlink und QR-Code werden beim Finalisieren
+        erstellt.
       </p>
       <p v-else-if="offer?.status === 'sent' && !printMode" class="offer-notice">
         Finalisiert am {{ offer.sent_at?.slice(0, 10) }}. Zum Ändern ein neues Angebot duplizieren.
@@ -510,18 +503,44 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :admin="auth.isAdmin"
         @refresh="refreshConfirmation"
       />
-      <OfferDocument
-        v-if="offer"
-        ref="renderer"
-        :key="`${offer.id}-${printMode}`"
-        :offer="offer"
-        :zoom="zoom"
-        :public-url="publicUrl"
-        :qr-preview="offer.status === 'draft'"
-        :editable="editable"
-        @overflow="overflow = $event"
-        @select="selection = $event"
-      />
+      <div class="offer-workspace">
+        <OfferInspector
+          v-if="editable && offer"
+          :open="inspectorOpen"
+          :footer="offer.document.footer ?? null"
+          :can-undo="!!renderer?.canUndo"
+          :can-redo="!!renderer?.canRedo"
+          :selection="selection"
+          :block-count="offer.document.blocks.length"
+          @footer="onFooter"
+          @undo="renderer?.undo()"
+          @redo="renderer?.redo()"
+          @action="onToolbarAction"
+          @insert-section="renderer?.addSection()"
+          @insert-position="addPosition()"
+          @section-add="renderer?.addSection()"
+          @section-up="renderer?.moveSection(-1)"
+          @section-down="renderer?.moveSection(1)"
+          @section-delete="renderer?.askDeleteSection()"
+          @position-up="selection.kind === 'position' && renderer?.move(selection.index, -1)"
+          @position-down="selection.kind === 'position' && renderer?.move(selection.index, 1)"
+          @position-delete="selection.kind === 'position' && renderer?.remove(selection.index)"
+        />
+        <div ref="viewport" class="offer-stage">
+          <OfferDocument
+            v-if="offer"
+            ref="renderer"
+            :key="`${offer.id}-${printMode}`"
+            :offer="offer"
+            :zoom="zoom"
+            :public-url="publicUrl"
+            :qr-preview="offer.status === 'draft'"
+            :editable="editable"
+            @overflow="overflow = $event"
+            @select="selection = $event"
+          />
+        </div>
+      </div>
       <OfferSettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
       <dialog
         ref="finalizeDialog"
@@ -602,6 +621,58 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
 
 .offer-view {
   min-width: 0;
+}
+@media screen {
+  .offer-view {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 132px);
+    min-height: 280px;
+  }
+  .offer-view.is-collapsed {
+    height: calc(100dvh - 16px);
+  }
+  .offer-workspace {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+  }
+  .offer-stage {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+  }
+  .offer-workspace :deep(.offer-inspector) {
+    order: 2;
+    flex: none;
+    align-self: stretch;
+    width: 300px;
+    max-height: 100%;
+    overflow: auto;
+  }
+}
+@media screen and (max-width: 860px) {
+  .offer-workspace {
+    flex-direction: column;
+  }
+  .offer-stage,
+  .offer-workspace :deep(.offer-inspector) {
+    order: 0;
+    width: 100%;
+    max-height: min(46vh, 420px);
+  }
+  .offer-stage {
+    max-height: none;
+    flex: 1 1 auto;
+  }
+  .offer-workspace :deep(.offer-inspector) {
+    border-left: 0;
+    border-bottom: 1px solid var(--h-line, #d8e2df);
+  }
 }
 .offer-notice {
   padding: 8px 20px;

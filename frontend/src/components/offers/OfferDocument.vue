@@ -442,14 +442,6 @@ const activeField = ref<'heading' | 'body'>('heading')
 const canAdd = computed(
   () => !!props.editable && props.offer.document.blocks.length < OFFER_MAX_BLOCKS,
 )
-const canUp = computed(() => {
-  const index = activeBlock.value
-  return !!props.editable && index != null && index > 0
-})
-const canDown = computed(() => {
-  const index = activeBlock.value
-  return !!props.editable && index != null && index < props.offer.document.blocks.length - 1
-})
 function onSheetFocusIn(event: FocusEvent) {
   const target = event.target
   if (!(target instanceof Element)) return
@@ -480,8 +472,11 @@ function focusSection(index: number, field: 'heading' | 'body') {
 function addSection() {
   if (!canAdd.value) return
   const blocks = props.offer.document.blocks
+  const inSection = activeKind.value === 'heading' || activeKind.value === 'text'
   const at =
-    activeBlock.value == null ? blocks.length : Math.min(blocks.length, activeBlock.value + 1)
+    !inSection || activeBlock.value == null
+      ? blocks.length
+      : Math.min(blocks.length, activeBlock.value + 1)
   withBlocks(() => {
     blocks.splice(at, 0, { heading: '', body: '' })
   })
@@ -581,7 +576,12 @@ function currentSelection(): OfferSelection {
           count: blocks.length,
           heading: blocks[activeBlock.value]!.heading,
         }
-      : { kind: 'text', index: activeBlock.value, count: blocks.length }
+      : {
+          kind: 'text',
+          index: activeBlock.value,
+          count: blocks.length,
+          heading: blocks[activeBlock.value]!.heading,
+        }
   }
   return { kind: 'none' }
 }
@@ -676,160 +676,117 @@ defineExpose({
       :style="{ '--offer-zoom': zoom ?? 1 }"
       @focusin="onSheetFocusIn"
     >
-      <section
-        v-for="(page, index) in renderedPages"
-        :key="index"
-        :class="['page', page.kind === 'cover' ? 'p1' : 'p2']"
-        :aria-label="`Seite ${index + 1}`"
-      >
-        <div class="hdr">
-          <span>ANGEBOT {{ offer.offer_no }}</span>
-          <span class="right">{{ date(offer.document.offer_date) }}</span>
-        </div>
-        <div class="page-content">
-          <div v-if="index > 0 && !page.heading" class="page-continuation" />
-          <OfferCover v-if="page.kind === 'cover'" :offer="offer" :editable="editable" />
-          <h2 v-if="page.heading" class="section-heading">
-            <span>{{
-              page.heading === 'terms'
-                ? 'I. BEDINGUNGEN'
-                : `${offer.document.blocks.length ? 'II.' : 'I.'} LEISTUNGSAUFSTELLUNG`
-            }}</span>
-            <OfferBrandDots />
-          </h2>
-          <div v-if="page.blocks.length" class="sections">
-            <template v-for="i in page.blocks" :key="sectionKey(offer.document.blocks[i])">
-              <div v-if="offer.document.blocks[i]" class="sec" :data-section="i">
-                <span class="n">{{ i + 1 }}</span
-                ><OfferText
-                  v-model="offer.document.blocks[i]!.heading"
-                  tag="h3"
-                  :editable="editable"
-                  :label="`Überschrift Textbaustein ${i + 1}`"
-                /><span
-                  v-if="editable"
-                  class="sec-actions"
-                  :aria-label="`Aktionen für Abschnitt ${i + 1}`"
-                >
-                  <button
-                    type="button"
-                    title="Abschnitt danach hinzufügen"
-                    :aria-label="`Abschnitt ${i + 1} danach hinzufügen`"
-                    :disabled="!canAdd"
-                    @mousedown.prevent
-                    @click="
-                      () => {
-                        activeBlock = i
-                        addSection()
-                      }
-                    "
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    title="Abschnitt nach oben verschieben"
-                    aria-label="Abschnitt nach oben"
-                    :disabled="i === 0"
-                    @mousedown.prevent
-                    @click="
-                      () => {
-                        activeBlock = i
-                        moveSection(-1)
-                      }
-                    "
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    title="Abschnitt nach unten verschieben"
-                    aria-label="Abschnitt nach unten"
-                    :disabled="i === offer.document.blocks.length - 1"
-                    @mousedown.prevent
-                    @click="
-                      () => {
-                        activeBlock = i
-                        moveSection(1)
-                      }
-                    "
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    title="Diesen Abschnitt löschen"
-                    :aria-label="`Abschnitt ${i + 1} löschen`"
-                    @mousedown.prevent
-                    @click="askDeleteSection(i)"
-                  >
-                    ×
-                  </button> </span
-                ><OfferProse
-                  :body="offer.document.blocks[i]!.body"
-                  :nodes="offer.document.blocks[i]!.nodes"
-                  :memory="sectionMemory(offer.document.blocks[i])"
-                  :section-number="i + 1"
-                  :editable="editable"
-                  :label="`Textbaustein ${i + 1}`"
-                  @update="applyBody(i, $event)"
-                />
-              </div>
-            </template>
+      <div class="sheet-frame">
+        <section
+          v-for="(page, index) in renderedPages"
+          :key="index"
+          :class="['page', page.kind === 'cover' ? 'p1' : 'p2']"
+          :aria-label="`Seite ${index + 1}`"
+        >
+          <div class="hdr">
+            <span>ANGEBOT {{ offer.offer_no }}</span>
+            <span class="right">{{ date(offer.document.offer_date) }}</span>
           </div>
-          <OfferTable
-            v-if="page.positions.length"
-            @focusin="onPositionFocus"
-            :positions="offer.document.positions"
-            :indices="page.positions"
-            :editable="editable"
-            @remove="remove"
-            @move="move"
-            @change="emit('change')"
-          />
-          <OfferAcceptance
-            v-if="page.acceptance"
-            :document="offer.document"
-            :receipt="offer"
-            :public-url="publicUrl"
-            :qr-preview="qrPreview"
-            :editable="editable"
-          />
-        </div>
-        <div class="ftr">
-          <span>{{ offer.offer_no }}</span
-          ><OfferFootmark
-            v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
-            :layout="offer.document.footer"
-            :tabindex="editable ? 0 : undefined"
-            :role="editable ? 'button' : undefined"
-            :aria-label="editable ? 'Fußzeilenlogo auswählen' : undefined"
-            @click="editable && selectFooter($event)"
-            @keydown="onFooterKey"
-          /><span
-            v-else
-            class="footmark"
-            :class="{ 'is-set': !!offer.document.footer, 'is-selected': activeKind === 'footer' }"
-            :style="footerShift"
-            :tabindex="editable && !offer.document.footer ? 0 : undefined"
-            :role="editable && !offer.document.footer ? 'button' : undefined"
-            :aria-label="editable && !offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined"
-            @click="editable && !offer.document.footer && selectFooter($event)"
-            @keydown="!offer.document.footer && onFooterKey($event)"
-            ><span
-              class="lockup"
-              :tabindex="editable && offer.document.footer ? 0 : undefined"
-              :role="editable && offer.document.footer ? 'button' : undefined"
+          <div class="page-content">
+            <div v-if="index > 0 && !page.heading" class="page-continuation" />
+            <OfferCover v-if="page.kind === 'cover'" :offer="offer" :editable="editable" />
+            <h2 v-if="page.heading" class="section-heading">
+              <span>{{
+                page.heading === 'terms'
+                  ? 'I. BEDINGUNGEN'
+                  : `${offer.document.blocks.length ? 'II.' : 'I.'} LEISTUNGSAUFSTELLUNG`
+              }}</span>
+              <OfferBrandDots />
+            </h2>
+            <div v-if="page.blocks.length" class="sections">
+              <template v-for="i in page.blocks" :key="sectionKey(offer.document.blocks[i])">
+                <div
+                  v-if="offer.document.blocks[i]"
+                  class="sec"
+                  :data-section="i"
+                  :data-selected="
+                    activeBlock === i && (activeKind === 'heading' || activeKind === 'text')
+                      ? activeKind
+                      : undefined
+                  "
+                >
+                  <span class="n">{{ i + 1 }}</span
+                  ><OfferText
+                    v-model="offer.document.blocks[i]!.heading"
+                    tag="h3"
+                    :editable="editable"
+                    :label="`Überschrift Textbaustein ${i + 1}`"
+                  /><OfferProse
+                    :body="offer.document.blocks[i]!.body"
+                    :nodes="offer.document.blocks[i]!.nodes"
+                    :memory="sectionMemory(offer.document.blocks[i])"
+                    :section-number="i + 1"
+                    :editable="editable"
+                    :label="`Textbaustein ${i + 1}`"
+                    @update="applyBody(i, $event)"
+                  />
+                </div>
+              </template>
+            </div>
+            <OfferTable
+              v-if="page.positions.length"
+              @focusin="onPositionFocus"
+              :positions="offer.document.positions"
+              :indices="page.positions"
+              :editable="editable"
+              :selected="activeKind === 'position' ? activePosition : null"
+              @remove="remove"
+              @move="move"
+              @change="emit('change')"
+            />
+            <OfferAcceptance
+              v-if="page.acceptance"
+              :document="offer.document"
+              :receipt="offer"
+              :public-url="publicUrl"
+              :qr-preview="qrPreview"
+              :editable="editable"
+            />
+          </div>
+          <div class="ftr">
+            <span>{{ offer.offer_no }}</span
+            ><OfferFootmark
+              v-if="offer.document.sender.company.trim().toLowerCase() === 'augmentoring gmbh'"
+              :class="{ 'is-selected': activeKind === 'footer' }"
+              :layout="offer.document.footer"
+              :tabindex="editable ? 0 : undefined"
+              :role="editable ? 'button' : undefined"
+              :aria-label="editable ? 'Fußzeilenlogo auswählen' : undefined"
+              @click="editable && selectFooter($event)"
+              @keydown="onFooterKey"
+            /><span
+              v-else
+              class="footmark"
+              :class="{ 'is-set': !!offer.document.footer, 'is-selected': activeKind === 'footer' }"
+              :style="footerShift"
+              :tabindex="editable && !offer.document.footer ? 0 : undefined"
+              :role="editable && !offer.document.footer ? 'button' : undefined"
               :aria-label="
-                editable && offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined
+                editable && !offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined
               "
-              @click="editable && offer.document.footer && selectFooter($event)"
-              @keydown="offer.document.footer && onFooterKey($event)"
-              >{{ offer.document.sender.company }}</span
-            ></span
-          ><span class="right">SEITE {{ index + 1 }} VON {{ renderedPages.length }}</span>
-        </div>
-      </section>
+              @click="editable && !offer.document.footer && selectFooter($event)"
+              @keydown="!offer.document.footer && onFooterKey($event)"
+              ><span
+                class="lockup"
+                :class="{ 'is-selected': activeKind === 'footer' && !!offer.document.footer }"
+                :tabindex="editable && offer.document.footer ? 0 : undefined"
+                :role="editable && offer.document.footer ? 'button' : undefined"
+                :aria-label="
+                  editable && offer.document.footer ? 'Fußzeilenlogo auswählen' : undefined
+                "
+                @click="editable && offer.document.footer && selectFooter($event)"
+                @keydown="offer.document.footer && onFooterKey($event)"
+                >{{ offer.document.sender.company }}</span
+              ></span
+            ><span class="right">SEITE {{ index + 1 }} VON {{ renderedPages.length }}</span>
+          </div>
+        </section>
+      </div>
     </div>
     <dialog
       v-if="deleteAsk != null"

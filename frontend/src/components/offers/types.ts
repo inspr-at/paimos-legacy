@@ -24,7 +24,7 @@ export interface OfferFooterLayout {
 export type OfferSelection =
   | { kind: 'none' }
   | { kind: 'heading'; index: number; count: number; heading: string }
-  | { kind: 'text'; index: number; count: number }
+  | { kind: 'text'; index: number; count: number; heading: string }
   | { kind: 'position'; index: number; count: number }
   | { kind: 'footer' }
 
