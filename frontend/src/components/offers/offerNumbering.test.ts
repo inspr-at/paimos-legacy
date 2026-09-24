@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   applyStructure,
+  canonMarkerMm,
   enterProse,
   indentItem,
   insertProseText,
@@ -284,17 +285,39 @@ describe('offer outline numbering', () => {
     ]
     expect(proseMarkerLabels(nested, 5)).toEqual(['5.4', '5.4.1'])
     const columns = outlineMarkerColumns(proseMarkerLabels(nested, 5), nested)
-    expect(columns[0]).toEqual({ col: 3, prefix: 0 })
-    expect(columns[1]).toEqual({ col: 5, prefix: 3 })
+    expect(columns[0]).toEqual({ col: 3, prefix: 0, indent: 'calc(0ch + 0 * 0.4em)' })
+    expect(columns[1]).toEqual({ col: 5, prefix: 3, indent: 'calc(3ch + 1 * 0.4em)' })
     const short = [outline('A'), outline('B')]
     expect(outlineMarkerColumns(proseMarkerLabels(short), short)).toEqual([
-      { col: 1, prefix: 0 },
-      { col: 1, prefix: 0 },
+      { col: 1, prefix: 0, indent: 'calc(0ch + 0 * 0.4em)' },
+      { col: 1, prefix: 0, indent: 'calc(0ch + 0 * 0.4em)' },
     ])
     const css = readFileSync('src/components/offers/offer-document.css', 'utf8')
     expect(css).not.toContain('4.8em')
     expect(css).toContain('minmax(var(--outline-col, max-content), max-content)')
     expect(css).toContain('margin-left: var(--outline-indent, calc(var(--depth, 0) * 1.55em))')
+    const mixed = [bullet('A', 0, 'disc'), bullet('B', 1, 'disc'), outline('C', 2)]
+    expect(outlineMarkerColumns(proseMarkerLabels(mixed), mixed)[2]).toMatchObject({
+      indent: 'calc(2.85em)',
+    })
+    const underBullet = [bullet('A', 0, 'disc'), outline('B', 1), outline('C', 2)]
+    const underColumns = outlineMarkerColumns(proseMarkerLabels(underBullet), underBullet)
+    expect(underColumns[1]?.indent).toBe('calc(1.5em)')
+    expect(underColumns[2]?.indent).toBe('calc(1ch + 1.9em)')
+    const skipped = [bullet('A', 0, 'disc'), outline('C', 2)]
+    expect(outlineMarkerColumns(proseMarkerLabels(skipped), skipped)[1]?.indent).toBe('calc(1.5em)')
+    const plainParent = [
+      { kind: 'item' as const, text: 'A', marker: 'decimal' as const },
+      outline('B', 1),
+    ]
+    expect(outlineMarkerColumns(proseMarkerLabels(plainParent), plainParent)[1]?.indent).toBe(
+      'calc(2.3em)',
+    )
+    expect(css).toContain('margin-left: calc(var(--depth, 0) * 1.35em)')
+    expect(css).toContain('grid-template-columns: 1.15em minmax(0, 1fr)')
+    expect(css).toContain('column-gap: 0.35em')
+    expect(css).toContain('grid-template-columns: 1.9em minmax(0, 1fr)')
+    expect(css).toContain('margin-left: calc(var(--depth, 0) * 1.55em)')
     const pair = [
       { ...outline('A'), section_bound: true as const },
       { ...outline('B', 1), section_bound: true as const },
@@ -329,6 +352,27 @@ describe('offer outline numbering', () => {
       ]),
     ).toBeNull()
     expect(parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_x_mm: 80 }])).toBeNull()
+    expect(canonMarkerMm(-1.25, -30, 30)).toBe(-1.3)
+    expect(canonMarkerMm(1.25, -30, 30)).toBe(1.3)
+    expect(canonMarkerMm(-1.24, -30, 30)).toBe(-1.2)
+    expect(canonMarkerMm(-1.26, -30, 30)).toBe(-1.3)
+    expect(canonMarkerMm(-30.05, -30, 30)).toBeNull()
+    expect(canonMarkerMm(-30.04, -30, 30)).toBe(-30)
+    expect(canonMarkerMm(30.05, -30, 30)).toBeNull()
+    expect(canonMarkerMm(30.04, -30, 30)).toBe(30)
+    expect(canonMarkerMm(-30, -30, 30)).toBe(-30)
+    expect(canonMarkerMm(30, -30, 30)).toBe(30)
+    expect(canonMarkerMm(-0.05, -30, 30)).toBe(-0.1)
+    expect(canonMarkerMm(0.05, -30, 30)).toBe(0.1)
+    expect(canonMarkerMm(-29.95, -30, 30)).toBe(-30)
+    expect(canonMarkerMm(29.95, -30, 30)).toBe(30)
+    expect(canonMarkerMm(-20.05, -20, 20)).toBeNull()
+    expect(
+      parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_x_mm: -1.25 }]),
+    ).toEqual([{ kind: 'item', text: 'A', marker: 'disc', marker_x_mm: -1.3 }])
+    expect(
+      parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_x_mm: -30.05 }]),
+    ).toBeNull()
     expect(
       parseProseNodes([{ kind: 'item', text: 'A', marker: 'disc', marker_y_mm: Number.NaN }]),
     ).toBeNull()

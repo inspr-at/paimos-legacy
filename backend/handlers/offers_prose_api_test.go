@@ -4,6 +4,9 @@ package handlers_test
 import (
 	"encoding/json"
 	"io"
+	"math"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/handlers"
@@ -98,4 +101,240 @@ func TestOfferProseRoundTripPreservesLegacyAndLists(t *testing.T) {
 func jsonNumber(id int64) string {
 	raw, _ := json.Marshal(id)
 	return string(raw)
+}
+
+func takeOffer(t *testing.T, resp *http.Response) handlers.Offer {
+	t.Helper()
+	var offer handlers.Offer
+	decode(t, resp, &offer)
+	return offer
+}
+
+func proseResponseBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestOfferProseWriterVersionKeepsNewFormatting(t *testing.T) {
+	ts := newTestServer(t)
+	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, offerSettingsFixture())
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Testkunde", "address": "Gasse 2\n1010 Wien", "contact_name": "Eva Test", "contact_email": "eva@example.test"})
+	assertStatus(t, resp, 201)
+	var customer struct {
+		ID int64 `json:"id"`
+	}
+	decode(t, resp, &customer)
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": customer.ID})
+	assertStatus(t, resp, 201)
+	var offer handlers.Offer
+	decode(t, resp, &offer)
+	offer.Document.Positions = []handlers.OfferPosition{{ShortText: "Beratung", Quantity: 1, Unit: "Pauschale", UnitPriceCents: 10000}}
+	path := "/api/offers/" + jsonNumber(offer.ID)
+	offer.Document.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Nodes: []handlers.OfferTextNode{
+		{Kind: "item", Text: "Analyse"},
+		{Kind: "item", Text: "Workshop", Depth: 1},
+	}}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "document": offer.Document})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	if len(offer.Document.Blocks[0].Nodes) != 2 || offer.Document.Blocks[0].Nodes[1].Depth != 1 {
+		t.Fatalf("legacy list = %#v", offer.Document.Blocks[0])
+	}
+
+	stripped := offer.Document
+	stripped.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Body: "nur Text"}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "document": stripped})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	if offer.Document.Blocks[0].Nodes != nil || offer.Document.Blocks[0].Body != "nur Text" {
+		t.Fatalf("legacy clear = %#v", offer.Document.Blocks[0])
+	}
+
+	initial := offer.Document
+	initial.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Nodes: []handlers.OfferTextNode{
+		{Kind: "item", Text: "Erste Ebene", Depth: 1, Marker: "disc"},
+	}}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "document": initial})
+	body := proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("initial depth without writer: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if offer.Document.Blocks[0].Body != "nur Text" || offer.Document.Blocks[0].Nodes != nil {
+		t.Fatalf("refused create changed the offer: %#v", offer.Document.Blocks[0])
+	}
+
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": initial})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	node := offer.Document.Blocks[0].Nodes[0]
+	if node.Depth != 1 || node.Text != "Erste Ebene" || node.Glyph != "" || node.MarkerXMM != 0 || node.MarkerYMM != 0 || node.TextStartMM != 0 {
+		t.Fatalf("initial depth = %#v", node)
+	}
+	revision := offer.Revision
+	stale := offer.Document
+	stale.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Body: "ohne Knoten"}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": revision, "document": stale})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("stale strip: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if offer.Revision != revision || offer.Document.Blocks[0].Nodes[0].Depth != 1 || offer.Document.Blocks[0].Nodes[0].Text != "Erste Ebene" {
+		t.Fatalf("stale write changed revision %d or nodes %#v", offer.Revision, offer.Document.Blocks[0])
+	}
+
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": customer.ID, "duplicate_id": offer.ID})
+	assertStatus(t, resp, 201)
+	var copy handlers.Offer
+	decode(t, resp, &copy)
+	if copy.ID == offer.ID || copy.Document.Blocks[0].Nodes[0].Depth != 1 {
+		t.Fatalf("duplicate = %#v", copy.Document.Blocks[0])
+	}
+
+	cleared := offer.Document
+	cleared.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Body: "Klartext"}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": cleared})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	if offer.Document.Blocks[0].Nodes != nil || offer.Document.Blocks[0].Body != "Klartext" {
+		t.Fatalf("capable clear = %#v", offer.Document.Blocks[0])
+	}
+
+	laid := offer.Document
+	laid.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Nodes: []handlers.OfferTextNode{
+		{Kind: "item", Text: "Markiert", Marker: "disc", Glyph: "✓", MarkerXMM: -1.25},
+	}}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": laid})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	laidNode := offer.Document.Blocks[0].Nodes[0]
+	if laidNode.Glyph != "✓" || math.Abs(laidNode.MarkerXMM-(-1.3)) > 1e-9 || laidNode.Depth != 0 {
+		t.Fatalf("layout = %#v", laidNode)
+	}
+	plain := offer.Document
+	plain.Blocks = []handlers.OfferBlock{{Heading: "Leistung", Nodes: []handlers.OfferTextNode{{Kind: "item", Text: "Markiert", Marker: "disc"}}}}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "document": plain})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("stale layout strip: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if offer.Document.Blocks[0].Nodes[0].Glyph != "✓" || math.Abs(offer.Document.Blocks[0].Nodes[0].MarkerXMM-(-1.3)) > 1e-9 {
+		t.Fatalf("layout was stripped: %#v", offer.Document.Blocks[0].Nodes[0])
+	}
+	wide := offer.Document
+	wide.Blocks = []handlers.OfferBlock{{Heading: offer.Document.Blocks[0].Heading, Body: offer.Document.Blocks[0].Body, Nodes: []handlers.OfferTextNode{offer.Document.Blocks[0].Nodes[0]}}}
+	wide.Blocks[0].Nodes[0].MarkerXMM = -30.05
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": wide})
+	if resp.StatusCode != 400 {
+		t.Fatalf("-30.05 status %d %s", resp.StatusCode, proseResponseBody(t, resp))
+	}
+	resp.Body.Close()
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if math.Abs(offer.Document.Blocks[0].Nodes[0].MarkerXMM-(-1.3)) > 1e-9 {
+		t.Fatalf("rejected offset was stored: %#v", offer.Document.Blocks[0].Nodes[0])
+	}
+
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "document": offer.Document, "finalize": true})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("stale finalize: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, path, ts.adminCookie)
+	offer = takeOffer(t, resp)
+	if offer.Status != "draft" || offer.Document.Blocks[0].Nodes[0].Glyph != "✓" {
+		t.Fatalf("finalize changed the draft: %s %#v", offer.Status, offer.Document.Blocks[0].Nodes[0])
+	}
+	resp = ts.put(t, path, ts.adminCookie, map[string]any{"revision": offer.Revision, "prose_writer_version": 2, "document": offer.Document, "finalize": true})
+	assertStatus(t, resp, 200)
+	offer = takeOffer(t, resp)
+	if offer.Status != "sent" || offer.Document.Blocks[0].Nodes[0].Glyph != "✓" {
+		t.Fatalf("capable finalize = %s %#v", offer.Status, offer.Document.Blocks[0])
+	}
+}
+
+func TestOfferProseCreateAndDefaultsRejectIncapableV2(t *testing.T) {
+	ts := newTestServer(t)
+	settings := offerSettingsFixture()
+	settings.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Neu", Nodes: []handlers.OfferTextNode{
+		{Kind: "item", Text: "Erste Ebene", Depth: 1, Marker: "disc"},
+	}}}
+	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, settings)
+	body := proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("settings without writer: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+		"sender": settings.Sender, "defaults": settings.Defaults, "prose_writer_version": 2,
+	})
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Testkunde", "address": "Gasse 2\n1010 Wien", "contact_name": "Eva Test", "contact_email": "eva@example.test"})
+	assertStatus(t, resp, 201)
+	var customer struct {
+		ID int64 `json:"id"`
+	}
+	decode(t, resp, &customer)
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{
+		"customer_id": customer.ID,
+		"document": map[string]any{"blocks": []handlers.OfferBlock{{Heading: "Fremd", Nodes: []handlers.OfferTextNode{
+			{Kind: "item", Text: "Nicht speichern", Depth: 1},
+		}}}},
+	})
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("create with v2 document: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": customer.ID})
+	assertStatus(t, resp, 201)
+	var offer handlers.Offer
+	decode(t, resp, &offer)
+	if offer.Document.Blocks[0].Nodes[0].Depth != 1 || offer.Document.Blocks[0].Nodes[0].Text != "Erste Ebene" {
+		t.Fatalf("create did not copy stored defaults: %#v", offer.Document.Blocks[0])
+	}
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{
+		"customer_id": customer.ID, "prose_writer_version": 2,
+		"document": map[string]any{"blocks": []handlers.OfferBlock{{Heading: "Fremd", Body: "Client"}}},
+	})
+	assertStatus(t, resp, 201)
+	offer = takeOffer(t, resp)
+	if offer.Document.Blocks[0].Body == "Client" || offer.Document.Blocks[0].Nodes[0].Text != "Erste Ebene" {
+		t.Fatalf("create applied the client document: %#v", offer.Document.Blocks[0])
+	}
+
+	plain := settings
+	plain.Defaults.Blocks = []handlers.OfferBlock{{Heading: "Neu", Body: "Klartext"}}
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, plain)
+	body = proseResponseBody(t, resp)
+	if resp.StatusCode != 409 || !strings.Contains(body, "neu laden") {
+		t.Fatalf("settings strip: %d %s", resp.StatusCode, body)
+	}
+	resp = ts.get(t, "/api/integrations/crm/offers", ts.adminCookie)
+	var saved handlers.OfferSettings
+	decode(t, resp, &saved)
+	if saved.Defaults.Blocks[0].Nodes[0].Depth != 1 {
+		t.Fatalf("settings were stripped: %#v", saved.Defaults.Blocks[0])
+	}
+	resp = ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, map[string]any{
+		"sender": plain.Sender, "defaults": plain.Defaults, "prose_writer_version": 2,
+	})
+	assertStatus(t, resp, 200)
+	saved = handlers.OfferSettings{}
+	decode(t, resp, &saved)
+	if saved.Defaults.Blocks[0].Nodes != nil || saved.Defaults.Blocks[0].Body != "Klartext" {
+		t.Fatalf("capable settings clear = %#v", saved.Defaults.Blocks[0])
+	}
 }

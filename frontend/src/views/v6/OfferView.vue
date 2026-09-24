@@ -10,6 +10,7 @@ import {
   offerToolbarActions,
   type OfferToolbarActionId,
 } from '@/components/offers/offerToolbarActions'
+import { OFFER_PROSE_WRITER_VERSION } from '@/components/offers/offerProse'
 import { provideOfferProseSession } from '@/components/offers/offerProseSession'
 import {
   offerStatus,
@@ -201,6 +202,7 @@ async function save(force = false): Promise<boolean> {
         const result = await api.put<Offer>(`/offers/${offer.value.id}`, {
           revision: offer.value.revision,
           document: JSON.parse(snapshot),
+          prose_writer_version: OFFER_PROSE_WRITER_VERSION,
         })
         offer.value.revision = result.revision
         offer.value.updated_at = result.updated_at
@@ -276,6 +278,7 @@ async function finalize() {
       revision: offer.value.revision,
       document: offer.value.document,
       finalize: true,
+      prose_writer_version: OFFER_PROSE_WRITER_VERSION,
     })
     savedDocument = JSON.stringify(result.document)
     offer.value = result

@@ -8,6 +8,8 @@ import {
 export const OFFER_PROSE_MAX_DEPTH = 5
 export const OFFER_PROSE_MAX_NODES = 100
 export const OFFER_PROSE_MAX_TEXT = 2000
+/** Sent with offer and template saves so an older editor cannot drop newer prose. */
+export const OFFER_PROSE_WRITER_VERSION = 2
 
 export type Caret = { index: number; offset: number }
 export type ProseRange = { anchor: Caret; focus: Caret }
@@ -111,11 +113,14 @@ export function plainGlyph(value: string): string | null {
   return text
 }
 
+/** One decimal place, half away from zero, then the inclusive range. −1.25 becomes −1.3. */
 export function canonMarkerMm(value: number, min: number, max: number): number | null {
   if (!Number.isFinite(value)) return null
-  const scaled = Math.round(value * 10) / 10
-  if (scaled < min || scaled > max) return null
-  return scaled
+  const scaled = value * 10
+  const away = Math.sign(scaled) * Math.round(Math.abs(scaled))
+  const tenth = (away === 0 ? 0 : away) / 10
+  if (tenth < min || tenth > max) return null
+  return tenth
 }
 
 function anchorOf(node: OfferTextNode, keepAnchor: boolean): ItemAnchor | undefined {
@@ -251,27 +256,98 @@ function zeroFrom(values: number[], depth: number) {
   for (let i = depth; i < values.length; i++) values[i] = 0
 }
 
+export type OutlineColumn = { col: number; prefix: number; indent: string }
+
+/** Hundredths of an em. These match the bullet and decimal columns in offer-document.css. */
+const BULLET_STEP_EM = 135
+const BULLET_TEXT_EM = 150
+const DECIMAL_STEP_EM = 155
+const DECIMAL_TEXT_EM = 230
+const OUTLINE_GAP_EM = 40
+
+function itemDepth(node: OfferTextNode): number {
+  return Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
+}
+
+function isOutlineItem(node: OfferTextNode | undefined): boolean {
+  return !!node && node.kind === 'item' && node.numbering === 'outline' && node.marker === 'decimal'
+}
+
+function findShallowerItem(nodes: readonly OfferTextNode[], index: number): number {
+  const depth = itemDepth(nodes[index]!)
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const earlier = nodes[cursor]
+    if (!earlier || earlier.kind !== 'item') continue
+    if (itemDepth(earlier) < depth) return cursor
+  }
+  return -1
+}
+
+function hasMixedAncestor(nodes: readonly OfferTextNode[], index: number): boolean {
+  let parent = findShallowerItem(nodes, index)
+  while (parent >= 0) {
+    if (!isOutlineItem(nodes[parent])) return true
+    parent = findShallowerItem(nodes, parent)
+  }
+  return false
+}
+
+function formatEmHundredths(value: number): string {
+  const whole = Math.trunc(value / 100)
+  const frac = value % 100
+  if (frac === 0) return String(whole)
+  if (frac % 10 === 0) return `${whole}.${frac / 10}`
+  return `${whole}.${String(frac).padStart(2, '0')}`
+}
+
+function outlineIndent(prefix: number, emHundredths: number, gaps: number): string {
+  if (emHundredths === 0) return `calc(${prefix}ch + ${gaps} * 0.4em)`
+  const em = formatEmHundredths(emHundredths)
+  if (prefix === 0 && gaps === 0) return `calc(${em}em)`
+  if (gaps === 0) return `calc(${prefix}ch + ${em}em)`
+  if (prefix === 0) return `calc(${em}em + ${gaps} * 0.4em)`
+  return `calc(${prefix}ch + ${em}em + ${gaps} * 0.4em)`
+}
+
 /**
- * Column width in `ch` for each outline level, and the sum of earlier levels.
- * A child starts where the previous level's text starts. Short numbers stay narrow.
+ * Column width in `ch` for each outline level.
+ * A pure outline child starts after the widest shallower label.
+ * A child of a bullet or plain number starts where that parent's text starts.
  */
 export function outlineMarkerColumns(
   labels: readonly string[],
   nodes: readonly OfferTextNode[],
-): { col: number; prefix: number }[] {
+): OutlineColumn[] {
   const widths = Array<number>(OFFER_PROSE_MAX_DEPTH + 1).fill(0)
   nodes.forEach((node, index) => {
-    if (node.kind !== 'item' || node.numbering !== 'outline' || node.marker !== 'decimal') return
-    const depth = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
-    widths[depth] = Math.max(widths[depth], [...(labels[index] ?? '')].length)
+    if (!isOutlineItem(node)) return
+    const depth = itemDepth(node)
+    widths[depth] = Math.max(widths[depth] ?? 0, [...(labels[index] ?? '')].length)
   })
-  return nodes.map((node) => {
-    if (node.kind !== 'item' || node.numbering !== 'outline' || node.marker !== 'decimal')
-      return { col: 0, prefix: 0 }
-    const depth = Math.max(0, Math.min(node.depth ?? 0, OFFER_PROSE_MAX_DEPTH))
-    let prefix = 0
-    for (let i = 0; i < depth; i++) prefix += widths[i] ?? 0
-    return { col: Math.max(widths[depth] ?? 0, 1), prefix }
+  const leadOf = (index: number): { ch: number; em: number } => {
+    const parent = findShallowerItem(nodes, index)
+    if (parent < 0) return { ch: 0, em: 0 }
+    const parentNode = nodes[parent]!
+    if (isOutlineItem(parentNode)) {
+      const base = leadOf(parent)
+      const col = Math.max(widths[itemDepth(parentNode)] ?? 0, 1)
+      return { ch: base.ch + col, em: base.em + OUTLINE_GAP_EM }
+    }
+    const depth = itemDepth(parentNode)
+    if (parentNode.marker === 'decimal') return { ch: 0, em: depth * DECIMAL_STEP_EM + DECIMAL_TEXT_EM }
+    return { ch: 0, em: depth * BULLET_STEP_EM + BULLET_TEXT_EM }
+  }
+  return nodes.map((node, index) => {
+    if (!isOutlineItem(node)) return { col: 0, prefix: 0, indent: '' }
+    const depth = itemDepth(node)
+    const col = Math.max(widths[depth] ?? 0, 1)
+    if (!hasMixedAncestor(nodes, index)) {
+      let prefix = 0
+      for (let level = 0; level < depth; level++) prefix += widths[level] ?? 0
+      return { col, prefix, indent: outlineIndent(prefix, 0, depth) }
+    }
+    const lead = leadOf(index)
+    return { col, prefix: lead.ch, indent: outlineIndent(lead.ch, lead.em, 0) }
   })
 }
 

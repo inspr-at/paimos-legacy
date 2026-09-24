@@ -217,3 +217,86 @@ func TestOfferProseIndentGlyphAndMarkerOffset(t *testing.T) {
 		t.Fatal("nan marker offset was accepted")
 	}
 }
+
+func TestRoundMarkerMMMatchesHalfAwayFromZero(t *testing.T) {
+	cases := []struct {
+		value    float64
+		min, max float64
+		want     float64
+		ok       bool
+	}{
+		{-1.25, -30, 30, -1.3, true},
+		{1.25, -30, 30, 1.3, true},
+		{-1.24, -30, 30, -1.2, true},
+		{-1.26, -30, 30, -1.3, true},
+		{-30.05, -30, 30, 0, false},
+		{-30.04, -30, 30, -30, true},
+		{30.05, -30, 30, 0, false},
+		{30.04, -30, 30, 30, true},
+		{-30, -30, 30, -30, true},
+		{30, -30, 30, 30, true},
+		{-0.05, -30, 30, -0.1, true},
+		{0.05, -30, 30, 0.1, true},
+		{-29.95, -30, 30, -30, true},
+		{29.95, -30, 30, 30, true},
+		{-20.05, -20, 20, 0, false},
+		{40.05, -20, 40, 0, false},
+		{-20.04, -20, 20, -20, true},
+	}
+	for _, tc := range cases {
+		got, ok := roundMarkerMM(tc.value, tc.min, tc.max)
+		if ok != tc.ok || (ok && math.Abs(got-tc.want) > 1e-9) {
+			t.Fatalf("roundMarkerMM(%v, %v, %v) = %v, %v; want %v, %v", tc.value, tc.min, tc.max, got, ok, tc.want, tc.ok)
+		}
+	}
+	body, stored, err := normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", MarkerXMM: -1.25}})
+	if err != nil || math.Abs(stored[0].MarkerXMM-(-1.3)) > 1e-9 || !strings.Contains(body, "A") {
+		t.Fatalf("stored tenth = %v %q %v", stored, body, err)
+	}
+	if _, _, err = normalizeOfferProse("keep", []OfferTextNode{{Kind: "item", Text: "A", Marker: "disc", MarkerXMM: -30.05}}); err == nil {
+		t.Fatal("-30.05 was accepted")
+	}
+}
+
+func TestProseWriterDetectsInitialDepthAndLayoutOnly(t *testing.T) {
+	if !proseNodesNeedWriter([]OfferTextNode{{Kind: "item", Text: "A", Depth: 1}}) {
+		t.Fatal("initial depth was treated as legacy")
+	}
+	legacy := []OfferTextNode{{Kind: "item", Text: "A"}, {Kind: "item", Text: "B", Depth: 1}}
+	if proseNodesNeedWriter(legacy) {
+		t.Fatal("legacy chain required the new writer")
+	}
+	continued := []OfferTextNode{{Kind: "item", Text: "A", Depth: 2, Marker: "decimal", Numbering: "outline", ListContinue: true}}
+	if proseNodesNeedWriter(continued) {
+		t.Fatal("continued opening item required the new writer")
+	}
+	if !proseNodesNeedWriter([]OfferTextNode{{Kind: "item", Text: "A"}, {Kind: "item", Text: "B", Depth: 2}}) {
+		t.Fatal("skipped depth was treated as legacy")
+	}
+	if !proseNodesNeedWriter([]OfferTextNode{{Kind: "paragraph", Text: "p"}, {Kind: "item", Text: "A", Depth: 1}}) {
+		t.Fatal("depth after a paragraph was treated as legacy")
+	}
+	afterContinue := []OfferTextNode{{Kind: "paragraph", Text: "p"}, {Kind: "item", Text: "A", Depth: 1, Marker: "decimal", Numbering: "outline", ListContinue: true}}
+	if proseNodesNeedWriter(afterContinue) {
+		t.Fatal("continued item after a paragraph required the new writer")
+	}
+	if !proseNodesNeedWriter([]OfferTextNode{{Kind: "item", Text: "A", Glyph: "✓"}}) {
+		t.Fatal("glyph was treated as legacy")
+	}
+	if !proseNodesNeedWriter([]OfferTextNode{{Kind: "item", Text: "A", MarkerXMM: -1.3}}) {
+		t.Fatal("marker offset was treated as legacy")
+	}
+	if proseNodesNeedWriter([]OfferTextNode{{Kind: "item", Text: "A"}}) {
+		t.Fatal("plain item required the new writer")
+	}
+	if offerProseWriteUnsafe([]OfferBlock{{Nodes: legacy}}, nil, 0) {
+		t.Fatal("legacy save was refused")
+	}
+	initial := []OfferBlock{{Nodes: []OfferTextNode{{Kind: "item", Text: "A", Depth: 1}}}}
+	if !offerProseWriteUnsafe(initial, nil, 0) || !offerProseWriteUnsafe(nil, initial, 1) {
+		t.Fatal("initial depth was writable without the current version")
+	}
+	if offerProseWriteUnsafe(initial, nil, offerProseWriterVersion) {
+		t.Fatal("capable client could not clear or keep initial depth")
+	}
+}

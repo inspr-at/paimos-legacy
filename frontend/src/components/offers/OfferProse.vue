@@ -667,10 +667,9 @@ function itemStyle(node: OfferTextNode, index: number): Record<string, string> |
   if (node.text_start_mm) style['--text-start'] = `${node.text_start_mm}mm`
   if (node.numbering === 'outline' && node.marker === 'decimal') {
     const column = outlineColumns.value[index]
-    const depth = node.depth ?? 0
-    if (column) {
+    if (column?.indent) {
       style['--outline-col'] = `${column.col}ch`
-      style['--outline-indent'] = `calc(${column.prefix}ch + ${depth} * 0.4em)`
+      style['--outline-indent'] = column.indent
     }
   }
   return style

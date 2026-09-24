@@ -23,6 +23,8 @@ coordinate, from the first entry below that form).
 ### Fixed
 
 - Leaving the list-start field no longer drops the selected paragraph, so continue and bullet commands still apply to it (PAI-1063).
+- An outline under a bullet starts where that bullet's text starts, including when bullets and numbers are mixed (PAI-1063).
+- Offer and template saves send the prose writer version. An older editor cannot replace an indented first item, a skipped level, a bullet symbol, or a marker offset with plain text; the stored offer stays unchanged until the page is reloaded. A current editor can still clear that formatting. Marker offsets round the same way in the page and the server, half away from zero. An older application build is not a safe rollback once an offer uses that layout: keep the server guard or ship a forward fix, and do not restore an older database over later customer writes (PAI-1063).
 - The first list item, and a bullet under a shallower number, can be indented. That depth is kept when the offer is saved (PAI-1063).
 - A longer outline number such as 5.4.1 starts at the parent text. The indent follows each level's own number, so short numbers stay narrow (PAI-1063).
 - Home and End in offer text move to the current visual line. Shift extends the selection, and Ctrl or Command keeps the browser's usual movement. The page no longer jumps (PAI-1063).

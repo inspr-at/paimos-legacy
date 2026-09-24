@@ -138,21 +138,33 @@ func GetOfferSettings(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, s)
 }
 func PutOfferSettings(w http.ResponseWriter, r *http.Request) {
-	var s OfferSettings
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&s); err != nil {
+	var body struct {
+		OfferSettings
+		ProseWriterVersion int `json:"prose_writer_version"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&body); err != nil {
 		jsonError(w, "Ungültige Einstellungen", 400)
 		return
 	}
-	if err := validateOfferSender(s.Sender); err != nil {
+	if err := validateOfferSender(body.Sender); err != nil {
 		jsonError(w, err.Error(), 400)
 		return
 	}
-	if len(s.Defaults.Blocks) > 20 {
+	if len(body.Defaults.Blocks) > 20 {
 		jsonError(w, "Maximal 20 Textbausteine", 400)
 		return
 	}
-	if err := normalizeOfferBlocks(s.Defaults.Blocks); err != nil {
+	current, err := loadOfferSettings()
+	if err != nil {
+		jsonError(w, "Einstellungen konnten nicht geladen werden", 500)
+		return
+	}
+	if err = normalizeOfferBlocks(body.Defaults.Blocks); err != nil {
 		jsonError(w, err.Error(), 400)
+		return
+	}
+	if offerProseWriteUnsafe(current.Defaults.Blocks, body.Defaults.Blocks, body.ProseWriterVersion) {
+		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
 		return
 	}
 	tx, err := db.DB.BeginTx(r.Context(), nil)
@@ -161,7 +173,7 @@ func PutOfferSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	for key, value := range map[string]any{"offer_sender": s.Sender, "offer_defaults": s.Defaults} {
+	for key, value := range map[string]any{"offer_sender": body.Sender, "offer_defaults": body.Defaults} {
 		raw, e := json.Marshal(value)
 		if e != nil {
 			jsonError(w, "Ungültige Einstellungen", 400)
@@ -176,7 +188,7 @@ func PutOfferSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Speichern fehlgeschlagen", 500)
 		return
 	}
-	jsonOK(w, s)
+	jsonOK(w, body.OfferSettings)
 }
 func validateOfferSender(s OfferSender) error {
 	if strings.TrimSpace(s.Company) == "" || strings.TrimSpace(s.Street) == "" || strings.TrimSpace(s.PostalCode) == "" || strings.TrimSpace(s.City) == "" || strings.TrimSpace(s.Country) == "" {
@@ -353,11 +365,20 @@ func nextOfferSequence(tx *sql.Tx, key string) (int, error) {
 }
 func CreateOffer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		CustomerID  int64 `json:"customer_id"`
-		DuplicateID int64 `json:"duplicate_id"`
+		CustomerID         int64          `json:"customer_id"`
+		DuplicateID        int64          `json:"duplicate_id"`
+		ProseWriterVersion int            `json:"prose_writer_version"`
+		Document           *OfferDocument `json:"document,omitempty"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 		jsonError(w, "Ungültiges Angebot", 400)
+		return
+	}
+	// Create copies stored defaults or the duplicated offer. It does not apply a
+	// client document. Newer prose in that document is refused when the client
+	// does not name the current writer; a legacy body has neither and still creates.
+	if body.Document != nil && offerProseWriteUnsafe(nil, body.Document.Blocks, body.ProseWriterVersion) {
+		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
 		return
 	}
 	c := getCustomerByID(body.CustomerID)
@@ -459,9 +480,10 @@ func CreateOffer(w http.ResponseWriter, r *http.Request) {
 }
 func PutOffer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Revision int64         `json:"revision"`
-		Document OfferDocument `json:"document"`
-		Finalize bool          `json:"finalize"`
+		Revision           int64         `json:"revision"`
+		Document           OfferDocument `json:"document"`
+		Finalize           bool          `json:"finalize"`
+		ProseWriterVersion int           `json:"prose_writer_version"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body) != nil || body.Revision < 1 {
 		jsonError(w, "Ungültiges Angebot", 400)
@@ -495,6 +517,10 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Document.Customer.CustomerNo = existing.Customer.CustomerNo
+	if offerProseWriteUnsafe(existing.Blocks, body.Document.Blocks, body.ProseWriterVersion) {
+		jsonError(w, offerProseStaleWriterMessage, http.StatusConflict)
+		return
+	}
 	raw, _ := json.Marshal(body.Document)
 	status := "draft"
 	var sent any

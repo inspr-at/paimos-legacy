@@ -15,6 +15,10 @@ const (
 	offerProseMaxDepth = 5
 	offerProseMaxNodes = 100
 	offerProseMaxText  = 2000
+	// Clients that understand first-item depth, skipped levels, and marker layout send this.
+	// Older editors omit it and would save those offers as plain text.
+	offerProseWriterVersion      = 2
+	offerProseStaleWriterMessage = "Die gespeicherte Textformatierung ist neuer als dieser Editor. Bitte die Seite neu laden, bevor Sie speichern."
 )
 
 // OfferTextNode is an optional paragraph or bullet inside an offer text block.
@@ -91,6 +95,8 @@ func validOfferNumbering(node OfferTextNode) bool {
 	return !(node.ListStart > 0 && node.ListContinue)
 }
 
+// roundMarkerMM keeps one decimal place, half away from zero, then the inclusive range.
+// −1.25 and 1.25 both become 1.3. −30.05 becomes −30.1 and falls outside −30..30.
 func roundMarkerMM(value, min, max float64) (float64, bool) {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0, false
@@ -100,6 +106,60 @@ func roundMarkerMM(value, min, max float64) (float64, bool) {
 		return 0, false
 	}
 	return scaled, true
+}
+
+// proseNodesNeedWriter reports prose the previous editor cannot round-trip.
+// That editor rejects a depth the previous item cannot own, except a continued
+// item opening a chain, and it drops a custom symbol and marker offsets on save.
+func proseNodesNeedWriter(nodes []OfferTextNode) bool {
+	previous := -1
+	for _, node := range nodes {
+		if node.Kind != "item" {
+			previous = -1
+			continue
+		}
+		if node.Glyph != "" || node.MarkerXMM != 0 || node.MarkerYMM != 0 || node.TextStartMM != 0 {
+			return true
+		}
+		depth := node.Depth
+		if depth < 0 {
+			depth = 0
+		}
+		if depth > offerProseMaxDepth {
+			depth = offerProseMaxDepth
+		}
+		maxDepth := 0
+		if previous >= 0 {
+			maxDepth = previous + 1
+			if maxDepth > offerProseMaxDepth {
+				maxDepth = offerProseMaxDepth
+			}
+		}
+		if depth > maxDepth && !(previous < 0 && node.ListContinue) {
+			return true
+		}
+		previous = depth
+	}
+	return false
+}
+
+func offerBlocksNeedWriter(blocks []OfferBlock) bool {
+	for _, block := range blocks {
+		if proseNodesNeedWriter(block.Nodes) {
+			return true
+		}
+	}
+	return false
+}
+
+// offerProseWriteUnsafe is true when this client would replace newer prose.
+// A client that sends offerProseWriterVersion may remove that prose on purpose.
+// The offer revision does not help: the older editor already loaded this revision.
+func offerProseWriteUnsafe(stored, incoming []OfferBlock, writer int) bool {
+	if writer >= offerProseWriterVersion {
+		return false
+	}
+	return offerBlocksNeedWriter(stored) || offerBlocksNeedWriter(incoming)
 }
 
 func plainItemGlyph(glyph string, marker string) (string, bool) {

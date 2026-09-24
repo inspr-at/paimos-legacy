@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { api, errMsg } from '@/api/client'
+import { OFFER_PROSE_WRITER_VERSION } from './offerProse'
 import type { OfferSettings, OfferSender } from './types'
 import defaults from './prototype-defaults.json'
 const props = defineProps<{ open: boolean }>()
@@ -59,7 +60,10 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
-    const saved = await api.put<OfferSettings>('/integrations/crm/offers', settings.value)
+    const saved = await api.put<OfferSettings>('/integrations/crm/offers', {
+      ...settings.value,
+      prose_writer_version: OFFER_PROSE_WRITER_VERSION,
+    })
     emit('saved', saved)
     emit('close')
   } catch (e) {
