@@ -245,7 +245,9 @@ describe('offer document prose', () => {
     expect(document.activeElement).toBe(hits[0])
     editableApp.unmount()
     expect(footerCss).toMatch(/data-numbering='outline'/)
-    expect(footerCss).toMatch(/\.section-tools/)
+    expect(footerCss).toMatch(/\.sheet-frame\s*\{[^}]*width:\s*max-content/)
+    expect(footerCss).not.toMatch(/\.section-tools/)
+    expect(editableEl.querySelector('.sec-actions')).toBeNull()
     app.unmount()
   })
 
@@ -265,30 +267,34 @@ describe('offer document prose', () => {
     const el = document.createElement('div')
     document.body.appendChild(el)
     const app = createApp(OfferDocument, { offer: sample, editable: true })
-    const vm = app.mount(el) as unknown as { paginate: () => Promise<void> }
+    const vm = app.mount(el) as unknown as {
+      paginate: () => Promise<void>
+      moveSection: (direction: -1 | 1) => void
+      addSection: () => void
+    }
     await vm.paginate()
     await nextTick()
+    expect(el.querySelector('.sec-actions')).toBeNull()
+    expect(el.querySelector('.section-tools')).toBeNull()
     el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
     await nextTick()
-    const up = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach oben"]')
-    const down = el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')
-    expect(up?.disabled).toBe(true)
-    expect(down?.disabled).toBe(false)
-    down?.click()
+    expect(el.querySelector('[data-section="0"]')?.getAttribute('data-selected')).toBe('heading')
+    vm.moveSection(1)
     await nextTick()
     await nextTick()
     expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins'])
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Überschrift Textbaustein 2')
-    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt 1 danach hinzufügen"]')?.click()
+    vm.addSection()
     await nextTick()
     await nextTick()
-    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', '', 'Eins'])
-    expect(sample.document.blocks[1]).toEqual({ heading: '', body: '' })
+    expect(sample.document.blocks.map((block) => block.heading)).toEqual(['Zwei', 'Eins', ''])
+    expect(sample.document.blocks[2]).toEqual({ heading: '', body: '' })
     app.unmount()
     const locked = document.createElement('div')
     document.body.appendChild(locked)
     const lockedApp = createApp(OfferDocument, { offer: sample, editable: false })
     lockedApp.mount(locked)
+    expect(locked.querySelector('.sec-actions')).toBeNull()
     expect(locked.querySelector('.section-tools')).toBeNull()
     lockedApp.unmount()
   })
@@ -309,7 +315,11 @@ describe('offer document prose', () => {
     const el = document.createElement('div')
     document.body.appendChild(el)
     const app = createApp(OfferDocument, { offer: sample, editable: true })
-    const vm = app.mount(el) as unknown as { paginate: () => Promise<void> }
+    const vm = app.mount(el) as unknown as {
+      paginate: () => Promise<void>
+      moveSection: (direction: -1 | 1) => void
+      addSection: () => void
+    }
     await vm.paginate()
     await nextTick()
     const place = (root: HTMLElement, offset: number) => {
@@ -355,7 +365,7 @@ describe('offer document prose', () => {
     expect(bodies()).toEqual(['AlphaY', 'BetaX'])
     el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
     await nextTick()
-    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')?.click()
+    vm.moveSection(1)
     await nextTick()
     const moved = el.querySelector<HTMLElement>('[aria-label="Textbaustein 2"]')!
     expect(moved.textContent).toContain('AlphaY')
@@ -370,7 +380,7 @@ describe('offer document prose', () => {
     expect(bodies()).toEqual(['Alpha', 'Beta'])
     el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
     await nextTick()
-    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt 1 danach hinzufügen"]')?.click()
+    vm.addSection()
     await nextTick()
     await nextTick()
     expect(bodies()).toEqual(['Alpha', '', 'Beta'])
@@ -449,7 +459,7 @@ describe('offer document prose', () => {
     expect(pageOf('AlphaY')).not.toBe(pageOf('Beta'))
     el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
     await nextTick()
-    el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')?.click()
+    ;(vm as unknown as { moveSection: (direction: -1 | 1) => void }).moveSection(1)
     await vm.paginate()
     await nextTick()
     expect(bodies()).toEqual(['Beta', 'AlphaY'])

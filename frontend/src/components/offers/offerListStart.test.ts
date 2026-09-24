@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import OfferInspector from './OfferInspector.vue'
 import OfferProse from './OfferProse.vue'
-import OfferTitleBar from './OfferTitleBar.vue'
 import { provideOfferProseSession } from './offerProseSession'
-import type { OfferFooterLayout, OfferTextNode } from './types'
-import type { OfferToolbarAction } from './offerToolbarActions'
+import type { OfferFooterLayout, OfferSelection, OfferTextNode } from './types'
 
 const paragraphs: OfferTextNode[] = [
   { kind: 'paragraph', text: 'Alpha' },
@@ -18,16 +16,12 @@ function click(target: Element) {
   target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
 }
 
-async function mount() {
+async function mount(selection: OfferSelection) {
   const updates: { body: string; nodes?: OfferTextNode[] }[] = []
   const actionsEmitted: string[] = []
-  const footerSelects = { count: 0 }
   const footer = ref<OfferFooterLayout>({ logo_width_mm: 43.3, logo_offset_mm: 2 })
   const el = document.createElement('div')
   document.body.appendChild(el)
-  const actions: OfferToolbarAction[] = [
-    { id: 'layout', label: 'Fußzeilenlogo', detail: 'Versatz', disabled: false },
-  ]
   const Host = defineComponent({
     setup() {
       provideOfferProseSession()
@@ -37,33 +31,16 @@ async function mount() {
       })
       return () =>
         h('div', [
-          h(OfferTitleBar, {
-            backTo: '/crm',
-            backLabel: 'Zurück',
-            offerNo: 'A260923-01',
-            hostname: 'paimos.test',
-            editable: true,
-            busy: false,
-            loading: false,
-            dirty: false,
-            saveFailed: false,
-            state: 'Gespeichert',
-            savedAt: '',
-            savedAtIso: '',
-            zoomMode: 'page',
-            zoom: 1,
-            printDisabled: false,
-            showPrint: true,
-            actions,
+          h(OfferInspector, {
+            open: true,
             footer: footer.value,
+            selection,
+            blockCount: 1,
             onFooter: (value: OfferFooterLayout) => {
               footer.value = value
             },
             onAction: (id: string) => {
               actionsEmitted.push(id)
-            },
-            onSelectFooter: () => {
-              footerSelects.count += 1
             },
           }),
           h(OfferProse, {
@@ -79,24 +56,14 @@ async function mount() {
         ])
     },
   })
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { path: '/crm', component: { template: '<div />' } },
-    ],
-  })
   const app = createApp(Host)
-  app.use(router)
   app.mount(el)
-  await router.isReady()
   await nextTick()
   return {
     el,
     updates,
     footer,
     actionsEmitted,
-    footerSelects,
     unmount() {
       app.unmount()
       el.remove()
@@ -111,8 +78,8 @@ function labels(root: ParentNode) {
 }
 
 describe('offer list start and signed offset', () => {
-  it('applies a typed start value and keeps it when the menu closes', async () => {
-    const mounted = await mount()
+  it('applies a typed start value and keeps it when the field blurs', async () => {
+    const mounted = await mount({ kind: 'text', index: 0, count: 1, heading: 'Leistung' })
     const prose = mounted.el.querySelector<HTMLElement>('.offer-prose')!
     prose.focus()
     prose.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
@@ -126,8 +93,6 @@ describe('offer list start and signed offset', () => {
         cancelable: true,
       }),
     )
-    click(mounted.el.querySelector('[aria-label="Listen und Punkte"]')!)
-    await nextTick()
     click(mounted.el.querySelector('[aria-label="Nummerierung"]')!)
     await nextTick()
     expect(labels(prose)).toEqual(['1', '2', '3'])
@@ -168,14 +133,13 @@ describe('offer list start and signed offset', () => {
   })
 
   it('keeps a leading minus until the offset is a real number', async () => {
-    const mounted = await mount()
-    click(mounted.el.querySelector('[aria-label="Einstellungen"]')!)
-    await nextTick()
-    expect(mounted.el.querySelector('#this-offer-heading')?.textContent).toBe('Dieses Angebot')
+    const mounted = await mount({ kind: 'footer' })
+    expect(mounted.el.querySelector('#this-offer-heading')?.textContent).toBe(
+      'Fußzeilenlogo dieses Angebots',
+    )
     expect(mounted.el.textContent).toContain('nur für dieses Angebot')
-    expect(mounted.footerSelects.count).toBe(0)
-    const templates = [...mounted.el.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Vorlagen für neue Angebote'),
+    const templates = [...mounted.el.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Vorlagen bearbeiten',
     )
     expect(templates?.closest('[aria-label="Vorlagen für neue Angebote"]')).toBeTruthy()
     const offset = mounted.el.querySelector<HTMLInputElement>(
@@ -209,7 +173,6 @@ describe('offer list start and signed offset', () => {
     click(templates!)
     await nextTick()
     expect(mounted.actionsEmitted).toEqual(['settings'])
-    expect(mounted.footerSelects.count).toBe(0)
     expect(mounted.footer.value).toEqual({ logo_width_mm: 55.5, logo_offset_mm: -6 })
     mounted.unmount()
   })

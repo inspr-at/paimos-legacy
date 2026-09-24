@@ -87,10 +87,8 @@
   font-family: var(--mono);
 }
 .offer-document .sheet {
-  display: grid;
-  gap: 22px;
-  justify-items: center;
-  padding: 26px 16px 60px;
+  display: block;
+  padding: 0;
 }
 .offer-document .page {
   position: relative;
@@ -424,43 +422,18 @@
 .offer-document .sec {
   position: relative;
 }
-.offer-document .sec-actions {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  pointer-events: none;
-}
-.offer-document .sec:hover .sec-actions,
-.offer-document .sec:focus-within .sec-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-.offer-document .sec-actions button {
-  min-width: 22px;
-  min-height: 22px;
-  padding: 0 4px;
-  border: 1px solid var(--rule, #d8e2df);
-  border-radius: 4px;
-  background: var(--paper, #fffefa);
-  color: var(--ink, #203c3d);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-.offer-document .sec-actions button:focus-visible {
-  outline: 1px solid #0e6f6c;
-  outline-offset: 1px;
-}
-.offer-document .sec-actions button:disabled {
-  opacity: 0.4;
-  cursor: default;
+.offer-document .sec[data-selected] {
+  background: rgba(199, 239, 236, 0.55);
+  border-radius: 2px;
 }
 .offer-document .section-delete {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  z-index: 30;
+  width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  transform: translateX(-50%);
   border: 1px solid var(--rule, #d8e2df);
   border-radius: 8px;
   background: var(--paper, #fffefa);
@@ -470,47 +443,6 @@
 .offer-document .section-delete button {
   min-height: 28px;
   margin-right: 8px;
-}
-@media (hover: none) {
-  .offer-document .sec-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-.offer-document .section-tools {
-  position: sticky;
-  top: 46px;
-  z-index: 6;
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  width: min(210mm, 100%);
-  padding: 4px;
-  background: var(--paper, #fffefa);
-  border: 1px solid var(--rule, #d8e2df);
-  border-radius: 8px;
-}
-.offer-document .section-tools button {
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink, #203c3d);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-.offer-document .section-tools button:hover:not(:disabled) {
-  background: #e0f3f0;
-}
-.offer-document .section-tools button:focus-visible {
-  outline: 1px solid #0e6f6c;
-  outline-offset: 2px;
-}
-.offer-document .section-tools button:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 .offer-document .offer-prose-notice {
   position: absolute;
@@ -769,7 +701,19 @@
 }
 .offer-document .sheet {
   overflow: auto;
+}
+.offer-document .sheet-frame {
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: safe center;
+  gap: 22px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 26px 16px 60px;
 }
 .offer-document .page-content {
   flex: 1;
@@ -847,16 +791,17 @@
 .offer-document .offer-table th:nth-child(6) {
   width: 27mm;
 }
-.offer-document .offer-table th.act {
-  width: 0;
-  padding: 0;
+.offer-document .offer-table tbody.is-selected > tr > td {
+  background: rgba(199, 239, 236, 0.4);
 }
 .offer-document .long span {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.offer-document .rowtools {
-  right: 0;
+.offer-document .ftr .footmark.is-selected:not(.is-set),
+.offer-document .ftr .lockup.is-selected {
+  background: rgba(199, 239, 236, 0.65);
+  border-radius: 2px;
 }
 @media print {
   @page {
@@ -877,10 +822,15 @@
   .offer-measure {
     display: none !important;
   }
-  .offer-document .sheet {
+  .offer-document .sheet,
+  .offer-document .sheet-frame {
+    display: block;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
     padding: 0;
     gap: 0;
-    display: block;
     overflow: visible;
   }
   .offer-document .sheet .page {
@@ -899,9 +849,12 @@
     break-after: auto;
     page-break-after: auto;
   }
-  .offer-document .rowtools,
-  .offer-document .section-tools,
-  .offer-document .sec-actions,
+  .offer-document .sec[data-selected],
+  .offer-document .offer-table tbody.is-selected > tr > td,
+  .offer-document .ftr .footmark.is-selected:not(.is-set),
+  .offer-document .ftr .lockup.is-selected {
+    background: transparent !important;
+  }
   .offer-document .section-delete {
     display: none !important;
   }

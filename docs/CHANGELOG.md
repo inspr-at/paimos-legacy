@@ -9,6 +9,17 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Changed
+
+- Draft offer editing lives in one hideable right inspector: section order, lists and numbering, inserting a section or service position, and the footer logo of the open offer. Templates for later offers stay a separate entry. The header keeps the offer number, save state, centered zoom, PDF and document actions (PAI-1063).
+- Offer page zoom runs from 25% to 800%. Fit width and whole page remain. Only the page scales, and a magnified page scrolls to every edge (PAI-1063).
+
+### Fixed
+
+- Home and End in offer text move to the current visual line. Shift extends the selection, and Ctrl or Command keeps the browser's usual movement. The page no longer jumps (PAI-1063).
+
 ## [260923073158.0.0] — 2026-09-23
 
 ### Fixed

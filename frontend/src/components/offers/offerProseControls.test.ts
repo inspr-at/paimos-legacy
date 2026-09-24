@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import OfferInspector from './OfferInspector.vue'
 import OfferProse from './OfferProse.vue'
-import OfferTitleBar from './OfferTitleBar.vue'
 import {
   createProseHistory,
   persistProse,
@@ -165,11 +164,18 @@ describe('offer level controls and this-offer settings', () => {
     window.getSelection()?.removeAllRanges()
   })
 
-  async function mount(nodes: OfferTextNode[]) {
-    const selection: OfferSelection = { kind: 'text', index: 0, count: 1 }
+  async function mount(
+    nodes: OfferTextNode[],
+    selection: OfferSelection = {
+      kind: 'text',
+      index: 0,
+      count: 1,
+      heading: 'Leistung',
+    },
+  ) {
     const footer = ref<OfferFooterLayout>({ logo_width_mm: 43.3, logo_offset_mm: 2 })
     const actions: string[] = []
-    let footerSelects = 0
+    const footerSelects = 0
     const el = document.createElement('div')
     document.body.appendChild(el)
     const Host = defineComponent({
@@ -178,33 +184,17 @@ describe('offer level controls and this-offer settings', () => {
         const prose = ref({ body: nodes.map((node) => node.text).join('\n'), nodes })
         return () =>
           h('div', [
-            h(OfferTitleBar, {
-              backTo: '/crm',
-              backLabel: 'Zurück',
-              offerNo: 'A260923-01',
-              hostname: 'paimos.test',
-              editable: true,
-              busy: false,
-              loading: false,
-              dirty: false,
-              saveFailed: false,
-              state: 'Gespeichert',
-              savedAt: '',
-              savedAtIso: '',
-              zoomMode: 'page',
-              zoom: 1,
-              printDisabled: false,
-              showPrint: true,
-              actions: [],
+            h(OfferInspector, {
+              open: true,
               footer: footer.value,
+              canUndo: false,
+              canRedo: false,
               selection,
+              blockCount: 1,
               onFooter: (value: OfferFooterLayout) => {
                 footer.value = value
               },
               onAction: (id: string) => actions.push(id),
-              onSelectFooter: () => {
-                footerSelects += 1
-              },
             }),
             h(OfferProse, {
               body: prose.value.body,
@@ -218,17 +208,8 @@ describe('offer level controls and this-offer settings', () => {
           ])
       },
     })
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: '/', component: { template: '<div />' } },
-        { path: '/crm', component: { template: '<div />' } },
-      ],
-    })
     const app = createApp(Host)
-    app.use(router)
     app.mount(el)
-    await router.isReady()
     await nextTick()
     return {
       el,
@@ -245,8 +226,8 @@ describe('offer level controls and this-offer settings', () => {
 
   it('disables higher and lower level buttons when the selection cannot move', async () => {
     const mounted = await mount([item('A'), item('B')])
-    const deeper = () => button(mounted.el, 'Ebene tiefer') as HTMLButtonElement
-    const higher = () => button(mounted.el, 'Ebene höher') as HTMLButtonElement
+    const deeper = () => button(mounted.el, 'Einrücken') as HTMLButtonElement
+    const higher = () => button(mounted.el, 'Ausrücken') as HTMLButtonElement
     expect(deeper().disabled).toBe(true)
     expect(higher().disabled).toBe(true)
     mounted.root.focus()
@@ -263,25 +244,21 @@ describe('offer level controls and this-offer settings', () => {
     expect(deeper().parentElement?.getAttribute('data-tip')).toBe('Kein vorheriger Listeneintrag.')
     expect(deeper().getAttribute('aria-label')).toContain('Kein vorheriger Listeneintrag.')
     expect(higher().getAttribute('aria-label')).toBe('Eine Listenebene höher')
-    const list = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Listen und Punkte"]')!
-    list.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
-    list.click()
-    await nextTick()
-    const indent = button(mounted.el, 'Einrücken') as HTMLButtonElement
-    const outdent = button(mounted.el, 'Ausrücken') as HTMLButtonElement
-    expect(indent.disabled).toBe(true)
-    expect(outdent.disabled).toBe(false)
-    expect(indent.getAttribute('aria-label')).toContain('Kein vorheriger Listeneintrag.')
-    expect(indent.parentElement?.getAttribute('title')).toBe('Kein vorheriger Listeneintrag.')
+    expect(deeper().getAttribute('aria-label')).toContain('Kein vorheriger Listeneintrag.')
+    expect(deeper().parentElement?.getAttribute('title')).toBe('Kein vorheriger Listeneintrag.')
+    const kept = window.getSelection()?.focusOffset
+    deeper().dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }),
+    )
+    expect(window.getSelection()?.focusOffset).toBe(kept)
     mounted.unmount()
   })
 
-  it('edits this offer from the gear without selecting the footer', async () => {
-    const mounted = await mount([paragraph('Alpha')])
-    const gear = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Einstellungen"]')!
-    gear.click()
-    await nextTick()
-    expect(mounted.el.querySelector('#this-offer-heading')?.textContent).toBe('Dieses Angebot')
+  it('edits this offer footer from the inspector without opening templates', async () => {
+    const mounted = await mount([paragraph('Alpha')], { kind: 'footer' })
+    expect(mounted.el.querySelector('#this-offer-heading')?.textContent).toBe(
+      'Fußzeilenlogo dieses Angebots',
+    )
     expect(mounted.footerSelects()).toBe(0)
     const offset = mounted.el.querySelector<HTMLInputElement>(
       '[aria-label="Vertikaler Versatz des Fußzeilenlogos in Millimetern. Negativ nach oben, positiv nach unten."]',
@@ -291,10 +268,10 @@ describe('offer level controls and this-offer settings', () => {
     await nextTick()
     expect(mounted.footer.value.logo_offset_mm).toBe(-6)
     expect(mounted.footerSelects()).toBe(0)
-    const templates = [...mounted.el.querySelectorAll('button')].find((item) =>
-      item.textContent?.includes('Vorlagen für neue Angebote'),
+    const templates = [...mounted.el.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === 'Vorlagen bearbeiten',
     )!
-    expect(templates.closest('.gear-future')).toBeTruthy()
+    expect(templates.closest('[aria-label="Vorlagen für neue Angebote"]')).toBeTruthy()
     expect(templates.closest('.this-offer')).toBeNull()
     templates.click()
     await nextTick()

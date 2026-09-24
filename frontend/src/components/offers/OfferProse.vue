@@ -28,6 +28,7 @@ import {
   type ProseEdit,
   type ProseRange,
 } from './offerProse'
+import { revealCaretInEditor, visualLineOf } from './offerProseCaret'
 import type { OfferTextNode } from './types'
 import {
   isOfferChrome,
@@ -73,6 +74,14 @@ let held: ProseRange | null = null
 let suppressInput = false
 let composing = false
 let pointerSelecting = false
+// A wrapped line's end offset is also the next line's start, so the key that
+// landed there keeps that line instead of stepping into the next one.
+let visualEdge: {
+  index: number
+  offset: number
+  start: number
+  end: number
+} | null = null
 
 let hydrated = false
 watch(
@@ -110,6 +119,41 @@ function pointAt(caret: Caret): { node: Node; offset: number } | null {
   if (!text) return { node: el, offset: 0 }
   return { node: text, offset: Math.min(caret.offset, text.textContent?.length ?? 0) }
 }
+function glyphTopAt(index: number, charIndex: number): number | null {
+  const point = pointAt({ index, offset: charIndex })
+  if (!point || point.node.nodeType !== Node.TEXT_NODE) return null
+  const textNode = point.node as Text
+  if (charIndex < 0 || charIndex >= textNode.data.length) return null
+  const range = document.createRange()
+  try {
+    range.setStart(textNode, charIndex)
+    range.setEnd(textNode, charIndex + 1)
+    const rects = range.getClientRects()
+    const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+    if (!rect || rect.height <= 0) return null
+    return rect.top
+  } catch {
+    return null
+  }
+}
+function pageOffset() {
+  return { x: window.scrollX, y: window.scrollY }
+}
+function restorePageOffset(saved: { x: number; y: number }) {
+  if (window.scrollX !== saved.x || window.scrollY !== saved.y) window.scrollTo(saved.x, saved.y)
+}
+function showCaretInEditor() {
+  if (!root.value) return
+  const live = window.getSelection()
+  if (!live?.rangeCount) return
+  let rect: DOMRect
+  try {
+    rect = live.getRangeAt(0).getBoundingClientRect()
+  } catch {
+    return
+  }
+  revealCaretInEditor(root.value, rect)
+}
 function placeRange(range: ProseRange) {
   const anchor = pointAt(range.anchor)
   const focus = pointAt(range.focus)
@@ -146,6 +190,11 @@ function remember() {
   if (!live) return
   selection.value = live
   held = live
+  if (
+    visualEdge &&
+    (visualEdge.index !== live.focus.index || visualEdge.offset !== live.focus.offset)
+  )
+    visualEdge = null
 }
 function toolbarRange(): ProseRange {
   return held ?? selection.value
@@ -293,6 +342,7 @@ function snapshot() {
   return { nodes: local.value.map((node) => ({ ...node })), caret }
 }
 function commit(edit: ProseEdit, keep?: ProseRange, restoreSelection = true) {
+  visualEdge = null
   const stored = persistProse(edit.nodes, props.sectionNumber || 0)
   const nodes = stored.nodes ?? edit.nodes
   if (nodes.length !== local.value.length) keys.value = nodes.map(() => serial++)
@@ -328,6 +378,7 @@ function apply(edit: ProseEdit) {
   commit(edit)
 }
 function restoreSnap(snap: { nodes: OfferTextNode[]; caret: Caret }) {
+  visualEdge = null
   if (snap.nodes.length !== local.value.length) keys.value = snap.nodes.map(() => serial++)
   local.value = snap.nodes.map((node) => ({ ...node }))
   const caret = snap.caret
@@ -377,8 +428,69 @@ function selectAll() {
     held = stored
   }
 }
+function onEditorPointer() {
+  pointerSelecting = true
+  visualEdge = null
+}
+function nativeLineBoundary(event: KeyboardEvent, before: ProseRange): boolean {
+  const live = window.getSelection()
+  if (!live || typeof live.modify !== 'function') return false
+  const alter = event.shiftKey ? 'extend' : 'move'
+  const direction = event.key === 'Home' ? 'backward' : 'forward'
+  try {
+    live.modify(alter, direction, 'lineboundary')
+  } catch {
+    return false
+  }
+  const after = readRange()
+  if (!after || after.focus.index !== before.focus.index) return false
+  // Keep the browser caret, including its soft-wrap affinity. Rewriting it would drop that.
+  selection.value = after
+  held = after
+  visualEdge = null
+  return true
+}
+function onHomeEnd(event: KeyboardEvent) {
+  if (event.isComposing || composing) return
+  if (event.altKey || event.ctrlKey || event.metaKey) return
+  event.preventDefault()
+  if (!props.editable || !root.value) return
+  const before = currentRange()
+  const page = pageOffset()
+  const moved = nativeLineBoundary(event, before)
+  if (!moved) {
+    const focus = before.focus
+    const text = local.value[focus.index]?.text ?? ''
+    const offset = Math.max(0, Math.min(focus.offset, text.length))
+    const key = event.key === 'Home' ? 'Home' : 'End'
+    const remembered =
+      visualEdge && visualEdge.index === focus.index && visualEdge.offset === offset
+        ? visualEdge
+        : null
+    const line = remembered ?? {
+      ...visualLineOf(text, offset, (charIndex) => glyphTopAt(focus.index, charIndex)),
+    }
+    const target = key === 'Home' ? line.start : line.end
+    const edge = { index: focus.index, offset: target, start: line.start, end: line.end }
+    const dest = { index: focus.index, offset: target }
+    const range = { anchor: event.shiftKey ? before.anchor : dest, focus: dest }
+    selection.value = range
+    held = range
+    placeRange(range)
+    visualEdge = edge
+  }
+  restorePageOffset(page)
+  showCaretInEditor()
+  requestAnimationFrame(() => restorePageOffset(page))
+  if (session?.active.value?.id === proseId) session.touch()
+}
 function onKey(event: KeyboardEvent) {
-  if (!props.editable || event.isComposing) return
+  if (event.key === 'Home' || event.key === 'End') {
+    onHomeEnd(event)
+    return
+  }
+  visualEdge = null
+  if (!props.editable || event.isComposing || composing) return
   const key = event.key.toLowerCase()
   if ((event.metaKey || event.ctrlKey) && key === 'a') {
     event.preventDefault()
@@ -444,6 +556,7 @@ function inputRange(event: InputEvent): ProseRange {
   return currentRange()
 }
 function onBeforeInput(event: InputEvent) {
+  visualEdge = null
   if (!props.editable || suppressInput || composing || event.isComposing) return
   const type = event.inputType
   if (type === 'historyUndo') {
@@ -603,7 +716,7 @@ function nodeClass(node: OfferTextNode, index: number) {
     <div
       ref="root"
       class="offer-prose"
-      @pointerdown="pointerSelecting = true"
+      @pointerdown="onEditorPointer"
       :data-prose="local.some((node) => node.kind === 'item') ? 'list' : 'plain'"
       :contenteditable="editable ? 'true' : 'false'"
       role="textbox"

@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import OfferText from './OfferText.vue'
 import { money, quantity, total, parseAmount, type OfferPosition } from './types'
-const props = defineProps<{ positions: OfferPosition[]; indices: number[]; editable?: boolean }>()
+const props = defineProps<{
+  positions: OfferPosition[]
+  indices: number[]
+  editable?: boolean
+  selected?: number | null
+}>()
 const emit = defineEmits<{
   change: []
   remove: [index: number]
@@ -33,14 +38,13 @@ function numberInput(e: Event, index: number, price: boolean) {
         <th>Einheit</th>
         <th class="num">Einzelpreis</th>
         <th class="num">Betrag</th>
-        <th v-if="editable" class="act" />
       </tr>
     </thead>
     <tbody
       v-for="i in indices"
       :key="i"
       :data-position="i"
-      :class="{ 'last-position': i === positions.length - 1 }"
+      :class="{ 'last-position': i === positions.length - 1, 'is-selected': selected === i }"
     >
       <tr class="pos">
         <td class="pos-no">{{ String(i + 1).padStart(2, '0') }}</td>
@@ -77,31 +81,6 @@ function numberInput(e: Event, index: number, price: boolean) {
           /><template v-else>{{ money(positions[i]!.unit_price_cents) }}</template>
         </td>
         <td class="sum num">{{ money(total(positions[i]!)) }}</td>
-        <td v-if="editable" class="act">
-          <span class="rowtools"
-            ><button
-              type="button"
-              :disabled="i === 0"
-              :aria-label="`Position ${i + 1} nach oben`"
-              @click="emit('move', i, -1)"
-            >
-              ↑</button
-            ><button
-              type="button"
-              :disabled="i === positions.length - 1"
-              :aria-label="`Position ${i + 1} nach unten`"
-              @click="emit('move', i, 1)"
-            >
-              ↓</button
-            ><button
-              type="button"
-              :aria-label="`Position ${i + 1} löschen`"
-              @click="emit('remove', i)"
-            >
-              ×
-            </button></span
-          >
-        </td>
       </tr>
       <tr class="long">
         <td />
@@ -112,7 +91,6 @@ function numberInput(e: Event, index: number, price: boolean) {
             :label="`Beschreibung Position ${i + 1}`"
           />
         </td>
-        <td v-if="editable" class="act" />
       </tr>
     </tbody>
   </table>

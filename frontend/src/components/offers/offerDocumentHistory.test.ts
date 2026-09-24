@@ -94,6 +94,7 @@ type DocApi = {
   canRedo: boolean | { value: boolean }
   resetHistory: () => void
   addSection: () => void
+  moveSection: (direction: -1 | 1) => void
   askDeleteSection: (index?: number | null) => void
   move: (index: number, direction: number) => void
   remove: (index: number) => void
@@ -318,7 +319,9 @@ describe('offer document history', () => {
       sample.document.blocks[1]!.body = 'Beta'
       const view = await mount(sample)
       expect(enabled(view.api.canUndo)).toBe(false)
-      view.el.querySelector<HTMLButtonElement>('[aria-label="Abschnitt nach unten"]')?.click()
+      view.el.querySelector<HTMLElement>('[aria-label="Überschrift Textbaustein 1"]')?.focus()
+      await nextTick()
+      view.api.moveSection(1)
       await nextTick()
       expect(bodies(sample)).toEqual(['Beta', 'Alpha'])
       expect(enabled(view.api.canUndo)).toBe(true)

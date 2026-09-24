@@ -320,6 +320,15 @@ literal plain text, including characters that look like Markdown. The editor,
 public page and PDF share that markup. Optional `footer.logo_width_mm` (18–96)
 and `footer.logo_offset_mm` (-6–10) size the centered footer mark and move it
 up (negative) or down (positive). Absent `footer` keeps the previous lockup.
+Draft editing controls live in one right inspector: section order, lists and
+numbering, a new section or service position, and the footer logo width and
+signed offset for this offer only. Templates for later offers open from a
+separate inspector entry and do not change the offer that is already open.
+Home and End move to the current visual line; Shift extends the selection;
+holding Ctrl or Command keeps the browser's usual Home and End movement.
+Percentage zoom is 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500,
+600, 700 and 800, plus page width and whole page. Only the page scales, and a
+magnified page scrolls to each edge.
 New offers start at 43.3 mm wide and 2 mm lower. Accepted and other non-draft
 offers stay immutable. Draft section order is part of the saved document;
 central text defaults are not copied into an offer that is already open. A block that is still taller than one
